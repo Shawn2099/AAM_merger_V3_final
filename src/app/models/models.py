@@ -15,7 +15,7 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-class DocType(str, enum.Enum):
+class DocType(enum.StrEnum):
     PO = "PO"
     DN = "DN"
     SI = "SI"
@@ -26,14 +26,14 @@ class DocType(str, enum.Enum):
     UNKNOWN = "UNKNOWN"
 
 
-class ExtractionStatus(str, enum.Enum):
+class ExtractionStatus(enum.StrEnum):
     pending = "pending"
     processing = "processing"
     valid = "valid"
     failed = "failed"
 
 
-class POSetStatus(str, enum.Enum):
+class POSetStatus(enum.StrEnum):
     pending = "pending"
     mismatched = "mismatched"
     quarantined = "quarantined"
@@ -41,7 +41,7 @@ class POSetStatus(str, enum.Enum):
     merged = "merged"
 
 
-class AuditAction(str, enum.Enum):
+class AuditAction(enum.StrEnum):
     force_merge = "force_merge"
     quarantine_delete = "quarantine_delete"
     manual_status_change = "manual_status_change"

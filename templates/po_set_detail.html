@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}PO Set {{ po_set.po_no_normalized }} — Detail{% endblock %}
+{% block content %}
+<div class="card">
+  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <h2 style="margin:0;">PO Set {{ po_set.po_no_normalized }}</h2>
+    <span class="badge badge-{{ po_set.status.value if po_set.status.value is defined else po_set.status }}">{{ po_set.status.value if po_set.status.value is defined else po_set.status }}</span>
+    {% if is_locked %}<span class="badge badge-quarantined">Locked by {{ po_set.locked_by_action }}</span>{% endif %}
+    <a href="/dashboard" class="btn btn-secondary" style="margin-left:auto;">← Back to Dashboard</a>
+  </div>
+  <p class="muted">Updated: {{ po_set.updated_at.isoformat() if po_set.updated_at else "—" }} · Has customs toggle: {{ po_set.has_customs_toggle }} · Customs doc count: {{ po_set.customs_doc_count }}</p>
+
+  <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;"
+       hx-get="/po_sets/{{ po_set.id }}/detail"
+       hx-trigger="every 2s"
+       hx-swap="outerHTML">
+    <!-- HTMX live actions fragment -->
+    <span class="muted" style="font-size:0.85rem;">Live actions (poll every 2s)</span>
+  </div>
+
+  <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;">
+    <!-- Customs toggle — available from any status (FR-12.1) -->
+    <button
+      class="btn {% if po_set.has_customs_toggle %}btn-primary{% else %}btn-secondary{% endif %}"
+      hx-post="/po_sets/{{ po_set.id }}/toggle_customs"
+      hx-swap="none"
+      {% if is_locked %}disabled title="action already in progress"{% endif %}
+    >Customs toggle — currently {{ "ON" if po_set.has_customs_toggle else "OFF" }}</button>
+    <span class="muted" style="align-self:center;">(available from any status — FR-12.1)</span>
+  </div>
+
+  <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+    <!-- Redo/Re-extract vs Redo matching — two distinct buttons (FR-6.8) -->
+    <button
+      class="btn btn-secondary"
+      hx-post="/po_sets/{{ po_set.id }}/redo_extract"
+      hx-swap="none"
+      {% if is_locked %}disabled title="action already in progress"{% endif %}
+    >Redo/Re-extract</button>
+    <button
+      class="btn btn-secondary"
+      hx-post="/po_sets/{{ po_set.id }}/redo_match"
+      hx-swap="none"
+      {% if is_locked %}disabled title="action already in progress"{% endif %}
+    >Redo matching</button>
+    <span class="muted" style="align-self:center; font-size:0.85rem;">Redo matching re-runs without VLM (no API call); Re-extract re-sends to VLM (FR-6.8)</span>
+  </div>
+
+  <div style="margin-top:14px;">
+    <!-- Force Merge — requires confirmation modal, available from any status (FR-14.8/14.9) -->
+    <button class="btn btn-danger" onclick="document.getElementById('force-merge-modal').classList.add('open')" {% if is_locked %}disabled title="action already in progress"{% endif %}>Force Merge</button>
+    <span class="muted" style="margin-left:8px;">Bypasses matching + customs gate, writes audit log (FR-14.9/14.10). Available from any status.</span>
+  </div>
+</div>
+
+<!-- Force Merge confirmation modal -->
+<div id="force-merge-modal" class="modal-backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="fm-title">
+    <h3 id="fm-title">Confirm Force Merge?</h3>
+    <p class="muted">Force Merge is unconditional — it merges with whatever CUSTOMS/SHIPPING files exist (0, 1, or 2) and writes a permanent audit log entry (<code>force_merge</code> with customs count). This cannot be undone.</p>
+    <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
+      <button class="btn btn-secondary" onclick="document.getElementById('force-merge-modal').classList.remove('open')">Cancel</button>
+      <button
+        class="btn btn-danger"
+        hx-post="/po_sets/{{ po_set.id }}/force_merge"
+        hx-swap="none"
+        onclick="document.getElementById('force-merge-modal').classList.remove('open')"
+      >Confirm Force Merge</button>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Documents ({{ documents|length }})</h3>
+  {% if documents %}
+  <table>
+    <thead><tr><th>Type</th><th>File</th><th>Extraction</th><th>PO No (raw)</th></tr></thead>
+    <tbody>
+      {% for d in documents %}
+      <tr>
+        <td><span class="badge badge-pending">{{ d.doc_type.value if d.doc_type.value is defined else d.doc_type }}</span></td>
+        <td class="muted" style="max-width:320px; overflow:hidden; text-overflow:ellipsis;">{{ d.original_filename }}</td>
+        <td>{{ d.extraction_status.value if d.extraction_status.value is defined else d.extraction_status }}</td>
+        <td>{{ d.po_no_raw or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No documents yet.</p>
+  {% endif %}
+
+  <div style="margin-top:16px; border-top:1px solid var(--border); padding-top:16px;">
+    <h3>Manual document upload — CUSTOMS / SHIPPING / COMMERCIAL_INVOICE</h3>
+    <form action="/po_sets/{{ po_set.id }}/upload" method="post" enctype="multipart/form-data" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <input type="file" name="file" accept=".pdf" required>
+      <select name="doc_type" required>
+        <option value="CUSTOMS">CUSTOMS</option>
+        <option value="SHIPPING">SHIPPING</option>
+        <option value="COMMERCIAL_INVOICE">COMMERCIAL_INVOICE</option>
+      </select>
+      <button type="submit" class="btn btn-primary" {% if is_locked %}disabled title="action already in progress"{% endif %}>Upload</button>
+    </form>
+    <p class="muted" style="font-size:0.85rem;">Attached as-is, never sent to VLM. CUSTOMS+SHIPPING (2 docs) required to clear blocked_customs (FR-12.2).</p>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Line items — per-line flags (priority [1]ident [2]qty [3]price per FR-11.2)</h3>
+  {% if line_items %}
+  <table>
+    <thead><tr><th>Doc</th><th>Line No</th><th>Description</th><th>Qty (×1000)</th><th>Price (×1000)</th></tr></thead>
+    <tbody>
+      {% for li in line_items %}
+      <tr>
+        <td class="muted">{{ li.doc_type }}</td>
+        <td>{{ li.line_item_no or "—" }}</td>
+        <td>{{ li.description }}</td>
+        <td>{{ li.quantity }}</td>
+        <td>{{ li.unit_price }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No line items yet. Run extraction.</p>
+  {% endif %}
+</div>
+
+{% if po_set.status.value == 'quarantined' or po_set.status == 'quarantined' %}
+<div class="card" style="border-color:#fecaca;">
+  <h3>Quarantined — Delete</h3>
+  <p class="muted">Delete removes DB rows only; stored files and quarantine copies remain on disk and an audit log entry is written (FR-13.6/13.7).</p>
+  <button class="btn btn-danger" onclick="document.getElementById('quarantine-delete-modal').classList.add('open')" {% if is_locked %}disabled title="action already in progress"{% endif %}>Delete Quarantined</button>
+  <div id="quarantine-delete-modal" class="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Confirm Delete Quarantined?</h3>
+      <p class="muted">This deletes the PO Set, its documents and line items from the database but keeps files on disk. An audit log entry (<code>quarantine_delete</code>) is written. Irreversible.</p>
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
+        <button class="btn btn-secondary" onclick="document.getElementById('quarantine-delete-modal').classList.remove('open')">Cancel</button>
+        <button class="btn btn-danger" hx-delete="/po_sets/{{ po_set.id }}/quarantine" hx-swap="none" onclick="document.getElementById('quarantine-delete-modal').classList.remove('open')">Confirm Delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+{% block scripts %}
+<script>
+// close modals on backdrop click
+document.addEventListener('click', function(e){
+  if(e.target.classList.contains('modal-backdrop')) e.target.classList.remove('open');
+});
+</script>
+{% endblock %}

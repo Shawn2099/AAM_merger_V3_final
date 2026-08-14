@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual PDF Merger — Isolated Tool</title>
+<style>
+  /* Isolated styling — distinct from automated pipeline dashboard (FR-14.13) */
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: #fdf8f0; color: #222; }
+  .banner { background: #7a3d00; color: #fff; padding: 12px 20px; font-weight: 700; letter-spacing: 0.5px; }
+  .banner small { font-weight: 400; opacity: 0.9; margin-left: 12px; }
+  .nav-isolated { background: #fff3e0; border-bottom: 3px solid #ffb74d; padding: 10px 20px; display: flex; gap: 16px; align-items: center; }
+  .nav-isolated a { text-decoration: none; color: #7a3d00; font-weight: 600; }
+  .nav-isolated span.sep { color: #bbb; }
+  .container { max-width: 900px; margin: 24px auto; padding: 0 20px; }
+  .card { background: #fff; border: 1px solid #e0c9a6; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(122,61,0,0.08); }
+  .card h2 { margin-top: 0; color: #7a3d00; }
+  .notice { background: #fff8e1; border-left: 4px solid #ffb300; padding: 10px 14px; margin-bottom: 16px; font-size: 0.95em; }
+  .notice strong { color: #7a3d00; }
+  #dropzone { border: 2px dashed #ffb74d; border-radius: 8px; padding: 24px; text-align: center; background: #fffaf0; cursor: pointer; }
+  #dropzone.dragover { background: #ffecb3; border-color: #ff8f00; }
+  #file-list { list-style: none; padding: 0; margin: 12px 0; }
+  #file-list li { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid #e0c9a6; border-radius: 6px; margin-bottom: 8px; background: #fff; cursor: grab; }
+  #file-list li.dragging { opacity: 0.4; }
+  .handle { cursor: grab; color: #999; font-size: 1.2em; }
+  .btn { background: #7a3d00; color: #fff; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+  .btn:disabled { background: #c9a88a; cursor: not-allowed; }
+  .btn-secondary { background: #fff; color: #7a3d00; border: 1px solid #7a3d00; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-weight: 600; margin-bottom: 4px; color: #5d2e00; }
+  .field input[type="text"] { width: 100%; padding: 8px 10px; border: 1px solid #d7b896; border-radius: 6px; box-sizing: border-box; }
+  .footer-note { font-size: 0.85em; color: #8d6e63; margin-top: 8px; }
+  .back-link { font-size: 0.9em; color: #666; }
+</style>
+</head>
+<body>
+<div class="banner">Manual PDF Merger — Isolated Tool <small>Not part of the automated AI pipeline</small></div>
+<div class="nav-isolated">
+  <a href="/health">← Pipeline Dashboard</a>
+  <span class="sep">|</span>
+  <span style="color:#7a3d00; font-weight:700;">Manual Merger (isolated)</span>
+  <span class="sep">|</span>
+  <a href="/manual/merger">This tool</a>
+</div>
+
+<div class="container">
+  <div class="card">
+    <h2>Manual PDF Merger</h2>
+    <div class="notice">
+      <strong>Isolated from AI pipeline (FR-14.11–14.13):</strong> Files you upload here are <em>not</em> stored in the database,
+      not grouped into any PO&nbsp;Set, and have no <code>po_no</code> association. Output file name and destination are chosen by you at merge time (FR-14.12).
+      This page is visually and navigationally separate from the automated dashboard.
+    </div>
+
+    <form id="merge-form" action="/manual/merge" method="post" enctype="multipart/form-data">
+      <div class="field">
+        <label>Upload PDFs (any files, arbitrary order)</label>
+        <div id="dropzone">
+          <p>Drag &amp; drop PDFs here or click to select</p>
+          <input type="file" id="file-input" name="files" multiple accept="application/pdf" style="display:none">
+          <button type="button" class="btn-secondary btn" onclick="document.getElementById('file-input').click()">Choose files</button>
+        </div>
+        <ul id="file-list"></ul>
+        <input type="hidden" name="order" id="order-input" value="">
+      </div>
+
+      <div class="field">
+        <label for="output_filename">Output filename (user-selectable, FR-14.12)</label>
+        <input type="text" id="output_filename" name="output_filename" value="manual_merged.pdf" placeholder="e.g. Invoice-1234_merged.pdf">
+        <div class="footer-note">You may choose any name; by default the merged file is downloaded with this name — not auto-written to the pipeline output folder.</div>
+      </div>
+
+      <button type="submit" id="merge-btn" class="btn" disabled>Merge &amp; Download</button>
+      <span class="footer-note" id="hint">Add at least 1 PDF to enable merge.</span>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>How this differs from the automated pipeline</h2>
+    <ul>
+      <li>Pipeline dashboard: watches <code>input_folder</code>, groups by PO&nbsp;number, reconciles, auto-merges SI→DN→PO→(AWB→Customs) — all DB-backed.</li>
+      <li><strong>This tool:</strong> you upload arbitrary PDFs, drag to reorder, click Merge — result is a direct download, no DB row, no audit log.</li>
+      <li>Quarantine cases: copy files from the quarantine folder into this tool to resolve manually (FR-13.8).</li>
+    </ul>
+    <p class="back-link"><a href="/health">← Back to pipeline health</a> &nbsp;|&nbsp; <span style="color:#b71c1c; font-weight:600;">Isolated navigation — not pipeline</span></p>
+  </div>
+</div>
+
+<script>
+const fileInput = document.getElementById('file-input');
+const dropzone = document.getElementById('dropzone');
+const fileList = document.getElementById('file-list');
+const orderInput = document.getElementById('order-input');
+const mergeBtn = document.getElementById('merge-btn');
+const hint = document.getElementById('hint');
+let files = []; // {name, file}
+
+function refreshList() {
+  fileList.innerHTML = '';
+  files.forEach((f, idx) => {
+    const li = document.createElement('li');
+    li.draggable = true;
+    li.dataset.idx = idx;
+    li.innerHTML = '<span class="handle">⋮⋮</span> <span>' + (idx+1) + '. ' + f.name + '</span> <span style="margin-left:auto; color:#999; font-size:0.85em;">drag to reorder</span>';
+    li.addEventListener('dragstart', e => { li.classList.add('dragging'); e.dataTransfer.setData('text/plain', idx); });
+    li.addEventListener('dragend', () => li.classList.remove('dragging'));
+    li.addEventListener('dragover', e => e.preventDefault());
+    li.addEventListener('drop', e => {
+      e.preventDefault();
+      const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+      const to = idx;
+      if (from !== to) {
+        const item = files.splice(from, 1)[0];
+        files.splice(to, 0, item);
+        refreshList();
+        syncOrder();
+        syncFileInput();
+      }
+    });
+    fileList.appendChild(li);
+  });
+  mergeBtn.disabled = files.length === 0;
+  hint.textContent = files.length ? files.length + ' file(s) ready — drag to reorder, then Merge.' : 'Add at least 1 PDF to enable merge.';
+}
+
+function syncOrder() {
+  // natural order 0..n-1 reflects current visual order
+  orderInput.value = files.map((_, i) => i).join(',');
+}
+
+function syncFileInput() {
+  const dt = new DataTransfer();
+  files.forEach(f => dt.items.add(f.file));
+  fileInput.files = dt.files;
+}
+
+fileInput.addEventListener('change', () => {
+  files = Array.from(fileInput.files).map(f => ({name: f.name, file: f}));
+  refreshList();
+  syncOrder();
+});
+
+dropzone.addEventListener('click', (e) => {
+  if (e.target === dropzone) fileInput.click();
+});
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('dragover');
+  const dropped = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+  if (!dropped.length) return;
+  files.push(...dropped.map(f => ({name: f.name, file: f})));
+  refreshList();
+  syncOrder();
+  syncFileInput();
+});
+
+document.getElementById('merge-form').addEventListener('submit', () => {
+  syncOrder();
+});
+</script>
+</body>
+</html>

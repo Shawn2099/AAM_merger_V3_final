@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Quarantine — AAM Merger{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Quarantine Review</h2>
+  <p class="muted">Shows quarantine folder contents reference. Delete requires confirmation modal and writes audit log (FR-13.5/13.6). Files are kept on disk; only DB rows are removed (FR-13.7). HTMX partial refresh every 3s.</p>
+  <div
+    id="quarantine-table"
+    hx-get="/quarantine/table"
+    hx-trigger="every 3s"
+    hx-swap="outerHTML"
+  >
+    {% include "_quarantine_table.html" %}
+  </div>
+</div>
+{% endblock %}

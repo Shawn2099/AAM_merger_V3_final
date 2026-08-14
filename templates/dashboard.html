@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — AAM Merger{% endblock %}
+{% block content %}
+<div class="card">
+  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <h2 style="margin:0;">PO Sets</h2>
+    <span class="muted" style="margin-left:8px;">HTMX partial refresh every 2s</span>
+    <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+      <button
+        id="sync-btn"
+        class="btn btn-primary"
+        hx-post="/sync"
+        hx-swap="none"
+        hx-indicator="#sync-indicator"
+        {% if sync_running %}disabled title="Sync already running"{% endif %}
+      >Sync</button>
+      <span id="sync-indicator" class="htmx-indicator muted">Syncing…</span>
+      {% if sync_running %}<span class="badge badge-pending">Sync already running</span>{% endif %}
+    </div>
+  </div>
+
+  <div class="filter-row" style="margin-top:14px;">
+    <form method="get" action="/dashboard" id="filter-form">
+      <label for="status-filter" class="muted" style="margin-right:6px;">Filter by status:</label>
+      <select name="status" id="status-filter" onchange="this.form.submit()">
+        <option value="" {% if not current_status %}selected{% endif %}>All statuses</option>
+        <option value="pending" {% if current_status == 'pending' %}selected{% endif %}>pending</option>
+        <option value="mismatched" {% if current_status == 'mismatched' %}selected{% endif %}>mismatched</option>
+        <option value="quarantined" {% if current_status == 'quarantined' %}selected{% endif %}>quarantined</option>
+        <option value="blocked_customs" {% if current_status == 'blocked_customs' %}selected{% endif %}>blocked_customs</option>
+        <option value="merged" {% if current_status == 'merged' %}selected{% endif %}>merged</option>
+      </select>
+      <noscript><button type="submit" class="btn btn-secondary">Filter</button></noscript>
+    </form>
+    <span class="muted">{{ po_sets|length }} PO Set(s){% if current_status %} — filtered: {{ current_status }}{% endif %}</span>
+  </div>
+
+  <div
+    id="po-table"
+    hx-get="/dashboard/table{% if current_status %}?status={{ current_status }}{% endif %}"
+    hx-trigger="every 2s"
+    hx-swap="outerHTML"
+  >
+    {% include "_dashboard_table.html" %}
+  </div>
+</div>
+
+<div class="card">
+  <h3>Manual Upload — CUSTOMS / SHIPPING / COMMERCIAL_INVOICE</h3>
+  <p class="muted">Attach customs or shipping PDFs to a PO Set from its detail page. These are attached as-is, never sent to VLM (FR-12.2).</p>
+  <a href="/quarantine" class="btn btn-secondary">Go to Quarantine Review</a>
+  <a href="/audit" class="btn btn-secondary">View Audit Log (read-only)</a>
+</div>
+{% endblock %}

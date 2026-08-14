@@ -1,0 +1,32 @@
+<div id="quarantine-table" hx-get="/quarantine/table" hx-trigger="every 3s" hx-swap="outerHTML">
+{% if po_sets %}
+<table>
+  <thead><tr><th>PO No</th><th>Status</th><th>Documents</th><th>Actions</th></tr></thead>
+  <tbody>
+    {% for ps in po_sets %}
+    <tr>
+      <td>{{ ps.po_no_normalized }}</td>
+      <td><span class="badge badge-quarantined">quarantined</span></td>
+      <td>{{ ps.doc_count }}</td>
+      <td>
+        <a href="/po_sets/{{ ps.id }}/view" class="btn btn-secondary" style="padding:4px 8px; font-size:0.82rem;">Detail</a>
+        <button class="btn btn-danger" style="padding:4px 8px; font-size:0.82rem;" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.add('open')">Delete</button>
+        <div id="qd-modal-{{ ps.id }}" class="modal-backdrop">
+          <div class="modal" role="dialog" aria-modal="true">
+            <h3>Confirm Delete Quarantined PO {{ ps.po_no_normalized }}?</h3>
+            <p class="muted">Irreversible — deletes DB rows, keeps files, writes audit log <code>quarantine_delete</code> (FR-13.6).</p>
+            <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
+              <button class="btn btn-secondary" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.remove('open')">Cancel</button>
+              <button class="btn btn-danger" hx-delete="/po_sets/{{ ps.id }}/quarantine" hx-swap="none" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.remove('open')">Confirm Delete</button>
+            </div>
+          </div>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted" style="text-align:center; padding:16px;">No quarantined PO Sets</p>
+{% endif %}
+</div>

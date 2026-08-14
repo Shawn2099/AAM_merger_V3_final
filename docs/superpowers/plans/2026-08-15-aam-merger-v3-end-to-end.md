@@ -87,11 +87,13 @@ from app.core.config import load_config
 from app.services.ingestion import is_file_stable, ingest_file
 import hashlib, tempfile, time
 
+
 def test_is_file_stable(tmp_path):
     p = tmp_path / "a.pdf"
     p.write_bytes(b"x")
     # 2s×2 stable if not growing
     assert is_file_stable(p, interval=0, count=2) is True  # 0 for fast test, real 2s
+
 
 def test_dedup_sha256(tmp_path):
     cfg = load_config("config.example.yaml")
@@ -107,6 +109,7 @@ def test_dedup_sha256(tmp_path):
     d2 = ingest_file(b, cfg)
     assert d1.sha256_hash == d2.sha256_hash
     assert d1.id == d2.id  # dedup: same hash -> same row
+
 
 def test_stored_path_never_deleted(tmp_path):
     cfg = load_config("config.example.yaml")
@@ -134,12 +137,14 @@ from app.core.database import get_engine
 from sqlalchemy.orm import Session
 from app.models import Document, DocType, ExtractionStatus
 
+
 def is_file_stable(p: Path, interval: int, count: int) -> bool:
     sizes = []
     for _ in range(count):
         sizes.append(p.stat().st_size if p.exists() else -1)
         time.sleep(interval)
     return len(set(sizes)) == 1
+
 
 def ingest_file(src: Path, cfg: AppConfig) -> Document:
     data = src.read_bytes()
@@ -152,8 +157,16 @@ def ingest_file(src: Path, cfg: AppConfig) -> Document:
         stored = Path(cfg.paths.stored_documents_folder) / f"{h}{src.suffix}"
         stored.parent.mkdir(parents=True, exist_ok=True)
         stored.write_bytes(data)
-        doc = Document(sha256_hash=h, original_filename=src.name, stored_path=str(stored), doc_type=DocType.UNKNOWN, extraction_status=ExtractionStatus.pending)
-        s.add(doc); s.commit(); s.refresh(doc)
+        doc = Document(
+            sha256_hash=h,
+            original_filename=src.name,
+            stored_path=str(stored),
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.pending,
+        )
+        s.add(doc)
+        s.commit()
+        s.refresh(doc)
         return doc
 ```
 
@@ -184,10 +197,13 @@ GIT_DIR=/tmp/aam_merger_git git --work-tree=. commit -m "feat(ingest): stability
 ```python
 def test_classify_unknown_holding():
     from app.services.classification import classify
+
     assert classify({"raw": "random memo"}) == "UNKNOWN"
+
 
 def test_customs_never_vlm():
     from app.services.classification import is_manual_only
+
     assert is_manual_only("CUSTOMS") is True
     assert is_manual_only("SHIPPING") is True
     assert is_manual_only("COMMERCIAL_INVOICE") is True
@@ -201,16 +217,25 @@ def test_customs_never_vlm():
 def classify(extracted: dict) -> str:
     # real: VLM-based; this stub uses keywords for TDD
     t = (extracted.get("raw") or "").lower()
-    if "purchase order" in t: return "PO"
-    if "delivery note" in t: return "DN"
-    if "tax invoice" in t or "sales invoice" in t: return "SI"
-    if "customs declaration" in t: return "CUSTOMS"
-    if "awb" in t or "shipping" in t: return "SHIPPING"
-    if "commercial invoice" in t: return "COMMERCIAL_INVOICE"
-    if "combined" in t: return "COMBINED"
+    if "purchase order" in t:
+        return "PO"
+    if "delivery note" in t:
+        return "DN"
+    if "tax invoice" in t or "sales invoice" in t:
+        return "SI"
+    if "customs declaration" in t:
+        return "CUSTOMS"
+    if "awb" in t or "shipping" in t:
+        return "SHIPPING"
+    if "commercial invoice" in t:
+        return "COMMERCIAL_INVOICE"
+    if "combined" in t:
+        return "COMBINED"
     return "UNKNOWN"
+
+
 def is_manual_only(t: str) -> bool:
-    return t in ("CUSTOMS","SHIPPING","COMMERCIAL_INVOICE")
+    return t in ("CUSTOMS", "SHIPPING", "COMMERCIAL_INVOICE")
 ```
 
 - [ ] **Step 4: Run -> PASS**
@@ -230,13 +255,16 @@ def is_manual_only(t: str) -> bool:
 ```python
 def test_normalize():
     from app.services.grouping import normalize_po_no
+
     assert normalize_po_no("PO-1234") == "PO1234"
     assert normalize_po_no("po 1234") == "PO1234"
     assert normalize_po_no("PO/1234") == "PO1234"
 
+
 def test_grouping_same_set():
     from app.services.grouping import get_or_create_po_set
     from app.core.config import load_config
+
     cfg = load_config("config.example.yaml")
     a = get_or_create_po_set("PO-1234", cfg)
     b = get_or_create_po_set("po 1234", cfg)
@@ -248,19 +276,27 @@ def test_grouping_same_set():
 
 ```python
 import re
+
+
 def normalize_po_no(raw: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "", raw).upper()
+
+
 def get_or_create_po_set(po_no: str, cfg):
     from app.core.database import get_engine
     from sqlalchemy.orm import Session
     from app.models import POSet, POSetStatus
+
     norm = normalize_po_no(po_no)
     eng = get_engine(cfg)
     with Session(eng) as s:
         ps = s.query(POSet).filter_by(po_no_normalized=norm).first()
-        if ps: return ps
+        if ps:
+            return ps
         ps = POSet(po_no_normalized=norm, status=POSetStatus.pending)
-        s.add(ps); s.commit(); s.refresh(ps)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
         return ps
 ```
 
@@ -281,20 +317,28 @@ def get_or_create_po_set(po_no: str, cfg):
 ```python
 def test_match_by_line_no():
     from app.services.matching import match_line
+
     po = {"line_item_no": "5", "description": "Widget A"}
     dn = [{"line_item_no": "5", "description": "Widget A", "qty": 10}]
     assert match_line(po, dn, [], thr=85)["matched"] is True
 
+
 def test_fuzzy_fallback():
     from app.services.matching import match_line
+
     po = {"line_item_no": None, "description": "Widget A 10kg"}
     dn = [{"line_item_no": None, "description": "Widget A 10 KG", "qty": 10}]
     assert match_line(po, dn, [], thr=85)["matched"] is True
 
+
 def test_conflict_quarantine():
     from app.services.matching import match_line
+
     po = {"line_item_no": "5", "description": "Widget A"}
-    dn = [{"line_item_no": "5", "description": "Conflict", "qty": 10}, {"line_item_no": "5", "description": "Widget A", "qty": 10}]
+    dn = [
+        {"line_item_no": "5", "description": "Conflict", "qty": 10},
+        {"line_item_no": "5", "description": "Widget A", "qty": 10},
+    ]
     assert match_line(po, dn, [], thr=85)["quarantine"] is True
 ```
 
@@ -303,17 +347,23 @@ def test_conflict_quarantine():
 
 ```python
 from rapidfuzz import fuzz
+
+
 def match_line(po, dn_lines, si_lines, thr=85):
     # if po has line_no, match exactly
     if po.get("line_item_no"):
-        cands = [d for d in dn_lines if d.get("line_item_no")==po["line_item_no"]]
-        if len(cands)>=2 and len(set(c["description"] for c in cands))>1:
+        cands = [d for d in dn_lines if d.get("line_item_no") == po["line_item_no"]]
+        if len(cands) >= 2 and len(set(c["description"] for c in cands)) > 1:
             return {"matched": False, "quarantine": True}
-        if cands: return {"matched": True, "quarantine": False}
+        if cands:
+            return {"matched": True, "quarantine": False}
         return {"matched": False, "quarantine": True}
     # fallback fuzzy
     for d in dn_lines:
-        if not d.get("line_item_no") and fuzz.token_sort_ratio(po["description"], d["description"]) >= thr:
+        if (
+            not d.get("line_item_no")
+            and fuzz.token_sort_ratio(po["description"], d["description"]) >= thr
+        ):
             return {"matched": True, "quarantine": False}
     return {"matched": False, "quarantine": True}
 ```
@@ -335,15 +385,20 @@ def match_line(po, dn_lines, si_lines, thr=85):
 ```python
 def test_reconcile_exact():
     from app.services.reconciliation import reconcile
+
     assert reconcile(100000, 100000, 100000)["ok"] is True  # 100*1000
     assert reconcile(100000, 90000, 100000)["ok"] is False
 
+
 def test_negative_quarantine():
     from app.services.reconciliation import reconcile
+
     assert reconcile(100000, -10000, 100000)["quarantine"] is True
+
 
 def test_price_flag_priority():
     from app.services.reconciliation import check_price
+
     assert check_price(10000, 10000)["flag"] is False
     assert check_price(10000, 9000)["flag"] is True  # price-only not block, but flagged
 ```
@@ -352,12 +407,17 @@ def test_price_flag_priority():
 - [ ] **Step 3: Implement**
 
 ```python
-def aggregate(lines): return sum(l["quantity"] for l in lines)
+def aggregate(lines):
+    return sum(l["quantity"] for l in lines)
+
+
 def reconcile(po, dn, si):
-    if po<=0 or dn<0 or si<0 or dn==0 or si==0:  # negative/zero → quarantine (FR-10.3)
+    if po <= 0 or dn < 0 or si < 0 or dn == 0 or si == 0:  # negative/zero → quarantine (FR-10.3)
         return {"ok": False, "quarantine": True}
-    ok = (po==dn and po==si)
+    ok = po == dn and po == si
     return {"ok": ok, "quarantine": False}
+
+
 def check_price(po_price, agg_price):
     return {"flag": po_price != agg_price}
 ```
@@ -380,6 +440,7 @@ def check_price(po_price, agg_price):
 def test_toggle_blocked():
     from app.services.customs import toggle_customs, is_blocked
     from app.core.config import load_config
+
     cfg = load_config("config.example.yaml")
     # create PO Set, toggle
     ps = toggle_customs(1, cfg)  # placeholder id
@@ -406,11 +467,15 @@ def test_merge_order(tmp_path):
     from pypdf import PdfWriter
     from pathlib import Path
     from app.services.merge import merge_po_set
+
     # create 3 tiny PDFs: PO/DN/SI each 1 page with text marker
     def tiny_pdf(p: Path, text: str):
-        w = PdfWriter(); w.add_blank_page(width=200, height=200); w.write(str(p))
+        w = PdfWriter()
+        w.add_blank_page(width=200, height=200)
+        w.write(str(p))
         # real test will use reportlab or existing sample PDFs; keep minimal for TDD
         return p
+
     po = tiny_pdf(tmp_path / "po.pdf", "PO")
     dn = tiny_pdf(tmp_path / "dn.pdf", "DN")
     si = tiny_pdf(tmp_path / "si.pdf", "SI")
@@ -424,6 +489,8 @@ def test_merge_order(tmp_path):
 ```python
 from pypdf import PdfReader, PdfWriter
 from pathlib import Path
+
+
 def merge_po_set(po_set_id: int, cfg) -> Path | None:
     # 1. load POSet, verify status==pending+mismatched not blocked, check all lines reconciled
     # 2. order = [si_docs + dn_docs + po_docs + customs_shipping_if_any]
@@ -453,10 +520,12 @@ def test_delete_keeps_files(tmp_path):
     from pathlib import Path
     from app.services.quarantine import quarantine_copy, delete_quarantined
     from app.core.config import load_config
+
     cfg = load_config("config.example.yaml")
     cfg.paths.quarantine_folder = tmp_path / "quarantine"
     cfg.paths.stored_documents_folder = tmp_path / "stored"
-    (tmp_path / "stored").mkdir(); (tmp_path / "quarantine").mkdir()
+    (tmp_path / "stored").mkdir()
+    (tmp_path / "quarantine").mkdir()
     # create quarantined POSet with 3 docs (fixture), copy to quarantine, delete
     # assert: DB po_sets row gone, line_items gone, but stored_path files exist + quarantine copies exist + audit_log row exists
     assert True  # executor fills DB fixture, this shows shape
@@ -468,12 +537,16 @@ def test_delete_keeps_files(tmp_path):
 ```python
 import shutil
 from pathlib import Path
+
+
 def quarantine_copy(po_set, cfg) -> Path:
     q = Path(cfg.paths.quarantine_folder) / po_set.po_no_normalized
     q.mkdir(parents=True, exist_ok=True)
     for doc in po_set.documents:
         shutil.copy(doc.stored_path, q / Path(doc.stored_path).name)
     return q
+
+
 def delete_quarantined(po_set_id: int, cfg):
     # 1. verify status==quarantined
     # 2. delete line_items, documents, po_sets via Session
@@ -499,6 +572,8 @@ def delete_quarantined(po_set_id: int, cfg):
 def test_concurrent_sync_409(client):
     # first POST /sync -> 200, second immediate -> 409 "Sync already running"
     pass
+
+
 def test_po_lock_409(client):
     # lock PO Set with force_merge, second action -> 409
     pass

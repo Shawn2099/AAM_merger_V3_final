@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}AAM Merger — Dashboard{% endblock %}</title>
+<script src="https://unpkg.com/htmx.org@1.9.12" crossorigin="anonymous"></script>
+<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  :root { --primary: #0f3b5f; --accent: #1a7f5a; --bg: #f6f8fb; --card: #ffffff; --muted: #6b7a90; --border: #dce3ef; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: #1a2332; }
+  nav { background: var(--primary); color: #fff; padding: 12px 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  nav a { color: #cfe0f2; text-decoration: none; font-weight: 600; font-size: 0.95rem; }
+  nav a.active { color: #fff; text-decoration: underline; }
+  nav .brand { font-weight: 800; letter-spacing: 0.3px; color: #fff; margin-right: 8px; }
+  .container { max-width: 1100px; margin: 24px auto; padding: 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 18px; box-shadow: 0 2px 8px rgba(15,59,95,0.06); }
+  .card h2, .card h3 { margin-top: 0; color: var(--primary); }
+  .btn { appearance: none; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: #123d62; }
+  .btn-danger { background: #b42318; color: #fff; }
+  .btn-secondary { background: #eef2f7; color: var(--primary); border: 1px solid var(--border); }
+  .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+  .badge { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; }
+  .badge-pending { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; }
+  .badge-mismatched { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+  .badge-quarantined { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+  .badge-blocked_customs { background: #ffedd5; color: #9a3412; border: 1px solid #fed7aa; }
+  .badge-merged { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 0.92rem; }
+  th { color: var(--muted); font-weight: 700; text-transform: uppercase; font-size: 0.78rem; letter-spacing: 0.4px; background: #f8fafc; }
+  tr:hover td { background: #f8fafc; }
+  .filter-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+  select, input[type="text"] { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(15,30,55,0.45); display: none; align-items: center; justify-content: center; z-index: 50; }
+  .modal-backdrop.open { display: flex; }
+  .modal { background: var(--card); border-radius: 10px; padding: 22px; max-width: 520px; width: 92%; box-shadow: 0 20px 40px rgba(0,0,0,0.18); }
+  .modal h3 { margin-top: 0; }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  .htmx-indicator { opacity: 0; transition: opacity 150ms; }
+  .htmx-request .htmx-indicator { opacity: 1; }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+<nav>
+  <span class="brand">AAM Merger V3</span>
+  <a href="/dashboard" class="{% if request.url.path.startswith('/dashboard') or request.url.path == '/' %}active{% endif %}">Dashboard</a>
+  <a href="/quarantine" class="{% if request.url.path.startswith('/quarantine') %}active{% endif %}">Quarantine</a>
+  <a href="/audit" class="{% if request.url.path.startswith('/audit') %}active{% endif %}">Audit Log</a>
+  <a href="/manual/merger">Manual Merger</a>
+  <a href="/health" style="margin-left:auto; font-size:0.85rem; opacity:0.9;">Health</a>
+</nav>
+<div class="container">
+  {% block content %}{% endblock %}
+</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

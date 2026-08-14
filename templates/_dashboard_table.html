@@ -1,0 +1,29 @@
+<div id="po-table" hx-get="/dashboard/table{% if current_status %}?status={{ current_status }}{% endif %}" hx-trigger="every 2s" hx-swap="outerHTML">
+<table>
+  <thead>
+    <tr>
+      <th>PO No</th>
+      <th>Status</th>
+      <th>Documents</th>
+      <th>Last updated</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for ps in po_sets %}
+    <tr>
+      <td><a href="/po_sets/{{ ps.id }}/view">{{ ps.po_no_normalized }}</a></td>
+      <td><span class="badge badge-{{ ps.status.value if ps.status.value is defined else ps.status }}">{{ ps.status.value if ps.status.value is defined else ps.status }}</span></td>
+      <td>{{ ps.doc_count }}</td>
+      <td class="muted">{{ ps.updated_at.isoformat() if ps.updated_at else "—" }}</td>
+      <td>
+        <a href="/po_sets/{{ ps.id }}/view" class="btn btn-secondary" style="padding:4px 8px; font-size:0.82rem;">Detail</a>
+        {% if ps.is_locked %}<span class="muted" title="action already in progress">Locked by {{ ps.locked_by_action }}</span>{% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted" style="text-align:center; padding:18px;">No PO Sets{% if current_status %} with status {{ current_status }}{% endif %}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>

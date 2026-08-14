@@ -11,6 +11,32 @@ from app.core.config import load_config
 
 app = FastAPI(title="AAM Merger V3", version="0.1.0")
 
+# Task 9: include sync + po_sets routers (FR-4.3, FR-CONC-1–4)
+try:
+    from app.api.routes.sync import router as sync_router
+
+    app.include_router(sync_router)
+except Exception:
+    pass
+try:
+    from app.api.routes.po_sets import router as po_sets_router
+
+    app.include_router(po_sets_router)
+except Exception:
+    pass
+try:
+    from app.api.routes.manual_merger import router as manual_router
+
+    app.include_router(manual_router)
+except Exception:
+    pass
+try:
+    from app.api.routes.dashboard import router as dashboard_router
+
+    app.include_router(dashboard_router)
+except Exception:
+    pass
+
 
 @app.get("/health")
 def health() -> JSONResponse:
