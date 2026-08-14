@@ -1,0 +1,52 @@
+# AAM_MERGER-FINAL — config.example.yaml
+# Copy to config.yaml and set real paths. All env-specific values MUST be here, not hardcoded (SPEC §13).
+# WS2016 prod paths are C:\AAM\*, Linux dev can use ./data/* or /tmp/AAM/*
+# Secrets (OPENROUTER_API_KEY) via .env or env var only, never here (SPEC NFR-5).
+
+paths:
+  input_folder: "./data/input"
+  output_folder: "./data/output"
+  quarantine_folder: "./data/quarantine"
+  stored_documents_folder: "./data/stored"
+  unclassified_folder: "./data/unclassified"
+  database_path: "./data/aam_merger.db"
+  log_folder: "./data/logs"
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+vlm:
+  provider: "openrouter"
+  model: "openai/gpt-4o"  # SPEC says gpt-5.6-luna via OpenRouter; use openai/gpt-4o as dev default, swap via config
+  request_timeout_seconds: 60
+  api_key_env_var: "OPENROUTER_API_KEY"
+
+extraction:
+  max_retries: 3
+  retry_backoff_seconds: [2, 5, 15]
+
+matching:
+  fuzzy_description_threshold: 85
+
+ingestion:
+  stability_poll_interval_seconds: 2
+  stability_poll_count: 2
+
+prefect:
+  work_pool_name: "aam-merger-process-pool"
+  max_concurrent_extraction_tasks: 3
+
+concurrency:
+  po_set_lock_timeout_seconds: 300
+
+logging:
+  level: "INFO"
+  max_file_size_mb: 10
+  backup_count: 5
+
+# Backup (SPEC NFR-6, simple folder copy)
+backup:
+  enabled: true
+  folder: "./data/backup"
+  interval_hours: 24
