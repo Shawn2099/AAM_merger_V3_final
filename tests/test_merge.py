@@ -226,7 +226,7 @@ def test_merged_immutable_first_completed_wins(tmp_path):
     )
     out1 = merge_po_set(po_set_id, cfg)
     assert out1 is not None
-    Path(out1).stat().st_mtime
+    _mtime = Path(out1).stat().st_mtime
     reader1 = PdfReader(str(out1))
     assert len(reader1.pages) == 2
 

@@ -55,6 +55,15 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
 ignore = ["D", "COM812", "ISC001"]
 
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*.py" = ["E501", "UP035", "UP007", "I001"]
+"alembic/env.py" = ["E501", "I001", "F401"]
+"tests/*.py" = ["E501"]
+"src/app/api/routes/po_sets.py" = ["E501"]
+"src/app/core/config.py" = ["E501"]
+"src/app/models/models.py" = ["E501"]
+"src/app/services/customs.py" = ["E501"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["src", "app"]
 

@@ -1,4 +1,4 @@
-"""FastAPI stub — cross-platform (pathlib, config.yaml, WAL). Health only; real routes in dev."""
+"""FastAPI stub - cross-platform (pathlib, config.yaml, WAL). Health only; real routes in dev."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from app.core.config import load_config
 
 app = FastAPI(title="AAM Merger V3", version="0.1.0")
 
-# Task 9: include sync + po_sets routers (FR-4.3, FR-CONC-1–4)
+# Task 9: include sync + po_sets routers (FR-4.3, FR-CONC-1-4)
 try:
     from app.api.routes.sync import router as sync_router
 
