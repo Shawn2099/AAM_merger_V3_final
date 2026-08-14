@@ -63,6 +63,7 @@ ignore = ["D", "COM812", "ISC001"]
 "src/app/core/config.py" = ["E501"]
 "src/app/models/models.py" = ["E501"]
 "src/app/services/customs.py" = ["E501"]
+"src/app/services/extraction.py" = ["E501", "RUF001"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src", "app"]

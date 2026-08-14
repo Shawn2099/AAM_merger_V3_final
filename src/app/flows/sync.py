@@ -107,10 +107,14 @@ def sync_flow(cfg_path: str | None = None) -> dict:
                 continue
             doc = ingest_file(f, cfg)
             processed += 1
-            # one task per doc
+            # classify + extract per doc (real Luna)
             try:
                 classify_task(doc.id, cfg_path=cfg_path)
                 classified += 1
+            except Exception:
+                errors += 1
+            try:
+                extract_task(doc.id, cfg_path=cfg_path)
             except Exception:
                 errors += 1
         except Exception:
@@ -130,5 +134,31 @@ def sync_flow(cfg_path: str | None = None) -> dict:
                 classified += 1
             except Exception:
                 errors += 1
+            # also extract via VLM (real Luna, no mock) — single call for COMBINED, retry [2,5,15]
+            try:
+                extract_task(doc.id, cfg_path=cfg_path)
+            except Exception:
+                errors += 1
+            # group into PO Set if po_no available
+            try:
+                from app.services.grouping import get_or_create_po_set
+
+                with Session(get_engine(cfg)) as s2:
+                    d = s2.get(Document, doc.id)
+                    if d and d.po_no_normalized:
+                        get_or_create_po_set(d.po_no_raw or d.po_no_normalized, cfg)
+                        if d.po_set_id is None:
+                            from app.models import POSet
+
+                            ps = (
+                                s2.query(POSet)
+                                .filter_by(po_no_normalized=d.po_no_normalized)
+                                .first()
+                            )
+                            if ps:
+                                d.po_set_id = ps.id
+                                s2.commit()
+            except Exception:
+                pass
 
     return {"processed": processed, "classified": classified, "errors": errors}
