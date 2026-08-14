@@ -11,7 +11,7 @@ from logging.config import fileConfig
 from alembic import context
 from app.core.config import load_config
 from app.core.database import get_engine
-from app.models import models  # noqa: F401 — register models
+from app.models import models
 from app.models.base import Base
 
 config = context.config

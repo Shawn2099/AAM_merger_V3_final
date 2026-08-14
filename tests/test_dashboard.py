@@ -56,7 +56,10 @@ def client(tmp_cfg, monkeypatch):
     monkeypatch.setattr("app.flows.sync.load_config", lambda path=None: tmp_cfg)
     # dashboard module may also use load_config
     try:
-        import app.api.routes.dashboard as dash_mod
+        import importlib.util
+
+        dash_spec = importlib.util.find_spec("app.api.routes.dashboard")
+        assert dash_spec is not None
 
         monkeypatch.setattr("app.api.routes.dashboard.load_config", lambda path=None: tmp_cfg)
     except ImportError:

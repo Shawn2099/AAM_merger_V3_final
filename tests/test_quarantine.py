@@ -1,4 +1,4 @@
-"""Tests for quarantine — FR-13.5-13.9 copy+delete keeps files + audit, manual merger isolated (FR-14.11-14.13)."""
+"""Tests for quarantine - FR-13.5-13.9 copy+delete keeps files + audit, manual merger isolated (FR-14.11-14.13)."""
 
 from pathlib import Path
 
@@ -161,7 +161,7 @@ def test_delete_keeps_files(tmp_path):
 
 
 def test_quarantine_copy_uses_copy_not_move(tmp_path):
-    """FR-13.3: quarantine_copy uses shutil.copy (not move) — originals remain."""
+    """FR-13.3: quarantine_copy uses shutil.copy (not move) - originals remain."""
     from app.services.quarantine import quarantine_copy
 
     cfg = _cfg_with_tmp(tmp_path)
@@ -230,7 +230,7 @@ def test_manual_merge_isolated(tmp_path):
     widths = [float(p.mediabox.width) for p in reader.pages]
     assert widths == [300, 100, 200], f"manual order failed, got {widths}"
 
-    # no DB row created — verify DB is empty or no po_sets created by manual merge
+    # no DB row created - verify DB is empty or no po_sets created by manual merge
     from sqlalchemy.orm import Session
 
     from app.core.database import get_engine
@@ -245,7 +245,7 @@ def test_manual_merge_isolated(tmp_path):
         assert (
             s.query(POSet).count() == 0 or True
         )  # manual_merge should not require DB, just ensure no crash
-        # actual assertion: manual_merge does not create POSet — if DB was empty before, still empty
+        # actual assertion: manual_merge does not create POSet - if DB was empty before, still empty
         # we use isolated cfg, so count should be 0
         assert s.query(POSet).count() == 0
 

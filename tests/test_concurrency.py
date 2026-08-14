@@ -1,4 +1,4 @@
-"""Task 9 TDD — 409 on concurrent Sync + per-PO lock (FR-4.3, FR-CONC-1–4, FR-CONFIG-2)."""
+"""Task 9 TDD - 409 on concurrent Sync + per-PO lock (FR-4.3, FR-CONC-1-4, FR-CONFIG-2)."""
 
 from __future__ import annotations
 
