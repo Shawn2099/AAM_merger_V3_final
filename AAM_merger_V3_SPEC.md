@@ -1,6 +1,6 @@
-# AAM_merger_V2 — Technical Specification (SPEC.md)
+# AAM_merger_V3 — Technical Specification (SPEC.md)
 
-**Status:** Draft v1, derived directly from `AAM_merger_V2_business_logic.md` (Final) plus decisions confirmed in the spec-drafting session below. No requirement in this document may be implemented in a way that contradicts the business logic doc — if a conflict is found, STOP and ask (see Section 1).
+**Status:** Draft v1, derived directly from `AAM_merger_V3_business_logic.md` (Final) plus decisions confirmed in the spec-drafting session below. No requirement in this document may be implemented in a way that contradicts the business logic doc — if a conflict is found, STOP and ask (see Section 1).
 
 **Build scope:** Input folder → identification → extraction → grouping → matching → reconciliation → automatic merge → output folder. Distribution (Phase 2) is explicitly excluded from this document.
 
@@ -25,7 +25,7 @@ AI-assisted document reconciliation system for a CA firm. Automates matching of 
 
 **Out of scope (Phase 2, parked, not designed against):** post-merge distribution (company/buyer lookup, email drafting), authentication/roles, multi-server deployment.
 
-Full business rules live in `AAM_merger_V2_business_logic.md` — this document translates those rules into buildable, testable, EARS-format requirements plus the technical architecture. Where this document restates a business rule, the business doc is definitive if there's ever a wording mismatch.
+Full business rules live in `AAM_merger_V3_business_logic.md` — this document translates those rules into buildable, testable, EARS-format requirements plus the technical architecture. Where this document restates a business rule, the business doc is definitive if there's ever a wording mismatch.
 
 ---
 

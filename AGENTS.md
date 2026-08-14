@@ -2,7 +2,7 @@
 
 > **Scope:** `Input → Sync → Dedup → Classify → Extract → Group → Match → Reconcile → Merge → Output`
 > **Repo:** `https://github.com/Shawn2099/AAM_merger_V3_final`
-> **Sources of truth:** [`AAM_merger_V2_SPEC.md`](./AAM_merger_V2_SPEC.md) > [`AAM_merger_V2_business_logic.md`](./AAM_merger_V2_business_logic.md) > this file. If this file ever contradicts SPEC, SPEC wins — STOP and ask.
+> **Sources of truth:** [`AAM_merger_V3_SPEC.md`](./AAM_merger_V3_SPEC.md) > [`AAM_merger_V3_business_logic.md`](./AAM_merger_V3_business_logic.md) > this file. If this file ever contradicts SPEC, SPEC wins — STOP and ask.
 > **POC reference only:** `~/Desktop/AAM_merger_V2` — lessons-learned, never a code base to branch from.
 
 ---
@@ -122,7 +122,7 @@ NPM_CONFIG_CACHE=/tmp/npm-cache npx --yes skills add <owner/repo@skill> -y
 ```bash
 # project root
 ls -la
-cat AAM_merger_V2_SPEC.md AAM_merger_V2_business_logic.md
+cat AAM_merger_V3_SPEC.md AAM_merger_V3_business_logic.md
 
 # skills
 NPM_CONFIG_CACHE=/tmp/npm-cache npx --yes skills list

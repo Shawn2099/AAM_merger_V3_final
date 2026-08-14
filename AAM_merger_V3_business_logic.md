@@ -1,4 +1,4 @@
-# AAM_merger_V2 — Business Idea & Logic Document
+# AAM_merger_V3 — Business Idea & Logic Document
 
 **Status:** Final, pre-spec. This document is intended to be detailed enough that SPEC.md can be written directly from it without further clarification.
 

@@ -1,6 +1,6 @@
 # AAM_MERGER-FINAL — AAM_merger_V3_final
 
-AI-assisted PO/DN/SI reconciliation → merged PDF per PO. See `AGENTS.md` for agent rules, `AAM_merger_V2_SPEC.md` for build spec.
+AI-assisted PO/DN/SI reconciliation → merged PDF per PO. See `AGENTS.md` for agent rules, `AAM_merger_V3_SPEC.md` for build spec.
 
 **Repo:** https://github.com/Shawn2099/AAM_merger_V3_final  
 **Status:** scaffolding (no code yet) — SPEC §1 binding.
