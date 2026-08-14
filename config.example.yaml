@@ -18,7 +18,7 @@ server:
 
 vlm:
   provider: "openrouter"
-  model: "openai/gpt-4o"  # SPEC says gpt-5.6-luna via OpenRouter; use openai/gpt-4o as dev default, swap via config
+  model: "openai/gpt-5.6-luna"  # SPEC §16 — Luna via OpenRouter (prod main), never hardcoded, swap via config only
   request_timeout_seconds: 60
   api_key_env_var: "OPENROUTER_API_KEY"
 
