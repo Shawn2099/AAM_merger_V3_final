@@ -12,7 +12,7 @@ from app.core.database import get_engine
 from app.models.base import Base
 
 
-@task(name="classify_task", retries=0)
+@task(name="classify_task", retries=3, retry_delay_seconds=[2, 5, 15])
 def classify_task(doc_id: int, cfg_path: str | None = None) -> str:
     """Classify a single document — one Prefect task per doc (Task 9).
 
@@ -53,6 +53,25 @@ def classify_task(doc_id: int, cfg_path: str | None = None) -> str:
             doc.doc_type = enum_val
             s.commit()
         return result
+
+
+@task(name="extract_task", retries=3, retry_delay_seconds=[2, 5, 15])
+def extract_task(doc_id: int, cfg_path: str | None = None) -> str:
+    """Extract a single document — one Prefect task per doc (FR-6.7).
+
+    Wraps app.services.extraction.extract_document with retry.
+    """
+    cfg = load_config(cfg_path) if cfg_path else load_config()
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    from app.services.extraction import extract_document
+
+    doc = extract_document(doc_id, cfg)
+    return str(
+        doc.extraction_status.value
+        if hasattr(doc.extraction_status, "value")
+        else doc.extraction_status
+    )
 
 
 @flow(name="sync_flow")
