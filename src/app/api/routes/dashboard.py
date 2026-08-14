@@ -72,7 +72,7 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
             }
         )
     # sort by updated_at desc for dashboard usability
-    out.sort(key=lambda x: x["updated_at"] or x["id"], reverse=True)
+    out.sort(key=lambda x: (x["updated_at"] or x["id"]), reverse=True)  # ty: ignore[no-matching-overload]
     return out
 
 
