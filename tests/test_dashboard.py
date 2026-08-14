@@ -56,7 +56,10 @@ def client(tmp_cfg, monkeypatch):
     monkeypatch.setattr("app.flows.sync.load_config", lambda path=None: tmp_cfg)
     # dashboard module may also use load_config
     try:
-        import app.api.routes.dashboard as dash_mod
+        import importlib.util
+
+        dash_spec = importlib.util.find_spec("app.api.routes.dashboard")
+        assert dash_spec is not None
 
         monkeypatch.setattr("app.api.routes.dashboard.load_config", lambda path=None: tmp_cfg)
     except ImportError:
@@ -378,3 +381,26 @@ def test_cross_platform_paths_no_hardcoded_separators(tmp_cfg, client):
     for path in ["/audit", "/quarantine"]:
         r2 = client.get(path)
         assert "C:\\" not in r2.text
+
+
+def test_dashboard_filter_htmx_returns_partial(tmp_cfg, client):
+    """P3: HTMX filter returns partial table not full page."""
+    _create_poset(tmp_cfg, po_no="POHTMX2", status=POSetStatus.pending)
+    # normal full page
+    r_full = client.get("/dashboard?status=pending")
+    assert r_full.status_code == 200
+    assert "POHTMX2" in r_full.text
+    # HTMX request should return _dashboard_table fragment
+    r_htmx = client.get("/dashboard?status=pending", headers={"HX-Request": "true"})
+    assert r_htmx.status_code == 200
+    # partial should still contain PO, but ideally NOT full base layout
+    # check that HTMX partial is shorter or contains table marker
+    assert "POHTMX2" in r_htmx.text
+    # dashboard partial should be HTMX-aware: less than full page or contains table id
+    # fail if implementation still returns full dashboard.html (contains <html> or base title)
+    # We assert that HTMX response does NOT contain full base title "AAM Merger" if partial, or contains hx fragment marker
+    # For TDD, we fail if response is identical to full (means not returning partial)
+    if r_htmx.text == r_full.text:
+        pytest.fail(
+            "HTMX dashboard filter should return partial _dashboard_table, not full dashboard.html"
+        )

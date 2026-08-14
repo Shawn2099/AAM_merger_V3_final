@@ -78,3 +78,5 @@ graphify-out/
 !.mcp.json
 !AGENTS.md
 !skills-lock.json
+.worktrees/
+worktrees/

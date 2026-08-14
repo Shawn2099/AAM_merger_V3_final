@@ -1,4 +1,4 @@
-"""Task 9 TDD — 409 on concurrent Sync + per-PO lock (FR-4.3, FR-CONC-1–4, FR-CONFIG-2)."""
+"""Task 9 TDD - 409 on concurrent Sync + per-PO lock (FR-4.3, FR-CONC-1-4, FR-CONFIG-2)."""
 
 from __future__ import annotations
 
@@ -119,3 +119,43 @@ def test_po_lock_timeout_releases(tmp_db, client):
     r = client.post(f"/po_sets/{po_id}/force_merge")
     # should succeed (200) because stale lock is auto-cleared
     assert r.status_code == 200, r.text
+
+
+def test_sync_tasks_have_retry_backoff():
+    """P2: Prefect tasks must have retries=3 and retry_delay [2,5,15] (FR-6.7)."""
+    from app.flows.sync import classify_task, extract_task
+
+    # classify_task should be a Prefect task with retry config
+    assert hasattr(classify_task, "retries") or hasattr(classify_task, "retry_delay_seconds")
+    # Prefect 3.x stores retry config on task object; check both aliases
+    retries = getattr(classify_task, "retries", None)
+    delay = getattr(classify_task, "retry_delay_seconds", None)
+    # fallback for internal attribute names
+    if retries is None:
+        retries = getattr(classify_task, "_retries", None)
+    if delay is None:
+        delay = getattr(classify_task, "_retry_delay_seconds", None)
+    assert retries == 3, f"classify_task retries={retries}"
+    assert delay == [2, 5, 15], f"classify_task delay={delay}"
+
+    retries2 = getattr(extract_task, "retries", None)
+    delay2 = getattr(extract_task, "retry_delay_seconds", None)
+    if retries2 is None:
+        retries2 = getattr(extract_task, "_retries", None)
+    if delay2 is None:
+        delay2 = getattr(extract_task, "_retry_delay_seconds", None)
+    assert retries2 == 3
+    assert delay2 == [2, 5, 15]
+
+
+def test_sync_flow_is_flow():
+    """P2: sync_flow must be a Prefect flow (one flow per Sync, FR-4.3)."""
+    from prefect import Flow
+
+    from app.flows.sync import sync_flow
+
+    # sync_flow should be a Flow instance or have flow decorator metadata
+    assert hasattr(sync_flow, "name") or isinstance(sync_flow, Flow)
+    # name check
+    flow_name = getattr(sync_flow, "name", None) or getattr(sync_flow, "__name__", "")
+    assert "sync" in str(flow_name).lower()

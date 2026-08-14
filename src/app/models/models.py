@@ -87,8 +87,8 @@ class LineItem(Base):
     document_id: Mapped[int] = mapped_column(ForeignKey("documents.id"), nullable=False)
     line_item_no: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str] = mapped_column(Text, nullable=False)
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False)  # scaled ×1000
-    unit_price: Mapped[int] = mapped_column(Integer, nullable=False)  # scaled ×1000
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)  # scaled x1000
+    unit_price: Mapped[int] = mapped_column(Integer, nullable=False)  # scaled x1000
 
     document: Mapped[Document] = relationship(back_populates="line_items")
 

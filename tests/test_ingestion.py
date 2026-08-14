@@ -7,7 +7,7 @@ from app.services.ingestion import ingest_file, is_file_stable
 def test_is_file_stable(tmp_path):
     p = tmp_path / "a.pdf"
     p.write_bytes(b"x")
-    # 2s×2 stable if not growing
+    # 2sx2 stable if not growing
     assert is_file_stable(p, interval=0, count=2) is True  # 0 for fast test, real 2s
 
 

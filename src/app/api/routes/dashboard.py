@@ -113,6 +113,16 @@ def dashboard(request: Request, status: str | None = None):
         s.commit()
         po_sets = _po_sets_with_doc_count(s, status, cfg)
         sync_running = _sync_running_state()
+        if request.headers.get("HX-Request") == "true":
+            return _templates.TemplateResponse(
+                request,
+                "_dashboard_table.html",
+                {
+                    "request": request,
+                    "po_sets": po_sets,
+                    "current_status": status if status in _ALLOWED_STATUSES else None,
+                },
+            )
         return _templates.TemplateResponse(
             request,
             "dashboard.html",

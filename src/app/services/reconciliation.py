@@ -1,5 +1,5 @@
 def aggregate(lines):
-    return sum(l["quantity"] for l in lines)
+    return sum(line["quantity"] for line in lines)
 
 
 def reconcile(po, dn, si):
