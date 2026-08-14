@@ -1,8 +1,9 @@
 """Models — SPEC §6 verified line-by-line (see AGENTS.md §3 table). Do not add part_no/UOM without spec change."""
+
 from __future__ import annotations
 
 import enum
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -11,7 +12,7 @@ from .base import Base
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class DocType(str, enum.Enum):
@@ -64,13 +65,17 @@ class Document(Base):
     )
     extraction_attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     po_set_id: Mapped[int | None] = mapped_column(ForeignKey("po_sets.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
-    po_set: Mapped["POSet | None"] = relationship(back_populates="documents")
-    line_items: Mapped[list["LineItem"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+    po_set: Mapped[POSet | None] = relationship(back_populates="documents")
+    line_items: Mapped[list[LineItem]] = relationship(
+        back_populates="document", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (Index("ix_documents_po_no_normalized", "po_no_normalized"),)
 
@@ -99,7 +104,9 @@ class POSet(Base):
     merged_output_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     locked_by_action: Mapped[str | None] = mapped_column(Text, nullable=True)  # FR-CONC-1, SPEC §9
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
@@ -114,5 +121,7 @@ class AuditLog(Base):
     po_set_id: Mapped[int | None] = mapped_column(ForeignKey("po_sets.id"), nullable=True)
     action: Mapped[AuditAction] = mapped_column(Enum(AuditAction), nullable=False)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
     source: Mapped[str] = mapped_column(Text, default="system", nullable=False)

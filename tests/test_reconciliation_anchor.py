@@ -1,4 +1,5 @@
 """Anchor TDD tests — SPEC §12 examples, must pass before dev proceeds (AGENTS.md §7)."""
+
 from __future__ import annotations
 
 

@@ -1,4 +1,5 @@
 """Core config — SPEC §13. All env-specific values via config.yaml (pydantic-settings + YAML), secrets via .env/env var only."""
+
 from __future__ import annotations
 
 import os

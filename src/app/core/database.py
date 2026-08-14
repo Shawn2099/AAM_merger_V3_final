@@ -1,4 +1,5 @@
 """DB — sync engine, WAL, single-writer discipline (SPEC §5.3, §5.1). Cross-platform via pathlib."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,7 +18,7 @@ def get_engine(cfg: AppConfig) -> Engine:
     engine = create_engine(url, connect_args={"check_same_thread": False})
 
     @event.listens_for(engine, "connect")
-    def set_sqlite_pragma(dbapi_conn, _):  # noqa: ANN001
+    def set_sqlite_pragma(dbapi_conn, _):
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("PRAGMA synchronous=NORMAL;")

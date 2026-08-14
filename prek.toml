@@ -1,0 +1,2 @@
+[hooks.ruff]
+args = ["--fix"]

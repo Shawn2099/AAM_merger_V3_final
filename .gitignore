@@ -6,14 +6,24 @@ config.yaml
 !.env.example
 
 # SPEC §13 + §6: runtime data (never commit)
-# use pathlib + config.yaml paths; these are Windows prod paths on host C:\AAM\*, Linux dev under ./data/ or /tmp/
-data/
-input/
-output/
-quarantine/
-stored/
-unclassified/
-logs/
+# Windows prod C:\AAM\* , Linux dev ./data/* via pathlib+config.yaml
+# Keep .gitkeep so empty folders exist on clone; ignore real data files
+data/input/*
+!data/input/.gitkeep
+data/output/*
+!data/output/.gitkeep
+data/quarantine/*
+!data/quarantine/.gitkeep
+data/stored/*
+!data/stored/.gitkeep
+data/unclassified/*
+!data/unclassified/.gitkeep
+data/logs/*
+!data/logs/.gitkeep
+data/samples/*
+!data/samples/.gitkeep
+data/Automation/
+data/backup/
 *.sqlite3
 *.sqlite-wal
 *.sqlite-shm
@@ -30,7 +40,6 @@ __pycache__/
 .venv/
 venv/
 .env*/
-.env
 .conda/
 *.egg-info/
 dist/
@@ -58,8 +67,10 @@ desktop.ini
 .gitnexus/
 graphify-out/
 
+# prek local
+.prek/
+
 # skills runtime (installed via `skills add`, not source)
-# keep skills-lock.json as source of truth at repo root, ignore installed copies
 .agents/
 .claude/skills/
 
