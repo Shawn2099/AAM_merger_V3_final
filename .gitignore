@@ -1,0 +1,69 @@
+# cross-platform gitignore for AAM_MERGER-FINAL (linux dev → win2016 prod)
+# SPEC §13: config.yaml is gitignored, config.example.yaml is committed
+config.yaml
+.env
+*.env
+!.env.example
+
+# SPEC §13 + §6: runtime data (never commit)
+# use pathlib + config.yaml paths; these are Windows prod paths on host C:\AAM\*, Linux dev under ./data/ or /tmp/
+data/
+input/
+output/
+quarantine/
+stored/
+unclassified/
+logs/
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-shm
+*.db-wal
+aam_merger.sqlite3
+
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+.env*/
+.env
+.conda/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# prefect / alembic noise
+.prefect/
+alembic/__pycache__/
+
+# OS cross-platform
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.vscode/
+.idea/
+
+# gitnexus local index (regenerated via `gitnexus analyze --skip-git`)
+.gitnexus/
+graphify-out/
+
+# skills runtime (installed via `skills add`, not source)
+# keep skills-lock.json as source of truth at repo root, ignore installed copies
+.agents/
+.claude/skills/
+
+# keep these at repo root (commit)
+!.mcp.json
+!AGENTS.md
+!skills-lock.json

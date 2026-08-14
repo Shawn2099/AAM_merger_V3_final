@@ -1,0 +1,12 @@
+# cross-platform: force LF, consistent handling win2016 ↔ linux
+* text=auto eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
+*.pdf binary
+*.sqlite3 binary
+*.db binary
