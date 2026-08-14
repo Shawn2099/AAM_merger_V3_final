@@ -136,20 +136,25 @@ git -C .worktrees/feat-next commit -m "chore(lint): zero ruff errors — per-fil
 # tests/test_extraction.py
 def test_is_manual_only_never_vlm():
     from app.services.extraction import is_manual_only
+
     assert is_manual_only("CUSTOMS") is True
     assert is_manual_only("SHIPPING") is True
     assert is_manual_only("COMMERCIAL_INVOICE") is True
     assert is_manual_only("PO") is False
     assert is_manual_only("COMBINED") is False
 
+
 def test_combine_single_call_retry(tmp_path, monkeypatch):
     from app.services.extraction import extract_document
+
     # monkeypatch instructor to fail twice then succeed, assert 3 attempts total and backoff [2,5,15] not actually sleeping (mock sleep)
     # doc.type COMBINED -> one VLM call should populate po_no + line_items, not 3 calls
     pass  # executor fills tmp DB + mock
 
+
 def test_retry_capped_at_3_and_failed_status(tmp_path, monkeypatch):
     from app.services.extraction import extract_document
+
     # mock always fail -> attempt_count ==3 and status failed
     pass
 ```
@@ -166,9 +171,14 @@ UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/test_extraction.py -v
 ```python
 # src/app/services/extraction.py
 from tenacity import retry, stop_after_attempt, wait_fixed
+
+
 # pseudo:
-def is_manual_only(t: str) -> bool: return t in ("CUSTOMS","SHIPPING","COMMERCIAL_INVOICE")
-def extract_document(doc_id:int, cfg):
+def is_manual_only(t: str) -> bool:
+    return t in ("CUSTOMS", "SHIPPING", "COMMERCIAL_INVOICE")
+
+
+def extract_document(doc_id: int, cfg):
     # if doc.doc_type in manual_only: return doc (no VLM)
     # else: for attempt in 1..3: try instructor call (single call for COMBINED) -> set valid, break; except: sleep backoff[attempt-1] if not last
     # on final fail: set failed, attempt_count=3
