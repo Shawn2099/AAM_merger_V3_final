@@ -35,3 +35,69 @@ def test_stored_path_never_deleted(tmp_path):
     p.write_bytes(b"data")
     d = ingest_file(p, cfg)
     assert Path(d.stored_path).exists()
+
+
+def test_delete_input_files_when_merged_and_valid(tmp_path):
+    from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus
+    from app.services.ingestion import delete_input_files
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    in_file = input_dir / "invoice.pdf"
+    in_file.write_bytes(b"pdf data")
+
+    stored_dir = tmp_path / "stored"
+    stored_dir.mkdir(parents=True, exist_ok=True)
+    stored_file = stored_dir / "stored_invoice.pdf"
+    stored_file.write_bytes(b"pdf data")
+
+    doc = Document(
+        id=1,
+        sha256_hash="h1",
+        original_filename="invoice.pdf",
+        stored_path=str(stored_file),
+        doc_type=DocType.SI,
+        extraction_status=ExtractionStatus.valid,
+    )
+    ps = POSet(
+        id=1,
+        po_no_normalized="PO1",
+        status=POSetStatus.merged,
+        merged_output_path=str(tmp_path / "out.pdf"),
+        documents=[doc],
+    )
+
+    deleted = delete_input_files(ps, input_dir)
+    assert "invoice.pdf" in deleted
+    assert not in_file.exists()
+    assert stored_file.exists()  # stored_path permanently kept (FR-4.8)
+
+
+def test_delete_input_files_skipped_if_not_merged(tmp_path):
+    from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus
+    from app.services.ingestion import delete_input_files
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    in_file = input_dir / "invoice.pdf"
+    in_file.write_bytes(b"pdf data")
+
+    doc = Document(
+        id=1,
+        sha256_hash="h1",
+        original_filename="invoice.pdf",
+        stored_path="stored/path.pdf",
+        doc_type=DocType.SI,
+        extraction_status=ExtractionStatus.valid,
+    )
+    ps = POSet(
+        id=1,
+        po_no_normalized="PO1",
+        status=POSetStatus.mismatched,
+        documents=[doc],
+    )
+
+    deleted = delete_input_files(ps, input_dir)
+    assert len(deleted) == 0
+    assert in_file.exists()
+
