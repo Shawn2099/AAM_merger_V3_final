@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}AAM Merger — Unclassified Documents (FR-5.3){% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>Unclassified Documents Holding Area</h2>
+  <p class="muted">Documents that could not be automatically identified are placed here pending manual classification (FR-5.3). They are not grouped into any PO Set and not auto-quarantined.</p>
+
+  {% if documents and documents|length > 0 %}
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Filename</th>
+        <th>SHA-256</th>
+        <th>Received</th>
+        <th>Assign Type</th>
+        <th>PO No</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for doc in documents %}
+      <tr id="doc-row-{{ doc.id }}">
+        <td>{{ doc.id }}</td>
+        <td><strong>{{ doc.original_filename }}</strong></td>
+        <td><code>{{ doc.sha256_hash[:10] }}...</code></td>
+        <td>{{ doc.created_at.strftime('%Y-%m-%d %H:%M') if doc.created_at else '—' }}</td>
+        <form method="post" action="/unclassified/{{ doc.id }}/reclassify" hx-post="/unclassified/{{ doc.id }}/reclassify" hx-target="#doc-row-{{ doc.id }}" hx-swap="outerHTML">
+          <td>
+            <select name="doc_type" required>
+              <option value="">-- Select Type --</option>
+              <option value="PO">Purchase Order (PO)</option>
+              <option value="DN">Delivery Note (DN)</option>
+              <option value="SI">Sales Invoice (SI)</option>
+              <option value="COMBINED">Combined (PO+DN+SI)</option>
+              <option value="CUSTOMS">Customs Declaration</option>
+              <option value="SHIPPING">Shipping Document</option>
+              <option value="COMMERCIAL_INVOICE">Commercial Invoice</option>
+            </select>
+          </td>
+          <td>
+            <input type="text" name="po_no" placeholder="Optional PO #" style="width: 130px;">
+          </td>
+          <td>
+            <button type="submit" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.85rem;">Reclassify</button>
+          </td>
+        </form>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="padding: 24px 0; text-align: center; color: var(--muted);">No unclassified documents. All ingested files have been classified.</p>
+  {% endif %}
+</div>
+{% endblock %}

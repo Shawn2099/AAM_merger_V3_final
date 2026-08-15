@@ -404,3 +404,56 @@ def test_dashboard_filter_htmx_returns_partial(tmp_cfg, client):
         pytest.fail(
             "HTMX dashboard filter should return partial _dashboard_table, not full dashboard.html"
         )
+
+
+def test_unclassified_view_and_reclassify(tmp_cfg, client):
+    from sqlalchemy.orm import Session
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus, POSet
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="unk_hash_1",
+            original_filename="unknown_vendor.pdf",
+            stored_path="data/stored/unknown_vendor.pdf",
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.pending,
+        )
+        s.add(doc)
+        s.commit()
+        s.refresh(doc)
+        doc_id = doc.id
+
+    # GET /unclassified
+    r = client.get("/unclassified")
+    assert r.status_code == 200
+    assert "unknown_vendor.pdf" in r.text
+    assert "Unclassified Documents" in r.text
+
+    # POST /unclassified/{doc_id}/reclassify
+    r_post = client.post(
+        f"/unclassified/{doc_id}/reclassify",
+        data={"doc_type": "PO", "po_no": "MANUALPO999"},
+        headers={"HX-Request": "true"},
+    )
+    assert r_post.status_code == 200
+    assert "Reclassified" in r_post.text or "PO" in r_post.text
+
+    with Session(eng) as s:
+        d = s.get(Document, doc_id)
+        assert d.doc_type == DocType.PO
+        assert d.po_no_normalized == "MANUALPO999"
+        assert d.po_set_id is not None
+        ps = s.get(POSet, d.po_set_id)
+        assert ps.po_no_normalized == "MANUALPO999"
+
+
+def test_manual_merger_back_link_points_to_dashboard(client):
+    r = client.get("/manual/merger")
+    assert r.status_code == 200
+    assert 'href="/dashboard"' in r.text
+

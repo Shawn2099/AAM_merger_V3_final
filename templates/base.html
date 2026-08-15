@@ -49,6 +49,7 @@
 <nav>
   <span class="brand">AAM Merger V3</span>
   <a href="/dashboard" class="{% if request.url.path.startswith('/dashboard') or request.url.path == '/' %}active{% endif %}">Dashboard</a>
+  <a href="/unclassified" class="{% if request.url.path.startswith('/unclassified') %}active{% endif %}">Unclassified</a>
   <a href="/quarantine" class="{% if request.url.path.startswith('/quarantine') %}active{% endif %}">Quarantine</a>
   <a href="/audit" class="{% if request.url.path.startswith('/audit') %}active{% endif %}">Audit Log</a>
   <a href="/manual/merger">Manual Merger</a>

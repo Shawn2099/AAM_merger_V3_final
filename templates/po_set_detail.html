@@ -106,7 +106,19 @@
 </div>
 
 <div class="card">
-  <h3>Line items — per-line flags (priority [1]ident [2]qty [3]price per FR-11.2)</h3>
+  <h3>Line Items & Reconciliation Flags (Priority [1] Identification → [2] Quantity → [3] Price per FR-11.2)</h3>
+
+  {% if flags %}
+  <div style="margin-bottom: 16px;">
+    {% for f in flags %}
+    <div style="display:flex; align-items:center; gap:8px; padding: 8px 12px; margin-bottom: 8px; background: #fff; border: 1px solid var(--border); border-radius: 6px;">
+      <span class="badge {{ f.badge }}">{{ f.type }}</span>
+      <span style="font-size: 0.9rem;">{{ f.message }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   {% if line_items %}
   <table>
     <thead><tr><th>Doc</th><th>Line No</th><th>Description</th><th>Qty (×1000)</th><th>Price (×1000)</th></tr></thead>

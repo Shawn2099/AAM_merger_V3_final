@@ -173,11 +173,10 @@ def po_set_detail_view(po_set_id: int, request: Request):
             s.refresh(ps)
         is_locked = _is_locked(ps, cfg)
         docs = s.query(Document).filter_by(po_set_id=po_set_id).all()
-        # line items via join
         doc_ids = [d.id for d in docs]
+        flags = []
         if doc_ids:
             items = s.query(LineItem).filter(LineItem.document_id.in_(doc_ids)).all()
-            # annotate with doc_type for display
             doc_type_map = {
                 d.id: (d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type))
                 for d in docs
@@ -193,8 +192,92 @@ def po_set_detail_view(po_set_id: int, request: Request):
                         "doc_type": doc_type_map.get(li.document_id, ""),
                     }
                 )
+
+            # compute reconciliation flags in priority order (FR-11.2)
+            from app.services.matching import _norm, find_unmatched, match_line
+            from app.services.reconciliation import check_price, reconcile
+
+            po_lines = [li for li in enriched if li["doc_type"] == "PO"]
+            dn_lines = [li for li in enriched if li["doc_type"] == "DN"]
+            si_lines = [li for li in enriched if li["doc_type"] == "SI"]
+            thr = getattr(cfg.matching, "fuzzy_description_threshold", 85)
+
+            # (1) Identification flags
+            unmatched = find_unmatched(po_lines, dn_lines, si_lines, thr=thr)
+            for u in unmatched:
+                flags.append(
+                    {
+                        "priority": 1,
+                        "badge": "badge-quarantined",
+                        "type": "Identification Mismatch",
+                        "message": f"Unmatched line item #{u.get('line_item_no') or '—'}: {u.get('description')}",
+                    }
+                )
+            for p in po_lines:
+                m_res = match_line(p, dn_lines, si_lines, thr=thr)
+                if m_res.get("quarantine"):
+                    flags.append(
+                        {
+                            "priority": 1,
+                            "badge": "badge-quarantined",
+                            "type": "Identification Conflict",
+                            "message": f"Conflicting line item #{p.get('line_item_no') or '—'}: {p.get('description')}",
+                        }
+                    )
+
+            # (2) Quantity flags & (3) Price flags
+            for p in po_lines:
+                p_no = p.get("line_item_no")
+                p_desc = p.get("description") or ""
+                if p_no:
+                    matching_dn = [d for d in dn_lines if d.get("line_item_no") == p_no]
+                    matching_si = [s for s in si_lines if s.get("line_item_no") == p_no]
+                else:
+                    from rapidfuzz import fuzz
+
+                    matching_dn = [
+                        d
+                        for d in dn_lines
+                        if not d.get("line_item_no")
+                        and fuzz.token_sort_ratio(_norm(p_desc), _norm(d.get("description") or ""))
+                        >= thr
+                    ]
+                    matching_si = [
+                        s
+                        for s in si_lines
+                        if not s.get("line_item_no")
+                        and fuzz.token_sort_ratio(_norm(p_desc), _norm(s.get("description") or ""))
+                        >= thr
+                    ]
+
+                agg_dn = sum(d["quantity"] for d in matching_dn)
+                agg_si = sum(s["quantity"] for s in matching_si)
+                rec = reconcile(p["quantity"], agg_dn, agg_si)
+                if not rec["ok"]:
+                    flags.append(
+                        {
+                            "priority": 2,
+                            "badge": "badge-mismatched",
+                            "type": "Quantity Mismatch",
+                            "message": f"Line #{p_no or '—'}: PO ({p['quantity']/1000:g}) != Agg DN ({agg_dn/1000:g}) or Agg SI ({agg_si/1000:g})",
+                        }
+                    )
+                if matching_si:
+                    p_check = check_price(p["unit_price"], matching_si[0]["unit_price"])
+                    if p_check["flag"]:
+                        flags.append(
+                            {
+                                "priority": 3,
+                                "badge": "badge-pending",
+                                "type": "Price Flag",
+                                "message": f"Line #{p_no or '—'}: PO unit price ({p['unit_price']/1000:g}) != SI unit price ({matching_si[0]['unit_price']/1000:g})",
+                            }
+                        )
+
+            flags.sort(key=lambda f: f["priority"])
         else:
             enriched = []
+
         return _templates.TemplateResponse(
             request,
             "po_set_detail.html",
@@ -203,9 +286,11 @@ def po_set_detail_view(po_set_id: int, request: Request):
                 "po_set": ps,
                 "documents": docs,
                 "line_items": enriched,
+                "flags": flags,
                 "is_locked": is_locked,
             },
         )
+
 
 
 # ---------------------------------------------------------------------------
@@ -380,6 +465,47 @@ def unclassified_view(request: Request):
         docs = s.query(Document).filter(Document.doc_type == DocType.UNKNOWN).all()
         return _templates.TemplateResponse(
             request,
-            "unclassified.html" if Path("templates/unclassified.html").exists() else "base.html",
+            "unclassified.html",
             {"request": request, "documents": docs},
         )
+
+
+@router.post("/unclassified/{doc_id}/reclassify", response_class=HTMLResponse)
+def reclassify_document(
+    doc_id: int,
+    request: Request,
+    doc_type: str = Form(...),
+    po_no: str | None = Form(None),
+):
+    cfg = load_config()
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    from app.services.grouping import get_or_create_po_set
+
+    try:
+        new_doc_type = DocType(doc_type)
+    except Exception:
+        raise HTTPException(status_code=422, detail=f"Invalid doc_type: {doc_type}")
+
+    with Session(eng) as s:
+        doc = s.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+        doc.doc_type = new_doc_type
+        if po_no and po_no.strip():
+            import re
+
+            raw = po_no.strip()
+            norm = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
+            doc.po_no_raw = raw
+            doc.po_no_normalized = norm
+            ps = get_or_create_po_set(raw, cfg)
+            doc.po_set_id = ps.id
+        s.commit()
+
+        if request.headers.get("HX-Request") == "true":
+            return HTMLResponse(
+                content=f'<tr id="doc-row-{doc_id}"><td colspan="7" style="color: #166534; background: #dcfce7; padding: 8px;">Reclassified document #{doc_id} as {new_doc_type.value}</td></tr>'
+            )
+        return RedirectResponse(url="/unclassified", status_code=302)
+
