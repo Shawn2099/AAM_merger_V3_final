@@ -1,4 +1,4 @@
-"""Reconciliation — exact-match math, quarantine on <=0, independent DN/SI aggregates (FR-9.1-11.2)."""
+"""Reconciliation — exact-match math, quarantine on <=0, independent aggregates (FR-9.1-11.2)."""
 
 from __future__ import annotations
 

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import base64
 import os
-import time
 from pathlib import Path
 from typing import Literal
 
@@ -268,4 +267,3 @@ def extract_document(doc_id: int, cfg) -> Document:
                 type(e).__name__,
             )
             raise e
-

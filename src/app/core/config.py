@@ -105,7 +105,6 @@ class AppConfig(BaseSettings):
         return v
 
 
-
 def load_config(path: str | Path | None = None) -> AppConfig:
     """Load YAML config + .env. SPEC §13.1 — validated at startup, fail fast."""
     cfg_path = Path(path or os.getenv("AAM_CONFIG_PATH", "config.yaml"))

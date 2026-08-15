@@ -42,7 +42,9 @@ def test_fr_conc_2_409_on_locked_po_set(tmp_path) -> None:
     Base.metadata.create_all(eng)
 
     with Session(eng) as s:
-        ps = POSet(po_no_normalized="PO_LOCKED", status=POSetStatus.pending, locked_by_action="force_merge")
+        ps = POSet(
+            po_no_normalized="PO_LOCKED", status=POSetStatus.pending, locked_by_action="force_merge"
+        )
         s.add(ps)
         s.commit()
         s.refresh(ps)
@@ -59,4 +61,3 @@ def test_fr_conc_2_409_on_locked_po_set(tmp_path) -> None:
         assert "already in progress" in response.json()["detail"]
     finally:
         po_routes.load_config = original_load
-

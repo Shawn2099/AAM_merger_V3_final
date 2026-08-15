@@ -18,8 +18,9 @@ def test_is_manual_only_never_vlm():
 
 def test_extract_document_single_failure_raises(tmp_path, monkeypatch):
     """SPEC §5.2 / FR-6.5: extract_document performs single attempt, records attempt count and failed status on error."""
-    import pytest
     from pathlib import Path
+
+    import pytest
     from sqlalchemy.orm import Session
 
     from app.core.config import load_config
@@ -64,7 +65,6 @@ def test_extract_document_single_failure_raises(tmp_path, monkeypatch):
         assert d.extraction_status == ExtractionStatus.failed
 
 
-
 def test_combine_single_vlm_call(tmp_path, monkeypatch):
     """FR-6.3: COMBINED uses single VLM call, not 3."""
     from pathlib import Path
@@ -106,12 +106,12 @@ def test_combine_single_vlm_call(tmp_path, monkeypatch):
         return {"po_no_raw": "PO123", "line_items": []}
 
     monkeypatch.setattr("app.services.extraction._call_vlm", fake_vlm)
-    monkeypatch.setattr("app.services.extraction.time.sleep", lambda x: None)
 
     doc = extract_document(doc_id, cfg)
     assert len(calls) == 1
     assert doc.extraction_status == ExtractionStatus.valid
     assert doc.extraction_attempt_count == 1
+
 
 
 def test_manual_only_skips_vlm(tmp_path, monkeypatch):

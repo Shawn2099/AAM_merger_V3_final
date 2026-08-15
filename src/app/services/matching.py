@@ -1,8 +1,9 @@
-"""Line-item matching — primary line_item_no, fuzzy fallback (rapidfuzz), conflict & reverse checks (FR-8.1-8.5)."""
+"""Line-item matching — primary line_item_no, fuzzy fallback, reverse checks (FR-8.1-8.5)."""
 
 from __future__ import annotations
 
 import re
+
 from rapidfuzz import fuzz
 
 
@@ -24,7 +25,7 @@ def match_line(po: dict, dn_lines: list[dict], si_lines: list[dict], thr: int = 
       - Matches SI lines with same line_item_no.
       - Checks conflicting descriptions on duplicate line_item_no (FR-8.4).
     - If PO has no line_item_no:
-      - Fuzzy fallback via token_sort_ratio >= thr against DN/SI lines without line_item_no (FR-8.2).
+      - Fuzzy fallback via token_sort_ratio >= thr against DN/SI lines (FR-8.2).
     """
     po_line_no = po.get("line_item_no")
     po_desc = _norm(po.get("description") or "")
@@ -114,10 +115,12 @@ def find_unmatched(
                     break
         else:
             for p in po_lines:
-                if not p.get("line_item_no"):
-                    if fuzz.token_sort_ratio(d_desc, _norm(p.get("description") or "")) >= thr:
-                        matched = True
-                        break
+                if (
+                    not p.get("line_item_no")
+                    and fuzz.token_sort_ratio(d_desc, _norm(p.get("description") or "")) >= thr
+                ):
+                    matched = True
+                    break
         if not matched:
             unmatched.append(d)
 
@@ -133,10 +136,12 @@ def find_unmatched(
                     break
         else:
             for p in po_lines:
-                if not p.get("line_item_no"):
-                    if fuzz.token_sort_ratio(s_desc, _norm(p.get("description") or "")) >= thr:
-                        matched = True
-                        break
+                if (
+                    not p.get("line_item_no")
+                    and fuzz.token_sort_ratio(s_desc, _norm(p.get("description") or "")) >= thr
+                ):
+                    matched = True
+                    break
         if not matched:
             unmatched.append(s)
 

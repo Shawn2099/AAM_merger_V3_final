@@ -158,9 +158,7 @@ def sync_flow(cfg_path: str | None = None) -> dict:
     from app.models import ExtractionStatus
 
     with Session(eng) as s:
-        pending = (
-            s.query(_Doc).filter(_Doc.extraction_status == ExtractionStatus.pending).all()
-        )
+        pending = s.query(_Doc).filter(_Doc.extraction_status == ExtractionStatus.pending).all()
         for doc in pending:
             try:
                 classify_task(doc.id, cfg_path=cfg_path)

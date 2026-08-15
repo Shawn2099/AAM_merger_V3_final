@@ -100,4 +100,3 @@ def test_delete_input_files_skipped_if_not_merged(tmp_path):
     deleted = delete_input_files(ps, input_dir)
     assert len(deleted) == 0
     assert in_file.exists()
-

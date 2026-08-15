@@ -205,23 +205,25 @@ def po_set_detail_view(po_set_id: int, request: Request):
             # (1) Identification flags
             unmatched = find_unmatched(po_lines, dn_lines, si_lines, thr=thr)
             for u in unmatched:
+                u_item = u.get("line_item_no") or "—"
                 flags.append(
                     {
                         "priority": 1,
                         "badge": "badge-quarantined",
                         "type": "Identification Mismatch",
-                        "message": f"Unmatched line item #{u.get('line_item_no') or '—'}: {u.get('description')}",
+                        "message": f"Unmatched line item #{u_item}: {u.get('description')}",
                     }
                 )
             for p in po_lines:
                 m_res = match_line(p, dn_lines, si_lines, thr=thr)
                 if m_res.get("quarantine"):
+                    p_item = p.get("line_item_no") or "—"
                     flags.append(
                         {
                             "priority": 1,
                             "badge": "badge-quarantined",
                             "type": "Identification Conflict",
-                            "message": f"Conflicting line item #{p.get('line_item_no') or '—'}: {p.get('description')}",
+                            "message": f"Conflicting line item #{p_item}: {p.get('description')}",
                         }
                     )
 
@@ -254,27 +256,39 @@ def po_set_detail_view(po_set_id: int, request: Request):
                 agg_si = sum(s["quantity"] for s in matching_si)
                 rec = reconcile(p["quantity"], agg_dn, agg_si)
                 if not rec["ok"]:
+                    po_q = p["quantity"] / 1000
+                    dn_q = agg_dn / 1000
+                    si_q = agg_si / 1000
                     flags.append(
                         {
                             "priority": 2,
                             "badge": "badge-mismatched",
                             "type": "Quantity Mismatch",
-                            "message": f"Line #{p_no or '—'}: PO ({p['quantity']/1000:g}) != Agg DN ({agg_dn/1000:g}) or Agg SI ({agg_si/1000:g})",
+                            "message": (
+                                f"Line #{p_no or '—'}: PO ({po_q:g}) != "
+                                f"DN ({dn_q:g}) or SI ({si_q:g})"
+                            ),
                         }
                     )
                 if matching_si:
                     p_check = check_price(p["unit_price"], matching_si[0]["unit_price"])
                     if p_check["flag"]:
+                        po_pr = p["unit_price"] / 1000
+                        si_pr = matching_si[0]["unit_price"] / 1000
                         flags.append(
                             {
                                 "priority": 3,
                                 "badge": "badge-pending",
                                 "type": "Price Flag",
-                                "message": f"Line #{p_no or '—'}: PO unit price ({p['unit_price']/1000:g}) != SI unit price ({matching_si[0]['unit_price']/1000:g})",
+                                "message": (
+                                    f"Line #{p_no or '—'}: PO price ({po_pr:g}) != "
+                                    f"SI price ({si_pr:g})"
+                                ),
                             }
                         )
 
             flags.sort(key=lambda f: f["priority"])
+
         else:
             enriched = []
 
@@ -290,7 +304,6 @@ def po_set_detail_view(po_set_id: int, request: Request):
                 "is_locked": is_locked,
             },
         )
-
 
 
 # ---------------------------------------------------------------------------
@@ -484,8 +497,8 @@ def reclassify_document(
 
     try:
         new_doc_type = DocType(doc_type)
-    except Exception:
-        raise HTTPException(status_code=422, detail=f"Invalid doc_type: {doc_type}")
+    except Exception as err:
+        raise HTTPException(status_code=422, detail=f"Invalid doc_type: {doc_type}") from err
 
     with Session(eng) as s:
         doc = s.get(Document, doc_id)
@@ -504,8 +517,11 @@ def reclassify_document(
         s.commit()
 
         if request.headers.get("HX-Request") == "true":
-            return HTMLResponse(
-                content=f'<tr id="doc-row-{doc_id}"><td colspan="7" style="color: #166534; background: #dcfce7; padding: 8px;">Reclassified document #{doc_id} as {new_doc_type.value}</td></tr>'
+            msg = f"Reclassified document #{doc_id} as {new_doc_type.value}"
+            html = (
+                f'<tr id="doc-row-{doc_id}">'
+                f'<td colspan="7" style="color: #166534; background: #dcfce7; padding: 8px;">'
+                f"{msg}</td></tr>"
             )
+            return HTMLResponse(content=html)
         return RedirectResponse(url="/unclassified", status_code=302)
-

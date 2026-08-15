@@ -408,6 +408,7 @@ def test_dashboard_filter_htmx_returns_partial(tmp_cfg, client):
 
 def test_unclassified_view_and_reclassify(tmp_cfg, client):
     from sqlalchemy.orm import Session
+
     from app.core.database import get_engine
     from app.models import DocType, Document, ExtractionStatus, POSet
     from app.models.base import Base
@@ -456,4 +457,3 @@ def test_manual_merger_back_link_points_to_dashboard(client):
     r = client.get("/manual/merger")
     assert r.status_code == 200
     assert 'href="/dashboard"' in r.text
-
