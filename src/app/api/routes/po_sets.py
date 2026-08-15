@@ -289,7 +289,34 @@ def redo_extract(po_set_id: int):
         ps.locked_by_action = "redo_extract"
         s.commit()
         try:
-            return {"status": "redo_extract queued", "po_set_id": po_set_id}
+            from app.services.extraction import extract_document, is_manual_only
+            from app.services.reconciliation import reconcile_po_set
+
+            docs = list(ps.documents or [])
+            extraction_results = []
+            for doc in docs:
+                dtype = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
+                if not is_manual_only(dtype) and (doc.extraction_attempt_count or 0) < 3:
+                    try:
+                        extracted = extract_document(doc.id, cfg)
+                        extraction_results.append(
+                            {
+                                "doc_id": doc.id,
+                                "status": extracted.extraction_status.value
+                                if hasattr(extracted.extraction_status, "value")
+                                else str(extracted.extraction_status),
+                            }
+                        )
+                    except Exception as e:
+                        extraction_results.append({"doc_id": doc.id, "error": str(e)})
+
+            rec_res = reconcile_po_set(po_set_id, cfg)
+            return {
+                "status": "redo_extract_complete",
+                "po_set_id": po_set_id,
+                "extractions": extraction_results,
+                "reconciliation": rec_res,
+            }
         finally:
             ps.locked_by_action = None
             s.commit()
@@ -317,10 +344,18 @@ def redo_match(po_set_id: int):
         ps.locked_by_action = "redo_match"
         s.commit()
         try:
-            return {"status": "redo_match queued", "po_set_id": po_set_id}
+            from app.services.reconciliation import reconcile_po_set
+
+            rec_res = reconcile_po_set(po_set_id, cfg)
+            return {
+                "status": "redo_match_complete",
+                "po_set_id": po_set_id,
+                "reconciliation": rec_res,
+            }
         finally:
             ps.locked_by_action = None
             s.commit()
+
 
 
 @router.delete("/{po_set_id}/quarantine")
