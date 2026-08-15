@@ -85,8 +85,25 @@ class AppConfig(BaseSettings):
     @field_validator("paths", mode="after")
     @classmethod
     def validate_paths(cls, v: PathsConfig) -> PathsConfig:
-        # cross-platform: use Path, not hardcoded separators; fail fast if parent missing is allowed, but warn
+        import logging
+
+        logger = logging.getLogger(__name__)
+        for field_name in [
+            "input_folder",
+            "output_folder",
+            "quarantine_folder",
+            "stored_documents_folder",
+            "unclassified_folder",
+            "log_folder",
+        ]:
+            p = getattr(v, field_name, None)
+            if isinstance(p, Path) and not p.exists():
+                p.mkdir(parents=True, exist_ok=True)
+                logger.info("Initialized required path: %s", p)
+        if v.database_path and isinstance(v.database_path, Path):
+            v.database_path.parent.mkdir(parents=True, exist_ok=True)
         return v
+
 
 
 def load_config(path: str | Path | None = None) -> AppConfig:

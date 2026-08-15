@@ -16,10 +16,10 @@ def test_is_manual_only_never_vlm():
     assert is_manual_only("UNKNOWN") is False
 
 
-def test_retry_capped_at_3_and_failed_status(tmp_path, monkeypatch):
-    """FR-6.7: extraction retry 3x [2,5,15], capped at 3, then failed."""
+def test_extract_document_single_failure_raises(tmp_path, monkeypatch):
+    """SPEC §5.2 / FR-6.5: extract_document performs single attempt, records attempt count and failed status on error."""
+    import pytest
     from pathlib import Path
-
     from sqlalchemy.orm import Session
 
     from app.core.config import load_config
@@ -33,12 +33,9 @@ def test_retry_capped_at_3_and_failed_status(tmp_path, monkeypatch):
     cfg.paths.database_path = str(db_path)
     cfg.paths.stored_documents_folder = str(tmp_path / "stored")
     Path(cfg.paths.stored_documents_folder).mkdir(parents=True, exist_ok=True)
-    cfg.extraction.max_retries = 3
-    cfg.extraction.retry_backoff_seconds = [2, 5, 15]
 
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
-    # create a PO doc pending
     with Session(eng) as s:
         doc = Document(
             sha256_hash="abc123",
@@ -52,18 +49,20 @@ def test_retry_capped_at_3_and_failed_status(tmp_path, monkeypatch):
         s.refresh(doc)
         doc_id = doc.id
 
-    # mock VLM to always fail
+    # mock VLM to fail
     monkeypatch.setattr(
         "app.services.extraction._call_vlm",
         lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("vlm fail")),
     )
 
-    # mock sleep to avoid real wait
-    monkeypatch.setattr("app.services.extraction.time.sleep", lambda x: None)
+    with pytest.raises(RuntimeError, match="vlm fail"):
+        extract_document(doc_id, cfg)
 
-    doc = extract_document(doc_id, cfg)
-    assert doc.extraction_attempt_count == 3
-    assert doc.extraction_status == ExtractionStatus.failed
+    with Session(eng) as s:
+        d = s.get(Document, doc_id)
+        assert d.extraction_attempt_count == 1
+        assert d.extraction_status == ExtractionStatus.failed
+
 
 
 def test_combine_single_vlm_call(tmp_path, monkeypatch):
