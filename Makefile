@@ -17,6 +17,9 @@ prefect-pool:
 	prefect work-pool create aam-merger-process-pool --type process || true
 	prefect work-pool ls
 
+deploy-prefect:
+	UV_CACHE_DIR=/tmp/uv-cache uv run python scripts/deploy_prefect.py
+
 backup:
 	mkdir -p ./data/backup
 	cp ./data/aam_merger.db ./data/backup/aam_merger_$$(date +%Y%m%d_%H%M%S).db 2>/dev/null || echo "no db yet"

@@ -5,5 +5,6 @@
 3. `pip install` via `uv sync` (or `pip install -r requirements`) with Python 3.11. Use `uv` to install 3.11 on WS2016 if needed.
 4. `alembic upgrade head` (creates SQLite WAL at `C:\AAM\db\aam_merger.sqlite3` via config).
 5. Prefect: `prefect work-pool create aam-merger-process-pool --type process` (once, dev + prod each create their own), `prefect worker start --pool aam-merger-process-pool`.
-6. NSSM: `nssm install AAMMerger "C:\...\ .venv\Scripts\python.exe" " -m uvicorn app.main:app --host 0.0.0.0 --port 8000"` + second service for Prefect worker, auto-restart.
-7. Backup: `backup.folder` in config.yaml → simple folder copy, `interval_hours` customizable (SPEC NFR-6). No network-share DB — WAL requires local shared memory on one host.
+6. Midnight Schedule: `uv run python scripts/deploy_prefect.py` (registers `aam-midnight-sync` with `0 0 * * *` cron).
+7. NSSM: `nssm install AAMMerger "C:\...\ .venv\Scripts\python.exe" " -m uvicorn app.main:app --host 0.0.0.0 --port 8000"` + second service for Prefect worker, auto-restart.
+8. Backup: `backup.folder` in config.yaml → simple folder copy, `interval_hours` customizable (SPEC NFR-6). No network-share DB — WAL requires local shared memory on one host.

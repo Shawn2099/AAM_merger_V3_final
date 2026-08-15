@@ -594,6 +594,22 @@ table.data-table tbody tr:hover td {
   font-weight: 600;
 }
 
+.muted, .text-muted {
+  color: var(--text-muted);
+}
+
+.text-danger {
+  color: var(--clr-quarantined-text);
+}
+
+.text-success {
+  color: var(--clr-merged-text);
+}
+
+.text-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 .breakdown-tooltip {
   position: relative;
   display: inline-block;

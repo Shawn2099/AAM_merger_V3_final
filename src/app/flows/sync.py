@@ -15,49 +15,9 @@ from app.models.base import Base
 logger = logging.getLogger(__name__)
 
 
-@task(name="classify_task", retries=3, retry_delay_seconds=[2, 5, 15])
-def classify_task(doc_id: int, cfg_path: str | None = None) -> str:
-    """Classify a single document — one Prefect task per doc (FR-5.1-5.3).
-
-    Loads Document by id, runs keyword heuristic via app.services.classification,
-    updates doc.doc_type if UNKNOWN, returns doc_type string.
-    """
-    cfg = load_config(cfg_path) if cfg_path else load_config()
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
-    from app.models import Document
-    from app.services.classification import classify
-
-    with Session(eng) as s:
-        doc = s.get(Document, doc_id)
-        if doc is None:
-            return "UNKNOWN"
-        raw = doc.original_filename or ""
-        try:
-            result = classify({"raw": raw})
-        except Exception:
-            logger.warning("Classification failed for doc %s", doc_id, exc_info=True)
-            result = "UNKNOWN"
-        if str(doc.doc_type) == "UNKNOWN" or doc.doc_type is None:
-            from app.models import DocType
-
-            try:
-                enum_val = (
-                    DocType(result)
-                    if result in DocType.__members__.values()
-                    or result in [e.value for e in DocType]
-                    else DocType.UNKNOWN
-                )  # type: ignore[arg-type]
-            except Exception:
-                enum_val = DocType.UNKNOWN
-            doc.doc_type = enum_val
-            s.commit()
-        return result
-
-
 @task(name="extract_task", retries=3, retry_delay_seconds=[2, 5, 15])
 def extract_task(doc_id: int, cfg_path: str | None = None) -> str:
-    """Extract a single document — one Prefect task per doc (FR-6.1-6.8).
+    """Extract and classify a single document via native VLM — one Prefect task per doc (FR-6.1-6.8).
 
     Wraps app.services.extraction.extract_document with Prefect retry envelope.
     """
@@ -80,11 +40,10 @@ def sync_flow(cfg_path: str | None = None) -> dict:
 
     Pipeline sequence:
     1. Ingestion & dedup (SHA-256)
-    2. Classification per doc (task with retry)
-    3. Extraction per doc (task with retry)
-    4. Grouping by normalized PO number into POSet
-    5. Reconciliation orchestrator (matching, exact qty aggregate, customs check, auto-merge)
-    6. Input folder clearing for merged sets (FR-4.8)
+    2. VLM Extraction & Classification per doc (task with retry)
+    3. Grouping by normalized PO number into POSet
+    4. Reconciliation orchestrator (matching, exact qty aggregate, customs check, auto-merge)
+    5. Input folder clearing for merged sets (FR-4.8)
     """
     cfg = load_config(cfg_path) if cfg_path else load_config()
     eng = get_engine(cfg)
@@ -100,7 +59,6 @@ def sync_flow(cfg_path: str | None = None) -> dict:
     input_folder.mkdir(parents=True, exist_ok=True)
 
     processed = 0
-    classified = 0
     errors = 0
     touched_po_set_ids: set[int] = set()
 
@@ -120,15 +78,7 @@ def sync_flow(cfg_path: str | None = None) -> dict:
             doc = ingest_file(f, cfg)
             processed += 1
 
-            # Classify
-            try:
-                classify_task(doc.id, cfg_path=cfg_path)
-                classified += 1
-            except Exception:
-                logger.warning("Classify task failed for doc %s", doc.id, exc_info=True)
-                errors += 1
-
-            # Extract
+            # Extract & Classify via VLM
             try:
                 extract_task(doc.id, cfg_path=cfg_path)
             except Exception:
@@ -160,12 +110,6 @@ def sync_flow(cfg_path: str | None = None) -> dict:
     with Session(eng) as s:
         pending = s.query(_Doc).filter(_Doc.extraction_status == ExtractionStatus.pending).all()
         for doc in pending:
-            try:
-                classify_task(doc.id, cfg_path=cfg_path)
-                classified += 1
-            except Exception:
-                logger.warning("Classify task failed for pending doc %s", doc.id, exc_info=True)
-                errors += 1
             try:
                 extract_task(doc.id, cfg_path=cfg_path)
             except Exception:
@@ -200,7 +144,7 @@ def sync_flow(cfg_path: str | None = None) -> dict:
 
     return {
         "processed": processed,
-        "classified": classified,
+        "extracted": processed - errors,
         "errors": errors,
         "touched_po_sets": len(touched_po_set_ids),
         "reconciled_count": reconciled_count,

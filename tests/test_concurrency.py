@@ -122,30 +122,17 @@ def test_po_lock_timeout_releases(tmp_db, client):
 
 
 def test_sync_tasks_have_retry_backoff():
-    """P2: Prefect tasks must have retries=3 and retry_delay [2,5,15] (FR-6.7)."""
-    from app.flows.sync import classify_task, extract_task
+    """P2: Prefect extract_task must have retries=3 and retry_delay [2,5,15] (FR-6.5)."""
+    from app.flows.sync import extract_task
 
-    # classify_task should be a Prefect task with retry config
-    assert hasattr(classify_task, "retries") or hasattr(classify_task, "retry_delay_seconds")
-    # Prefect 3.x stores retry config on task object; check both aliases
-    retries = getattr(classify_task, "retries", None)
-    delay = getattr(classify_task, "retry_delay_seconds", None)
-    # fallback for internal attribute names
+    retries = getattr(extract_task, "retries", None)
+    delay = getattr(extract_task, "retry_delay_seconds", None)
     if retries is None:
-        retries = getattr(classify_task, "_retries", None)
+        retries = getattr(extract_task, "_retries", None)
     if delay is None:
-        delay = getattr(classify_task, "_retry_delay_seconds", None)
-    assert retries == 3, f"classify_task retries={retries}"
-    assert delay == [2, 5, 15], f"classify_task delay={delay}"
-
-    retries2 = getattr(extract_task, "retries", None)
-    delay2 = getattr(extract_task, "retry_delay_seconds", None)
-    if retries2 is None:
-        retries2 = getattr(extract_task, "_retries", None)
-    if delay2 is None:
-        delay2 = getattr(extract_task, "_retry_delay_seconds", None)
-    assert retries2 == 3
-    assert delay2 == [2, 5, 15]
+        delay = getattr(extract_task, "_retry_delay_seconds", None)
+    assert retries == 3, f"extract_task retries={retries}"
+    assert delay == [2, 5, 15], f"extract_task delay={delay}"
 
 
 def test_sync_flow_is_flow():

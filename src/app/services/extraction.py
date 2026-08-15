@@ -190,8 +190,16 @@ def extract_document(doc_id: int, cfg) -> Document:
         if is_manual_only(dtype):
             return doc
 
+        if (doc.extraction_attempt_count or 0) >= 3:
+            doc.extraction_status = ExtractionStatus.failed
+            s.commit()
+            s.refresh(doc)
+            return doc
+
         doc.extraction_attempt_count = (doc.extraction_attempt_count or 0) + 1
         try:
+            # Multi-page PDFs (SPEC §7.3 FR-6.1): The entire PDF (all pages) is passed as a
+            # single base64 data URL. Luna sees every page natively in one API call.
             result = _call_vlm(doc.stored_path, dtype, cfg)
             doc.extraction_status = ExtractionStatus.valid
             if result and result.get("po_no_raw"):
@@ -213,7 +221,7 @@ def extract_document(doc_id: int, cfg) -> Document:
                     # for COMBINED, treat document_number as invoice_no fallback, keep po_no_raw as po_reference
                     doc.invoice_no = result["document_number"]
                     doc.si_no = result["document_number"]
-                # update doc_type if VLM classified differently (e.g. UNKNOWN -> SI)
+                # update doc_type if VLM classified differently (e.g. UNKNOWN -> SI, or SKIP -> UNKNOWN)
                 vtype = result.get("document_type")
                 if vtype and vtype in ("PO", "DN", "SI", "COMBINED", "SKIP", "UNKNOWN"):
                     import contextlib
@@ -221,7 +229,8 @@ def extract_document(doc_id: int, cfg) -> Document:
                     from app.models import DocType
 
                     with contextlib.suppress(Exception):
-                        doc.doc_type = DocType(vtype)  # type: ignore[arg-type]
+                        effective_type = "UNKNOWN" if vtype == "SKIP" else vtype
+                        doc.doc_type = DocType(effective_type)  # type: ignore[arg-type]
             # persist line items (replace existing for this doc)
             from app.models import LineItem
 

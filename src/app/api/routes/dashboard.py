@@ -397,6 +397,7 @@ def po_set_detail_view(po_set_id: int, request: Request):
             matrix_rows = []
 
         has_merged_file = bool(ps.merged_output_path and Path(ps.merged_output_path).exists())
+        unclassified_count = s.query(Document).filter(Document.doc_type == DocType.UNKNOWN).count()
 
         return _templates.TemplateResponse(
             request,
@@ -410,6 +411,7 @@ def po_set_detail_view(po_set_id: int, request: Request):
                 "flags": flags,
                 "is_locked": is_locked,
                 "has_merged_file": has_merged_file,
+                "unclassified_count": unclassified_count,
             },
         )
 
@@ -554,10 +556,15 @@ def audit_log(request: Request):
     Base.metadata.create_all(eng)
     with Session(eng) as s:
         entries = s.query(AuditLog).order_by(AuditLog.timestamp.desc()).all()
+        unclassified_count = s.query(Document).filter(Document.doc_type == DocType.UNKNOWN).count()
         return _templates.TemplateResponse(
             request,
             "audit.html",
-            {"request": request, "entries": entries},
+            {
+                "request": request,
+                "entries": entries,
+                "unclassified_count": unclassified_count,
+            },
         )
 
 
@@ -579,10 +586,15 @@ def quarantine_view(request: Request):
             enriched.append(
                 {"id": ps.id, "po_no_normalized": ps.po_no_normalized, "doc_count": cnt}
             )
+        unclassified_count = s.query(Document).filter(Document.doc_type == DocType.UNKNOWN).count()
         return _templates.TemplateResponse(
             request,
             "quarantine.html",
-            {"request": request, "po_sets": enriched},
+            {
+                "request": request,
+                "po_sets": enriched,
+                "unclassified_count": unclassified_count,
+            },
         )
 
 
@@ -621,7 +633,11 @@ def unclassified_view(request: Request):
         return _templates.TemplateResponse(
             request,
             "unclassified.html",
-            {"request": request, "documents": docs},
+            {
+                "request": request,
+                "documents": docs,
+                "unclassified_count": len(docs),
+            },
         )
 
 
