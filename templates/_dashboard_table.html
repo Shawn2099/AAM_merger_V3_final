@@ -1,29 +1,99 @@
 <div id="po-table" hx-get="/dashboard/table{% if current_status %}?status={{ current_status }}{% endif %}" hx-trigger="every 2s" hx-swap="outerHTML">
-<table>
-  <thead>
-    <tr>
-      <th>PO No</th>
-      <th>Status</th>
-      <th>Documents</th>
-      <th>Last updated</th>
-      <th>Actions</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for ps in po_sets %}
-    <tr>
-      <td><a href="/po_sets/{{ ps.id }}/view">{{ ps.po_no_normalized }}</a></td>
-      <td><span class="badge badge-{{ ps.status.value if ps.status.value is defined else ps.status }}">{{ ps.status.value if ps.status.value is defined else ps.status }}</span></td>
-      <td>{{ ps.doc_count }}</td>
-      <td class="muted">{{ ps.updated_at.isoformat() if ps.updated_at else "—" }}</td>
-      <td>
-        <a href="/po_sets/{{ ps.id }}/view" class="btn btn-secondary" style="padding:4px 8px; font-size:0.82rem;">Detail</a>
-        {% if ps.is_locked %}<span class="muted" title="action already in progress">Locked by {{ ps.locked_by_action }}</span>{% endif %}
-      </td>
-    </tr>
-    {% else %}
-    <tr><td colspan="5" class="muted" style="text-align:center; padding:18px;">No PO Sets{% if current_status %} with status {{ current_status }}{% endif %}</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>PO Number</th>
+        <th>Reconciliation Status</th>
+        <th>Documents</th>
+        <th>Last Updated</th>
+        <th style="text-align:right;">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="po-table-body">
+      {% for ps in po_sets %}
+      {% set status_str = ps.status.value if ps.status.value is defined else (ps.status|string) %}
+      <tr 
+        class="po-row" 
+        data-po="{{ ps.po_no_normalized }}" 
+        data-status="{{ status_str }}"
+      >
+        <td>
+          <a href="/po_sets/{{ ps.id }}/view" class="po-link" title="Open PO Set Detail">
+            {{ ps.po_no_normalized }}
+          </a>
+        </td>
+
+        <td>
+          {% if status_str == 'merged' %}
+            <span class="badge badge-merged">✅ Merged &amp; Ready</span>
+          {% elif status_str == 'mismatched' %}
+            <span class="badge badge-mismatched">⚠️ Needs Review</span>
+          {% elif status_str == 'blocked_customs' %}
+            <span class="badge badge-blocked">🔒 Awaiting Customs</span>
+          {% elif status_str == 'quarantined' %}
+            <span class="badge badge-quarantined">🚨 Quarantined</span>
+          {% elif status_str == 'pending' %}
+            <span class="badge badge-pending">⏳ Ingesting / Pending</span>
+          {% else %}
+            <span class="badge badge-gray">{{ status_str }}</span>
+          {% endif %}
+
+          {% if ps.is_locked %}
+            <span class="badge badge-gray" style="font-size:0.72rem; margin-left:4px;" title="Action in progress by background task">
+              🔒 Locked ({{ ps.locked_by_action }})
+            </span>
+          {% endif %}
+        </td>
+
+        <td>
+          <span style="font-weight:600; color:var(--text-main);">{{ ps.doc_count }}</span>
+          <span class="muted" style="font-size:0.82rem;">doc{{ 's' if ps.doc_count != 1 else '' }}</span>
+        </td>
+
+        <td class="muted" style="font-size:0.85rem;">
+          {{ ps.updated_at.strftime('%b %d, %H:%M') if ps.updated_at else '—' }}
+        </td>
+
+        <td style="text-align:right;">
+          <div style="display:inline-flex; gap:6px; align-items:center;">
+            <a 
+              href="/po_sets/{{ ps.id }}/view" 
+              class="btn btn-secondary btn-sm"
+              title="Inspect 3-Way Match &amp; Documents"
+            >
+              <span>View Set</span>
+              <span style="font-size:0.8rem;">→</span>
+            </a>
+
+            {% if status_str == 'merged' and ps.has_merged_file %}
+              <a 
+                href="/po_sets/{{ ps.id }}/merged_pdf" 
+                class="btn btn-success btn-sm"
+                title="Download final merged PDF"
+                download
+              >
+                <span>📥 PDF</span>
+              </a>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="5" style="text-align:center; padding:36px; color:var(--text-muted);">
+          <div style="font-size:2rem; margin-bottom:8px;">📭</div>
+          <div style="font-weight:600; font-size:1rem; color:var(--text-main);">No PO Sets found</div>
+          <div style="font-size:0.85rem; margin-top:4px;">
+            {% if current_status %}
+              There are no PO Sets currently with status <strong>{{ current_status }}</strong>.
+            {% else %}
+              Drop PDF invoices and delivery notes into your input folder and click <strong>Scan Input Folder</strong>.
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>

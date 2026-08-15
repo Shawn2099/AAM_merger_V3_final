@@ -6,10 +6,17 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import load_config
 
 app = FastAPI(title="AAM Merger V3", version="0.1.0")
+
+# Mount static assets
+static_dir = Path(__file__).resolve().parent.parent.parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
 
 # Task 9: include sync + po_sets routers (FR-4.3, FR-CONC-1-4)
 try:

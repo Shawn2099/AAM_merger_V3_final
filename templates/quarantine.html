@@ -1,16 +1,28 @@
 {% extends "base.html" %}
-{% block title %}Quarantine — AAM Merger{% endblock %}
+{% block title %}Quarantine Review — AAM Merger V3{% endblock %}
+
 {% block content %}
 <div class="card">
-  <h2>Quarantine Review</h2>
-  <p class="muted">Shows quarantine folder contents reference. Delete requires confirmation modal and writes audit log (FR-13.5/13.6). Files are kept on disk; only DB rows are removed (FR-13.7). HTMX partial refresh every 3s.</p>
-  <div
-    id="quarantine-table"
-    hx-get="/quarantine/table"
-    hx-trigger="every 3s"
-    hx-swap="outerHTML"
-  >
-    {% include "_quarantine_table.html" %}
+  <div class="card-header">
+    <div>
+      <h2 class="card-title">
+        <span>🚨 Quarantine Review</span>
+      </h2>
+      <p class="card-subtitle">
+        PO Sets with non-positive quantities ($Q \le 0$), conflicting line descriptions, or reverse unmatched items are safely halted here for review.
+      </p>
+    </div>
+  </div>
+
+  <div class="table-container">
+    <div
+      id="quarantine-table"
+      hx-get="/quarantine/table"
+      hx-trigger="every 3s"
+      hx-swap="outerHTML"
+    >
+      {% include "_quarantine_table.html" %}
+    </div>
   </div>
 </div>
 {% endblock %}

@@ -43,36 +43,35 @@ def _is_locked(ps: POSet, cfg) -> bool:
 def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) -> list[dict]:
     q = session.query(POSet)
     if status_filter:
-        # validate filter is one of 5 statuses; if invalid, return empty
         if status_filter not in _ALLOWED_STATUSES:
             return []
-        # compare via string value to support both enum and str storage
         all_sets = q.all()
-        filtered = [
+        pools = [
             ps
             for ps in all_sets
             if (ps.status.value if hasattr(ps.status, "value") else str(ps.status)) == status_filter
         ]
-        pools = filtered
     else:
         pools = q.all()
     out = []
     for ps in pools:
-        # doc_count via relationship or query
-        doc_count = session.query(Document).filter_by(po_set_id=ps.id).count()
+        docs = session.query(Document).filter_by(po_set_id=ps.id).all()
+        status_val = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
+        has_merged_file = bool(ps.merged_output_path and Path(ps.merged_output_path).exists())
         out.append(
             {
                 "id": ps.id,
                 "po_no_normalized": ps.po_no_normalized,
                 "status": ps.status,
-                "doc_count": doc_count,
+                "status_val": status_val,
+                "doc_count": len(docs),
+                "has_merged_file": has_merged_file,
                 "updated_at": ps.updated_at,
                 "locked_by_action": ps.locked_by_action,
                 "is_locked": _is_locked(ps, cfg),
             }
         )
-    # sort by updated_at desc for dashboard usability
-    out.sort(key=lambda x: x["updated_at"] or x["id"], reverse=True)  # ty: ignore[no-matching-overload]
+    out.sort(key=lambda x: x["updated_at"] or x["id"], reverse=True)  # type: ignore[no-matching-overload]
     return out
 
 
@@ -83,6 +82,35 @@ def _sync_running_state() -> bool:
         return _is_sync_running()
     except Exception:
         return False
+
+
+def _get_stats(session: Session) -> dict:
+    all_sets = session.query(POSet).all()
+    unclassified_count = (
+        session.query(Document).filter(Document.doc_type == DocType.UNKNOWN).count()
+    )
+
+    def count_status(s_name: str) -> int:
+        return sum(
+            1
+            for ps in all_sets
+            if (ps.status.value if hasattr(ps.status, "value") else str(ps.status)) == s_name
+        )
+
+    merged_c = count_status("merged")
+    total_c = len(all_sets)
+    pct = round(merged_c / total_c * 100) if total_c > 0 else 0
+
+    return {
+        "total": total_c,
+        "merged": merged_c,
+        "merged_pct": pct,
+        "mismatched": count_status("mismatched"),
+        "blocked_customs": count_status("blocked_customs"),
+        "quarantined": count_status("quarantined"),
+        "pending": count_status("pending"),
+        "unclassified": unclassified_count,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -106,13 +134,14 @@ def dashboard(request: Request, status: str | None = None):
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     with Session(eng) as s:
-        # auto-release stale locks so UI doesn't permanently disable
         for ps in s.query(POSet).all():
             if ps.locked_by_action is not None and not _is_locked(ps, cfg):
                 ps.locked_by_action = None
         s.commit()
         po_sets = _po_sets_with_doc_count(s, status, cfg)
         sync_running = _sync_running_state()
+        stats = _get_stats(s)
+
         if request.headers.get("HX-Request") == "true":
             return _templates.TemplateResponse(
                 request,
@@ -131,6 +160,8 @@ def dashboard(request: Request, status: str | None = None):
                 "po_sets": po_sets,
                 "current_status": status if status in _ALLOWED_STATUSES else None,
                 "sync_running": sync_running,
+                "stats": stats,
+                "unclassified_count": stats["unclassified"],
             },
         )
 
@@ -287,10 +318,85 @@ def po_set_detail_view(po_set_id: int, request: Request):
                             }
                         )
 
+            # Compute 3-Way Reconciliation Comparison Matrix rows
+            matrix_rows = []
+            combined_lines = [li for li in enriched if li["doc_type"] == "COMBINED"]
+            base_lines = po_lines if po_lines else combined_lines
+
+            for p in base_lines:
+                p_no = p.get("line_item_no")
+                p_desc = p.get("description") or ""
+                if p_no:
+                    matching_dn = [d for d in dn_lines if d.get("line_item_no") == p_no]
+                    matching_si = [s for s in si_lines if s.get("line_item_no") == p_no]
+                else:
+                    from rapidfuzz import fuzz
+
+                    matching_dn = [
+                        d
+                        for d in dn_lines
+                        if not d.get("line_item_no")
+                        and fuzz.token_sort_ratio(_norm(p_desc), _norm(d.get("description") or ""))
+                        >= thr
+                    ]
+                    matching_si = [
+                        s
+                        for s in si_lines
+                        if not s.get("line_item_no")
+                        and fuzz.token_sort_ratio(_norm(p_desc), _norm(s.get("description") or ""))
+                        >= thr
+                    ]
+
+                agg_dn = sum(d["quantity"] for d in matching_dn)
+                agg_si = sum(s["quantity"] for s in matching_si)
+                rec = reconcile(p["quantity"], agg_dn, agg_si) if po_lines else {"ok": True}
+                price_flag = False
+                si_pr = None
+                if matching_si:
+                    p_check = check_price(p["unit_price"], matching_si[0]["unit_price"])
+                    price_flag = p_check["flag"]
+                    si_pr = matching_si[0]["unit_price"] / 1000
+
+                if not rec["ok"]:
+                    row_class = "row-mismatch"
+                    v_badge = "badge-mismatched"
+                    po_g = p["quantity"] / 1000
+                    dn_g = agg_dn / 1000
+                    si_g = agg_si / 1000
+                    v_text = f"❌ Mismatch (PO: {po_g:g}, DN: {dn_g:g}, SI: {si_g:g})"
+                elif price_flag:
+                    row_class = "row-match"
+                    v_badge = "badge-pending"
+                    v_text = "⚠️ Price Difference"
+                else:
+                    row_class = "row-match"
+                    v_badge = "badge-merged"
+                    v_text = "✅ Match"
+
+                matrix_rows.append(
+                    {
+                        "line_item_no": p_no or "—",
+                        "description": p_desc,
+                        "po_qty": p["quantity"] / 1000,
+                        "dn_agg_qty": (agg_dn / 1000) if dn_lines else (p["quantity"] / 1000),
+                        "si_agg_qty": (agg_si / 1000) if si_lines else (p["quantity"] / 1000),
+                        "dn_count": len(matching_dn),
+                        "si_count": len(matching_si),
+                        "po_price": p["unit_price"] / 1000,
+                        "si_price": si_pr,
+                        "row_class": row_class,
+                        "badge": v_badge,
+                        "verdict": v_text,
+                    }
+                )
+
             flags.sort(key=lambda f: f["priority"])
 
         else:
             enriched = []
+            matrix_rows = []
+
+        has_merged_file = bool(ps.merged_output_path and Path(ps.merged_output_path).exists())
 
         return _templates.TemplateResponse(
             request,
@@ -300,10 +406,46 @@ def po_set_detail_view(po_set_id: int, request: Request):
                 "po_set": ps,
                 "documents": docs,
                 "line_items": enriched,
+                "matrix_rows": matrix_rows,
                 "flags": flags,
                 "is_locked": is_locked,
+                "has_merged_file": has_merged_file,
             },
         )
+
+
+@router.get("/documents/{doc_id}/preview")
+def preview_document(doc_id: int):
+    """Stream stored document PDF for inline preview drawer."""
+    from fastapi.responses import FileResponse
+
+    cfg = load_config()
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        doc = s.get(Document, doc_id)
+        if not doc or not doc.stored_path:
+            raise HTTPException(status_code=404, detail="Document not found")
+        p = Path(doc.stored_path)
+        if not p.exists():
+            raise HTTPException(status_code=404, detail="Stored PDF file missing from disk")
+        return FileResponse(p, media_type="application/pdf")
+
+
+@router.get("/po_sets/{po_set_id}/merged_pdf")
+def download_merged_pdf(po_set_id: int):
+    """Stream final merged PDF for downloading or inline inspection."""
+    from fastapi.responses import FileResponse
+
+    cfg = load_config()
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        ps = s.get(POSet, po_set_id)
+        if not ps or not ps.merged_output_path:
+            raise HTTPException(status_code=404, detail="Merged PDF not available")
+        p = Path(ps.merged_output_path)
+        if not p.exists():
+            raise HTTPException(status_code=404, detail="Merged output PDF missing from disk")
+        return FileResponse(p, media_type="application/pdf", filename=p.name)
 
 
 # ---------------------------------------------------------------------------

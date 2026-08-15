@@ -1,168 +1,392 @@
 {% extends "base.html" %}
-{% block title %}PO Set {{ po_set.po_no_normalized }} — Detail{% endblock %}
+{% block title %}PO Set {{ po_set.po_no_normalized }} — 3-Way Reconciliation{% endblock %}
+
 {% block content %}
+{% set status_str = po_set.status.value if po_set.status.value is defined else (po_set.status|string) %}
+
+<!-- Overview Header Card -->
 <div class="card">
-  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-    <h2 style="margin:0;">PO Set {{ po_set.po_no_normalized }}</h2>
-    <span class="badge badge-{{ po_set.status.value if po_set.status.value is defined else po_set.status }}">{{ po_set.status.value if po_set.status.value is defined else po_set.status }}</span>
-    {% if is_locked %}<span class="badge badge-quarantined">Locked by {{ po_set.locked_by_action }}</span>{% endif %}
-    <a href="/dashboard" class="btn btn-secondary" style="margin-left:auto;">← Back to Dashboard</a>
-  </div>
-  <p class="muted">Updated: {{ po_set.updated_at.isoformat() if po_set.updated_at else "—" }} · Has customs toggle: {{ po_set.has_customs_toggle }} · Customs doc count: {{ po_set.customs_doc_count }}</p>
+  <div class="card-header" style="margin-bottom:12px;">
+    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+      <a href="/dashboard" class="btn btn-secondary btn-sm" title="Return to main dashboard">
+        ← Dashboard
+      </a>
+      <h1 class="card-title" style="margin:0; font-size:1.5rem;">
+        <span>PO Set:</span>
+        <span style="font-family:ui-monospace, monospace; color:var(--primary);">{{ po_set.po_no_normalized }}</span>
+      </h1>
 
-  <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;"
-       hx-get="/po_sets/{{ po_set.id }}/detail"
-       hx-trigger="every 2s"
-       hx-swap="outerHTML">
-    <!-- HTMX live actions fragment -->
-    <span class="muted" style="font-size:0.85rem;">Live actions (poll every 2s)</span>
+      {% if status_str == 'merged' %}
+        <span class="badge badge-merged" style="font-size:0.9rem; padding:6px 14px;">✅ Merged &amp; Ready</span>
+      {% elif status_str == 'mismatched' %}
+        <span class="badge badge-mismatched" style="font-size:0.9rem; padding:6px 14px;">⚠️ Needs Review (Discrepancy)</span>
+      {% elif status_str == 'blocked_customs' %}
+        <span class="badge badge-blocked" style="font-size:0.9rem; padding:6px 14px;">🔒 Awaiting Customs (2 docs needed)</span>
+      {% elif status_str == 'quarantined' %}
+        <span class="badge badge-quarantined" style="font-size:0.9rem; padding:6px 14px;">🚨 Quarantined</span>
+      {% elif status_str == 'pending' %}
+        <span class="badge badge-pending" style="font-size:0.9rem; padding:6px 14px;">⏳ Processing</span>
+      {% endif %}
+
+      {% if is_locked %}
+        <span class="badge badge-quarantined" title="Locked by active background process">
+          🔒 Locked by {{ po_set.locked_by_action }}
+        </span>
+      {% endif %}
+    </div>
+
+    <!-- Right Header Actions -->
+    <div style="display:flex; gap:10px; align-items:center;">
+      {% if status_str == 'merged' and has_merged_file %}
+        <a 
+          href="/po_sets/{{ po_set.id }}/merged_pdf" 
+          class="btn btn-success" 
+          download 
+          title="Download the compiled merged PDF packet"
+        >
+          <span>📥 Download Merged PDF</span>
+        </a>
+      {% endif %}
+    </div>
   </div>
 
-  <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;">
-    <!-- Customs toggle — available from any status (FR-12.1) -->
+  <div style="display:flex; gap:20px; flex-wrap:wrap; font-size:0.85rem; color:var(--text-muted); border-top:1px solid var(--border); padding-top:12px;">
+    <div><strong>Last Updated:</strong> {{ po_set.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC') if po_set.updated_at else '—' }}</div>
+    <div><strong>Customs Requirement:</strong> <span style="font-weight:600; color:{{ 'var(--primary)' if po_set.has_customs_toggle else 'var(--text-muted)' }};">{{ 'ENABLED (2 Docs Required)' if po_set.has_customs_toggle else 'DISABLED' }}</span></div>
+    <div><strong>Customs Documents Attached:</strong> <span style="font-weight:600;">{{ po_set.customs_doc_count }} / 2</span></div>
+  </div>
+
+  <!-- Quick Action Controls -->
+  <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border); display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+    <!-- Customs Toggle -->
     <button
       class="btn {% if po_set.has_customs_toggle %}btn-primary{% else %}btn-secondary{% endif %}"
       hx-post="/po_sets/{{ po_set.id }}/toggle_customs"
       hx-swap="none"
-      {% if is_locked %}disabled title="action already in progress"{% endif %}
-    >Customs toggle — currently {{ "ON" if po_set.has_customs_toggle else "OFF" }}</button>
-    <span class="muted" style="align-self:center;">(available from any status — FR-12.1)</span>
-  </div>
+      title="Toggle whether Customs and Shipping documents are required for this PO Set"
+      {% if is_locked %}disabled{% endif %}
+    >
+      <span>🛡️ Customs Check:</span>
+      <strong>{{ 'ON' if po_set.has_customs_toggle else 'OFF' }}</strong>
+    </button>
 
-  <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
-    <!-- Redo/Re-extract vs Redo matching — two distinct buttons (FR-6.8) -->
-    <button
-      class="btn btn-secondary"
-      hx-post="/po_sets/{{ po_set.id }}/redo_extract"
-      hx-swap="none"
-      {% if is_locked %}disabled title="action already in progress"{% endif %}
-    >Redo/Re-extract</button>
+    <!-- Redo Match (Free, Instant) -->
     <button
       class="btn btn-secondary"
       hx-post="/po_sets/{{ po_set.id }}/redo_match"
       hx-swap="none"
-      {% if is_locked %}disabled title="action already in progress"{% endif %}
-    >Redo matching</button>
-    <span class="muted" style="align-self:center; font-size:0.85rem;">Redo matching re-runs without VLM (no API call); Re-extract re-sends to VLM (FR-6.8)</span>
-  </div>
+      title="Re-run matching rules on existing extracted data without calling the AI (Fast &amp; Free)"
+      {% if is_locked %}disabled{% endif %}
+    >
+      <span>🔄 Re-Match (Instant)</span>
+    </button>
 
-  <div style="margin-top:14px;">
-    <!-- Force Merge — requires confirmation modal, available from any status (FR-14.8/14.9) -->
-    <button class="btn btn-danger" onclick="document.getElementById('force-merge-modal').classList.add('open')" {% if is_locked %}disabled title="action already in progress"{% endif %}>Force Merge</button>
-    <span class="muted" style="margin-left:8px;">Bypasses matching + customs gate, writes audit log (FR-14.9/14.10). Available from any status.</span>
-  </div>
-</div>
+    <!-- Redo Extract (AI) -->
+    <button
+      class="btn btn-secondary"
+      hx-post="/po_sets/{{ po_set.id }}/redo_extract"
+      hx-swap="none"
+      title="Re-send all documents to the AI vision parser to re-extract lines and text"
+      {% if is_locked %}disabled{% endif %}
+    >
+      <span>⚡ Re-Extract with AI</span>
+    </button>
 
-<!-- Force Merge confirmation modal -->
-<div id="force-merge-modal" class="modal-backdrop">
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="fm-title">
-    <h3 id="fm-title">Confirm Force Merge?</h3>
-    <p class="muted">Force Merge is unconditional — it merges with whatever CUSTOMS/SHIPPING files exist (0, 1, or 2) and writes a permanent audit log entry (<code>force_merge</code> with customs count). This cannot be undone.</p>
-    <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
-      <button class="btn btn-secondary" onclick="document.getElementById('force-merge-modal').classList.remove('open')">Cancel</button>
-      <button
-        class="btn btn-danger"
-        hx-post="/po_sets/{{ po_set.id }}/force_merge"
-        hx-swap="none"
-        onclick="document.getElementById('force-merge-modal').classList.remove('open')"
-      >Confirm Force Merge</button>
+    <!-- Force Merge Button -->
+    <div style="margin-left:auto;">
+      <button 
+        class="btn btn-danger" 
+        onclick="document.getElementById('force-merge-modal').classList.add('open')"
+        title="Override matching and customs requirements to merge immediately with available documents"
+        {% if is_locked %}disabled{% endif %}
+      >
+        <span>⚠️ Force Merge</span>
+      </button>
     </div>
   </div>
 </div>
 
+<!-- 3-Way Reconciliation Comparison Matrix Card -->
 <div class="card">
-  <h3>Documents ({{ documents|length }})</h3>
-  {% if documents %}
-  <table>
-    <thead><tr><th>Type</th><th>File</th><th>Extraction</th><th>PO No (raw)</th></tr></thead>
-    <tbody>
-      {% for d in documents %}
-      <tr>
-        <td><span class="badge badge-pending">{{ d.doc_type.value if d.doc_type.value is defined else d.doc_type }}</span></td>
-        <td class="muted" style="max-width:320px; overflow:hidden; text-overflow:ellipsis;">{{ d.original_filename }}</td>
-        <td>{{ d.extraction_status.value if d.extraction_status.value is defined else d.extraction_status }}</td>
-        <td>{{ d.po_no_raw or "—" }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <p class="muted">No documents yet.</p>
-  {% endif %}
-
-  <div style="margin-top:16px; border-top:1px solid var(--border); padding-top:16px;">
-    <h3>Manual document upload — CUSTOMS / SHIPPING / COMMERCIAL_INVOICE</h3>
-    <form action="/po_sets/{{ po_set.id }}/upload" method="post" enctype="multipart/form-data" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-      <input type="file" name="file" accept=".pdf" required>
-      <select name="doc_type" required>
-        <option value="CUSTOMS">CUSTOMS</option>
-        <option value="SHIPPING">SHIPPING</option>
-        <option value="COMMERCIAL_INVOICE">COMMERCIAL_INVOICE</option>
-      </select>
-      <button type="submit" class="btn btn-primary" {% if is_locked %}disabled title="action already in progress"{% endif %}>Upload</button>
-    </form>
-    <p class="muted" style="font-size:0.85rem;">Attached as-is, never sent to VLM. CUSTOMS+SHIPPING (2 docs) required to clear blocked_customs (FR-12.2).</p>
+  <div class="card-header" style="margin-bottom:8px;">
+    <div>
+      <h2 class="card-title">
+        <span>3-Way Reconciliation Matrix</span>
+      </h2>
+      <p class="card-subtitle">
+        Direct side-by-side comparison of <strong>PO Ordered</strong> vs <strong>DN Delivered</strong> vs <strong>SI Invoiced</strong> quantities.
+      </p>
+    </div>
   </div>
-</div>
 
-<div class="card">
-  <h3>Line Items & Reconciliation Flags (Priority [1] Identification → [2] Quantity → [3] Price per FR-11.2)</h3>
-
+  <!-- Priority Flag Warnings -->
   {% if flags %}
-  <div style="margin-bottom: 16px;">
+  <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
     {% for f in flags %}
-    <div style="display:flex; align-items:center; gap:8px; padding: 8px 12px; margin-bottom: 8px; background: #fff; border: 1px solid var(--border); border-radius: 6px;">
+    <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:var(--radius-sm); border:1px solid var(--border); background:#ffffff;">
       <span class="badge {{ f.badge }}">{{ f.type }}</span>
-      <span style="font-size: 0.9rem;">{{ f.message }}</span>
+      <span style="font-size:0.88rem; color:var(--text-main); flex:1;">{{ f.message }}</span>
+      <span style="font-size:0.78rem; color:var(--text-muted); font-weight:600;">Priority {{ f.priority }}</span>
     </div>
     {% endfor %}
   </div>
   {% endif %}
 
-  {% if line_items %}
-  <table>
-    <thead><tr><th>Doc</th><th>Line No</th><th>Description</th><th>Qty (×1000)</th><th>Price (×1000)</th></tr></thead>
-    <tbody>
-      {% for li in line_items %}
-      <tr>
-        <td class="muted">{{ li.doc_type }}</td>
-        <td>{{ li.line_item_no or "—" }}</td>
-        <td>{{ li.description }}</td>
-        <td>{{ li.quantity }}</td>
-        <td>{{ li.unit_price }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <!-- 3-Way Comparison Table -->
+  {% if matrix_rows %}
+  <div class="table-container">
+    <table class="reconcile-matrix">
+      <thead>
+        <tr>
+          <th style="width:80px;">Line #</th>
+          <th>Item Description</th>
+          <th style="text-align:right;">PO Ordered</th>
+          <th style="text-align:right;">DN Delivered</th>
+          <th style="text-align:right;">SI Invoiced</th>
+          <th style="text-align:right;">Unit Price</th>
+          <th style="text-align:center;">Verdict</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in matrix_rows %}
+        <tr class="{{ r.row_class }}">
+          <td style="font-family:ui-monospace, monospace; font-weight:700;">#{{ r.line_item_no }}</td>
+          <td style="font-weight:500;">{{ r.description }}</td>
+          
+          <td style="text-align:right;">
+            <span class="qty-val" style="color:#0f172a;">{{ '{:g}'.format(r.po_qty) }}</span>
+          </td>
+
+          <td style="text-align:right;">
+            <span class="qty-val {% if r.dn_agg_qty != r.po_qty %}text-danger{% endif %}">
+              {{ '{:g}'.format(r.dn_agg_qty) }}
+            </span>
+            {% if r.dn_count > 1 %}
+              <span class="muted" style="font-size:0.75rem;">({{ r.dn_count }} DNs)</span>
+            {% endif %}
+          </td>
+
+          <td style="text-align:right;">
+            <span class="qty-val {% if r.si_agg_qty != r.po_qty %}text-danger{% endif %}">
+              {{ '{:g}'.format(r.si_agg_qty) }}
+            </span>
+            {% if r.si_count > 1 %}
+              <span class="muted" style="font-size:0.75rem;">({{ r.si_count }} SIs)</span>
+            {% endif %}
+          </td>
+
+          <td style="text-align:right; font-family:ui-monospace, monospace; font-size:0.85rem;">
+            {% if r.si_price is not none and r.po_price != r.si_price %}
+              <span style="color:var(--clr-mismatch-text);" title="PO: {{ r.po_price }} vs SI: {{ r.si_price }}">
+                {{ '{:g}'.format(r.po_price) }} / {{ '{:g}'.format(r.si_price) }}
+              </span>
+            {% else %}
+              <span class="muted">{{ '{:g}'.format(r.po_price) if r.po_price else '—' }}</span>
+            {% endif %}
+          </td>
+
+          <td style="text-align:center;">
+            <span class="badge {{ r.badge }}">{{ r.verdict }}</span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% else %}
-  <p class="muted">No line items yet. Run extraction.</p>
+  <div style="text-align:center; padding:32px; color:var(--text-muted); background:#f8fafc; border-radius:var(--radius-md);">
+    <div style="font-size:1.6rem; margin-bottom:6px;">📋</div>
+    <div style="font-weight:600; color:var(--text-main);">No extracted line items yet</div>
+    <div style="font-size:0.85rem; margin-top:4px;">Click <strong>Re-Extract with AI</strong> above to extract product lines from attached documents.</div>
+  </div>
   {% endif %}
 </div>
 
-{% if po_set.status.value == 'quarantined' or po_set.status == 'quarantined' %}
-<div class="card" style="border-color:#fecaca;">
-  <h3>Quarantined — Delete</h3>
-  <p class="muted">Delete removes DB rows only; stored files and quarantine copies remain on disk and an audit log entry is written (FR-13.6/13.7).</p>
-  <button class="btn btn-danger" onclick="document.getElementById('quarantine-delete-modal').classList.add('open')" {% if is_locked %}disabled title="action already in progress"{% endif %}>Delete Quarantined</button>
-  <div id="quarantine-delete-modal" class="modal-backdrop">
-    <div class="modal" role="dialog" aria-modal="true">
-      <h3>Confirm Delete Quarantined?</h3>
-      <p class="muted">This deletes the PO Set, its documents and line items from the database but keeps files on disk. An audit log entry (<code>quarantine_delete</code>) is written. Irreversible.</p>
-      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
-        <button class="btn btn-secondary" onclick="document.getElementById('quarantine-delete-modal').classList.remove('open')">Cancel</button>
-        <button class="btn btn-danger" hx-delete="/po_sets/{{ po_set.id }}/quarantine" hx-swap="none" onclick="document.getElementById('quarantine-delete-modal').classList.remove('open')">Confirm Delete</button>
-      </div>
+<!-- Attached Documents & Upload Card -->
+<div class="card">
+  <div class="card-header">
+    <div>
+      <h2 class="card-title">
+        <span>Attached Documents ({{ documents|length }})</span>
+      </h2>
+      <p class="card-subtitle">Source PDFs in this PO packet. Click preview to inspect pages in the slide-over drawer.</p>
+    </div>
+  </div>
+
+  {% if documents %}
+  <div class="table-container" style="margin-bottom:20px;">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Document Type</th>
+          <th>Original Filename</th>
+          <th>Extraction Status</th>
+          <th>Raw PO No</th>
+          <th style="text-align:right;">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in documents %}
+        {% set dt = d.doc_type.value if d.doc_type.value is defined else (d.doc_type|string) %}
+        {% set es = d.extraction_status.value if d.extraction_status.value is defined else (d.extraction_status|string) %}
+        <tr>
+          <td>
+            {% if dt == 'PO' %}
+              <span class="badge badge-pending">📄 Purchase Order</span>
+            {% elif dt == 'DN' %}
+              <span class="badge badge-pending">📦 Delivery Note</span>
+            {% elif dt == 'SI' %}
+              <span class="badge badge-pending">🧾 Sales Invoice</span>
+            {% elif dt == 'COMBINED' %}
+              <span class="badge badge-merged">📑 Combined Packet</span>
+            {% elif dt in ['CUSTOMS', 'SHIPPING', 'COMMERCIAL_INVOICE'] %}
+              <span class="badge badge-blocked">🛃 {{ dt }}</span>
+            {% else %}
+              <span class="badge badge-gray">❓ {{ dt }}</span>
+            {% endif %}
+          </td>
+
+          <td style="font-weight:500; max-width:280px; overflow:hidden; text-overflow:ellipsis;">
+            {{ d.original_filename }}
+          </td>
+
+          <td>
+            {% if es == 'valid' %}
+              <span class="badge badge-merged">✅ Valid</span>
+            {% elif es == 'failed' %}
+              <span class="badge badge-quarantined">❌ Failed</span>
+            {% elif es == 'processing' %}
+              <span class="badge badge-pending">⏳ Extracting</span>
+            {% else %}
+              <span class="badge badge-gray">{{ es }}</span>
+            {% endif %}
+          </td>
+
+          <td class="muted" style="font-family:ui-monospace, monospace;">
+            {{ d.po_no_raw or '—' }}
+          </td>
+
+          <td style="text-align:right;">
+            <button 
+              class="btn btn-secondary btn-sm"
+              @click="$store.pdfDrawer.open('/documents/{{ d.id }}/preview', '{{ d.original_filename }}')"
+              title="Preview document PDF"
+            >
+              <span>👁️ Preview</span>
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="margin-bottom:16px;">No documents attached to this PO Set.</p>
+  {% endif %}
+
+  <!-- Manual Upload Sub-Form -->
+  <div style="background:#f8fafc; border:1px solid var(--border); border-radius:var(--radius-md); padding:16px 20px;">
+    <h3 style="font-size:1rem; font-weight:700; color:var(--text-main); margin-bottom:4px;">
+      📎 Attach Supporting Document (Customs / Shipping / Commercial Invoice)
+    </h3>
+    <p class="muted" style="font-size:0.82rem; margin-bottom:12px;">
+      Attached as-is without AI extraction. To clear the <strong>Awaiting Customs</strong> gate, upload both a <strong>CUSTOMS</strong> and a <strong>SHIPPING</strong> document.
+    </p>
+
+    <form 
+      action="/po_sets/{{ po_set.id }}/upload" 
+      method="post" 
+      enctype="multipart/form-data" 
+      style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;"
+    >
+      <input 
+        type="file" 
+        name="file" 
+        accept=".pdf" 
+        required 
+        style="padding:6px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:#fff;"
+      >
+      <select 
+        name="doc_type" 
+        required 
+        style="padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:#fff; font-weight:600;"
+      >
+        <option value="CUSTOMS">CUSTOMS (Clearance / Bill of Entry)</option>
+        <option value="SHIPPING">SHIPPING (Bill of Lading / Air Waybill)</option>
+        <option value="COMMERCIAL_INVOICE">COMMERCIAL_INVOICE</option>
+      </select>
+      <button 
+        type="submit" 
+        class="btn btn-primary" 
+        {% if is_locked %}disabled{% endif %}
+      >
+        <span>Upload &amp; Attach</span>
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- Quarantined Deletion Card (Only if quarantined) -->
+{% if status_str == 'quarantined' %}
+<div class="card" style="border-color:var(--clr-quarantined-border); background:#fff5f5;">
+  <h3 style="color:#991b1b; font-size:1.1rem; margin-bottom:4px;">🚨 Delete Quarantined PO Set</h3>
+  <p class="muted" style="margin-bottom:14px; font-size:0.85rem;">
+    Removes database records for this PO Set while keeping stored files and quarantine copies safely on disk. An audit log entry is written.
+  </p>
+  <button 
+    class="btn btn-danger" 
+    onclick="document.getElementById('quarantine-delete-modal').classList.add('open')"
+    {% if is_locked %}disabled{% endif %}
+  >
+    Delete from Pipeline
+  </button>
+</div>
+
+<!-- Quarantine Delete Confirmation Modal -->
+<div id="quarantine-delete-modal" class="modal-backdrop">
+  <div class="modal-dialog" role="dialog" aria-modal="true">
+    <h3 style="margin-bottom:8px; color:#991b1b;">Confirm Delete Quarantined Record?</h3>
+    <p class="muted" style="margin-bottom:16px;">
+      This action removes this PO Set, its documents, and line items from the database. Files on disk will NOT be deleted. An audit log entry will be recorded.
+    </p>
+    <div style="display:flex; gap:10px; justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="document.getElementById('quarantine-delete-modal').classList.remove('open')">
+        Cancel
+      </button>
+      <button 
+        class="btn btn-danger" 
+        hx-delete="/po_sets/{{ po_set.id }}/quarantine" 
+        hx-swap="none" 
+        onclick="document.getElementById('quarantine-delete-modal').classList.remove('open')"
+      >
+        Confirm Delete
+      </button>
     </div>
   </div>
 </div>
 {% endif %}
 
-{% endblock %}
-{% block scripts %}
-<script>
-// close modals on backdrop click
-document.addEventListener('click', function(e){
-  if(e.target.classList.contains('modal-backdrop')) e.target.classList.remove('open');
-});
-</script>
+<!-- Force Merge Modal -->
+<div id="force-merge-modal" class="modal-backdrop">
+  <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="fm-title">
+    <h3 id="fm-title" style="margin-bottom:8px; color:#b91c1c;">⚠️ Confirm Force Merge</h3>
+    <p class="muted" style="margin-bottom:16px;">
+      Force Merge bypasses all reconciliation matching checks and customs requirements. It compiles whatever files currently exist into the final merged PDF and creates an immutable audit record.
+    </p>
+    <div style="display:flex; gap:10px; justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="document.getElementById('force-merge-modal').classList.remove('open')">
+        Cancel
+      </button>
+      <button
+        class="btn btn-danger"
+        hx-post="/po_sets/{{ po_set.id }}/force_merge"
+        hx-swap="none"
+        onclick="document.getElementById('force-merge-modal').classList.remove('open')"
+      >
+        Confirm Force Merge
+      </button>
+    </div>
+  </div>
+</div>
+
 {% endblock %}

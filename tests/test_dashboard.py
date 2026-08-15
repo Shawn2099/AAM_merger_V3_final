@@ -457,3 +457,52 @@ def test_manual_merger_back_link_points_to_dashboard(client):
     r = client.get("/manual/merger")
     assert r.status_code == 200
     assert 'href="/dashboard"' in r.text
+
+
+def test_document_preview_and_merged_download(tmp_cfg, client, tmp_path):
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    pdf_file = tmp_path / "test_preview.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 sample content")
+
+    with Session(eng) as s:
+        ps = POSet(
+            po_no_normalized="POPREV1", status=POSetStatus.merged, merged_output_path=str(pdf_file)
+        )
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        doc = Document(
+            sha256_hash="hash_prev_123",
+            original_filename="test_preview.pdf",
+            stored_path=str(pdf_file),
+            doc_type=DocType.PO,
+            po_set_id=ps.id,
+        )
+        s.add(doc)
+        s.commit()
+        s.refresh(doc)
+        doc_id = doc.id
+        ps_id = ps.id
+
+    # Test /documents/{doc_id}/preview
+    r_prev = client.get(f"/documents/{doc_id}/preview")
+    assert r_prev.status_code == 200
+    assert r_prev.headers["content-type"] == "application/pdf"
+    assert b"%PDF-1.4" in r_prev.content
+
+    # Test /po_sets/{ps_id}/merged_pdf
+    r_merged = client.get(f"/po_sets/{ps_id}/merged_pdf")
+    assert r_merged.status_code == 200
+    assert r_merged.headers["content-type"] == "application/pdf"
+    assert b"%PDF-1.4" in r_merged.content
+
+
+def test_static_assets_served(client):
+    r_css = client.get("/static/css/theme.css")
+    assert r_css.status_code == 200
+    assert "--primary" in r_css.text
+
+    r_js = client.get("/static/js/app.js")
+    assert r_js.status_code == 200
+    assert "pdfDrawer" in r_js.text

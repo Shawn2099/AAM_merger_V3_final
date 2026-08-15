@@ -1,88 +1,224 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Manual PDF Merger — Isolated Tool</title>
-<style>
-  /* Isolated styling — distinct from automated pipeline dashboard (FR-14.13) */
-  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: #fdf8f0; color: #222; }
-  .banner { background: #7a3d00; color: #fff; padding: 12px 20px; font-weight: 700; letter-spacing: 0.5px; }
-  .banner small { font-weight: 400; opacity: 0.9; margin-left: 12px; }
-  .nav-isolated { background: #fff3e0; border-bottom: 3px solid #ffb74d; padding: 10px 20px; display: flex; gap: 16px; align-items: center; }
-  .nav-isolated a { text-decoration: none; color: #7a3d00; font-weight: 600; }
-  .nav-isolated span.sep { color: #bbb; }
-  .container { max-width: 900px; margin: 24px auto; padding: 0 20px; }
-  .card { background: #fff; border: 1px solid #e0c9a6; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(122,61,0,0.08); }
-  .card h2 { margin-top: 0; color: #7a3d00; }
-  .notice { background: #fff8e1; border-left: 4px solid #ffb300; padding: 10px 14px; margin-bottom: 16px; font-size: 0.95em; }
-  .notice strong { color: #7a3d00; }
-  #dropzone { border: 2px dashed #ffb74d; border-radius: 8px; padding: 24px; text-align: center; background: #fffaf0; cursor: pointer; }
-  #dropzone.dragover { background: #ffecb3; border-color: #ff8f00; }
-  #file-list { list-style: none; padding: 0; margin: 12px 0; }
-  #file-list li { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid #e0c9a6; border-radius: 6px; margin-bottom: 8px; background: #fff; cursor: grab; }
-  #file-list li.dragging { opacity: 0.4; }
-  .handle { cursor: grab; color: #999; font-size: 1.2em; }
-  .btn { background: #7a3d00; color: #fff; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-weight: 600; }
-  .btn:disabled { background: #c9a88a; cursor: not-allowed; }
-  .btn-secondary { background: #fff; color: #7a3d00; border: 1px solid #7a3d00; }
-  .field { margin-bottom: 12px; }
-  .field label { display: block; font-weight: 600; margin-bottom: 4px; color: #5d2e00; }
-  .field input[type="text"] { width: 100%; padding: 8px 10px; border: 1px solid #d7b896; border-radius: 6px; box-sizing: border-box; }
-  .footer-note { font-size: 0.85em; color: #8d6e63; margin-top: 8px; }
-  .back-link { font-size: 0.9em; color: #666; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manual PDF Merger — Isolated Tool</title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --amber-bg: #fffbf5;
+      --amber-primary: #b45309;
+      --amber-hover: #92400e;
+      --amber-border: #fde68a;
+      --amber-card: #ffffff;
+      --text: #1c1917;
+      --muted: #78716c;
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--amber-bg); color: var(--text); line-height: 1.5; font-size: 14px; }
+    
+    .banner {
+      background: #78350f;
+      color: #fff;
+      padding: 12px 24px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .nav-isolated {
+      background: #fef3c7;
+      border-bottom: 1px solid var(--amber-border);
+      padding: 10px 24px;
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      font-size: 0.9rem;
+    }
+
+    .nav-isolated a { text-decoration: none; color: #92400e; font-weight: 600; }
+    .nav-isolated a:hover { text-decoration: underline; }
+
+    .container { max-width: 860px; margin: 28px auto; padding: 0 20px; }
+    
+    .card {
+      background: var(--amber-card);
+      border: 1px solid #fed7aa;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 4px 12px rgba(180, 83, 9, 0.06);
+    }
+
+    h2 { font-size: 1.3rem; color: #78350f; font-weight: 700; margin-bottom: 8px; }
+    .muted { color: var(--muted); font-size: 0.88rem; }
+
+    .notice {
+      background: #fffbeb;
+      border-left: 4px solid #f59e0b;
+      padding: 12px 16px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+      font-size: 0.88rem;
+    }
+
+    #dropzone {
+      border: 2px dashed #f59e0b;
+      border-radius: var(--radius);
+      padding: 36px 20px;
+      text-align: center;
+      background: #fffdfa;
+      cursor: pointer;
+      transition: all 150ms ease;
+    }
+
+    #dropzone:hover, #dropzone.dragover {
+      background: #fef3c7;
+      border-color: #d97706;
+    }
+
+    #file-list { list-style: none; margin: 16px 0; display: flex; flex-direction: column; gap: 8px; }
+    
+    .file-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border: 1px solid #fed7aa;
+      border-radius: var(--radius);
+      background: #fff;
+      cursor: grab;
+      transition: all 120ms ease;
+    }
+
+    .file-item:hover {
+      background: #fffbf5;
+      border-color: #f59e0b;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+    }
+
+    .file-item.dragging { opacity: 0.35; transform: scale(0.98); }
+    .handle { color: #a8a29e; font-size: 1.2rem; cursor: grab; }
+    
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: var(--amber-primary);
+      color: #fff;
+      border: none;
+      padding: 10px 20px;
+      border-radius: var(--radius);
+      font-weight: 600;
+      font-size: 0.92rem;
+      cursor: pointer;
+      transition: all 150ms ease;
+    }
+
+    .btn:hover:not(:disabled) { background: var(--amber-hover); transform: translateY(-1px); }
+    .btn:disabled { background: #d6d3d1; cursor: not-allowed; }
+
+    .btn-secondary {
+      background: #fff;
+      color: var(--amber-primary);
+      border: 1px solid var(--amber-primary);
+    }
+
+    .btn-secondary:hover { background: #fef3c7; }
+    
+    .btn-remove {
+      background: transparent;
+      border: none;
+      color: #dc2626;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 1rem;
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+
+    .btn-remove:hover { background: #fee2e2; }
+
+    .field { margin-bottom: 16px; }
+    .field label { display: block; font-weight: 600; margin-bottom: 6px; color: #78350f; }
+    .field input[type="text"] {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid #fed7aa;
+      border-radius: var(--radius);
+      font-size: 0.95rem;
+      background: #fff;
+    }
+  </style>
 </head>
 <body>
-<div class="banner">Manual PDF Merger — Isolated Tool <small>Not part of the automated AI pipeline</small></div>
+
+<div class="banner">
+  <div>🛠️ Manual PDF Merger — Isolated Workspace</div>
+  <small style="font-weight:400; opacity:0.85;">Out-of-Pipeline Tool (No AI, No DB)</small>
+</div>
+
 <div class="nav-isolated">
-  <a href="/dashboard">← Pipeline Dashboard</a>
-  <span class="sep">|</span>
-  <span style="color:#7a3d00; font-weight:700;">Manual Merger (isolated)</span>
-  <span class="sep">|</span>
-  <a href="/manual/merger">This tool</a>
+  <a href="/dashboard">← Return to Automated Pipeline Dashboard</a>
+  <span style="color:#d6d3d1;">|</span>
+  <span style="font-weight:700; color:#78350f;">Manual Merger Active</span>
 </div>
 
 <div class="container">
   <div class="card">
-    <h2>Manual PDF Merger</h2>
+    <h2>Arbitrary PDF Merger</h2>
     <div class="notice">
-      <strong>Isolated from AI pipeline (FR-14.11–14.13):</strong> Files you upload here are <em>not</em> stored in the database,
-      not grouped into any PO&nbsp;Set, and have no <code>po_no</code> association. Output file name and destination are chosen by you at merge time (FR-14.12).
-      This page is visually and navigationally separate from the automated dashboard.
+      <strong>Isolated from AI pipeline (FR-14.11–14.13):</strong> Files uploaded here bypass AI extraction, database persistence, and audit logging. Reorder PDFs arbitrarily and compile them into a downloadable packet on demand.
     </div>
 
     <form id="merge-form" action="/manual/merge" method="post" enctype="multipart/form-data">
       <div class="field">
-        <label>Upload PDFs (any files, arbitrary order)</label>
+        <label>Upload PDF Documents to Merge</label>
         <div id="dropzone">
-          <p>Drag &amp; drop PDFs here or click to select</p>
+          <div style="font-size:2rem; margin-bottom:8px;">📄</div>
+          <p style="font-weight:600; color:#78350f; font-size:1rem; margin-bottom:4px;">Drag &amp; drop PDF files here</p>
+          <p class="muted" style="margin-bottom:12px;">or browse files from your computer</p>
           <input type="file" id="file-input" name="files" multiple accept="application/pdf" style="display:none">
-          <button type="button" class="btn-secondary btn" onclick="document.getElementById('file-input').click()">Choose files</button>
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('file-input').click()">
+            Choose PDF Files
+          </button>
         </div>
+
         <ul id="file-list"></ul>
         <input type="hidden" name="order" id="order-input" value="">
       </div>
 
       <div class="field">
-        <label for="output_filename">Output filename (user-selectable, FR-14.12)</label>
+        <label for="output_filename">Target Output Filename</label>
         <input type="text" id="output_filename" name="output_filename" value="manual_merged.pdf" placeholder="e.g. Invoice-1234_merged.pdf">
-        <div class="footer-note">You may choose any name; by default the merged file is downloaded with this name — not auto-written to the pipeline output folder.</div>
+        <p class="muted" style="margin-top:4px; font-size:0.8rem;">Result will download immediately to your browser with this name.</p>
       </div>
 
-      <button type="submit" id="merge-btn" class="btn" disabled>Merge &amp; Download</button>
-      <span class="footer-note" id="hint">Add at least 1 PDF to enable merge.</span>
+      <div style="display:flex; align-items:center; gap:16px; margin-top:20px;">
+        <button type="submit" id="merge-btn" class="btn" disabled>
+          <span>📥 Merge &amp; Download PDF</span>
+        </button>
+        <span class="muted" id="hint">Upload at least 1 PDF to begin.</span>
+      </div>
     </form>
   </div>
 
-  <div class="card">
-    <h2>How this differs from the automated pipeline</h2>
-    <ul>
-      <li>Pipeline dashboard: watches <code>input_folder</code>, groups by PO&nbsp;number, reconciles, auto-merges SI→DN→PO→(AWB→Customs) — all DB-backed.</li>
-      <li><strong>This tool:</strong> you upload arbitrary PDFs, drag to reorder, click Merge — result is a direct download, no DB row, no audit log.</li>
-      <li>Quarantine cases: copy files from the quarantine folder into this tool to resolve manually (FR-13.8).</li>
+  <div class="card" style="background:#fffaf5;">
+    <h2>When to use this tool?</h2>
+    <ul style="margin-left:20px; line-height:1.8; color:var(--muted); font-size:0.9rem;">
+      <li><strong>Resolving Quarantine:</strong> Grab files from a quarantined PO and combine them in custom order.</li>
+      <li><strong>One-off Packets:</strong> Merge invoices with receipts or certificates not tied to a Purchase Order.</li>
+      <li><strong>Custom Page Order:</strong> Arrange pages in any sequence by dragging cards above.</li>
     </ul>
-    <p class="back-link"><a href="/health">← Back to pipeline health</a> &nbsp;|&nbsp; <span style="color:#b71c1c; font-weight:600;">Isolated navigation — not pipeline</span></p>
   </div>
 </div>
 
@@ -93,16 +229,36 @@ const fileList = document.getElementById('file-list');
 const orderInput = document.getElementById('order-input');
 const mergeBtn = document.getElementById('merge-btn');
 const hint = document.getElementById('hint');
-let files = []; // {name, file}
+let files = [];
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+  return (bytes/(1024*1024)).toFixed(1) + ' MB';
+}
 
 function refreshList() {
   fileList.innerHTML = '';
   files.forEach((f, idx) => {
     const li = document.createElement('li');
+    li.className = 'file-item';
     li.draggable = true;
     li.dataset.idx = idx;
-    li.innerHTML = '<span class="handle">⋮⋮</span> <span>' + (idx+1) + '. ' + f.name + '</span> <span style="margin-left:auto; color:#999; font-size:0.85em;">drag to reorder</span>';
-    li.addEventListener('dragstart', e => { li.classList.add('dragging'); e.dataTransfer.setData('text/plain', idx); });
+    
+    li.innerHTML = `
+      <span class="handle" title="Drag to reorder">⋮⋮</span>
+      <span style="font-weight:700; color:#78350f; width:24px;">#${idx+1}</span>
+      <span style="font-size:1.2rem;">📄</span>
+      <span style="font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${f.name}</span>
+      <span class="muted" style="font-size:0.8rem;">${formatSize(f.file.size)}</span>
+      <button type="button" class="btn-remove" onclick="removeFile(${idx})" title="Remove file">✕</button>
+    `;
+
+    li.addEventListener('dragstart', e => {
+      li.classList.add('dragging');
+      e.dataTransfer.setData('text/plain', idx);
+    });
+
     li.addEventListener('dragend', () => li.classList.remove('dragging'));
     li.addEventListener('dragover', e => e.preventDefault());
     li.addEventListener('drop', e => {
@@ -117,14 +273,22 @@ function refreshList() {
         syncFileInput();
       }
     });
+
     fileList.appendChild(li);
   });
+
   mergeBtn.disabled = files.length === 0;
-  hint.textContent = files.length ? files.length + ' file(s) ready — drag to reorder, then Merge.' : 'Add at least 1 PDF to enable merge.';
+  hint.textContent = files.length ? `${files.length} PDF(s) staged — drag to arrange merge order.` : 'Upload at least 1 PDF to begin.';
+}
+
+function removeFile(index) {
+  files.splice(index, 1);
+  refreshList();
+  syncOrder();
+  syncFileInput();
 }
 
 function syncOrder() {
-  // natural order 0..n-1 reflects current visual order
   orderInput.value = files.map((_, i) => i).join(',');
 }
 
@@ -135,13 +299,15 @@ function syncFileInput() {
 }
 
 fileInput.addEventListener('change', () => {
-  files = Array.from(fileInput.files).map(f => ({name: f.name, file: f}));
+  const newFiles = Array.from(fileInput.files).map(f => ({name: f.name, file: f}));
+  files.push(...newFiles);
   refreshList();
   syncOrder();
+  syncFileInput();
 });
 
 dropzone.addEventListener('click', (e) => {
-  if (e.target === dropzone) fileInput.click();
+  if (e.target === dropzone || e.target.parentElement === dropzone) fileInput.click();
 });
 dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
 dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));

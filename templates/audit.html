@@ -1,24 +1,71 @@
 {% extends "base.html" %}
-{% block title %}Audit Log — AAM Merger{% endblock %}
+{% block title %}Audit Log — AAM Merger V3{% endblock %}
+
 {% block content %}
 <div class="card">
-  <h2>Audit Log — read-only</h2>
-  <p class="muted">Permanent entries for <code>force_merge</code> and <code>quarantine_delete</code> (FR-14.10, FR-13.6). No authentication in v1 — audit is accountability, not access control (§11). This view is read-only; entries cannot be created, edited, or deleted via UI.</p>
-  <table>
-    <thead><tr><th>Timestamp</th><th>Action</th><th>PO Set</th><th>Detail</th><th>Source</th></tr></thead>
-    <tbody>
-      {% for e in entries %}
-      <tr>
-        <td class="muted">{{ e.timestamp.isoformat() if e.timestamp else "—" }}</td>
-        <td><span class="badge {% if e.action.value == 'force_merge' %}badge-merged{% else %}badge-quarantined{% endif %}">{{ e.action.value if e.action.value is defined else e.action }}</span></td>
-        <td>{{ e.po_set_id if e.po_set_id is not none else "—" }}</td>
-        <td style="max-width:360px; overflow:hidden; text-overflow:ellipsis; font-size:0.88rem;">{{ e.detail or "—" }}</td>
-        <td class="muted">{{ e.source }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="5" class="muted" style="text-align:center; padding:16px;">No audit entries yet</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="card-header">
+    <div>
+      <h2 class="card-title">
+        <span>📜 System Audit Log</span>
+      </h2>
+      <p class="card-subtitle">
+        Immutable record of administrative actions (Force Merges, Quarantine Deletions). Read-only for compliance &amp; CA auditing.
+      </p>
+    </div>
+  </div>
+
+  <div class="table-container">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Timestamp (UTC)</th>
+          <th>Administrative Action</th>
+          <th>PO Set ID</th>
+          <th>Event Detail</th>
+          <th>Initiator</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in entries %}
+        {% set act = e.action.value if e.action.value is defined else (e.action|string) %}
+        <tr>
+          <td class="muted" style="font-family:ui-monospace, monospace; font-size:0.85rem;">
+            {{ e.timestamp.strftime('%Y-%m-%d %H:%M:%S') if e.timestamp else '—' }}
+          </td>
+          <td>
+            {% if act == 'force_merge' %}
+              <span class="badge badge-merged">⚡ Force Merge</span>
+            {% elif act == 'quarantine_delete' %}
+              <span class="badge badge-quarantined">🚨 Quarantine Delete</span>
+            {% else %}
+              <span class="badge badge-pending">{{ act }}</span>
+            {% endif %}
+          </td>
+          <td style="font-weight:600;">
+            {% if e.po_set_id %}
+              <a href="/po_sets/{{ e.po_set_id }}/view" class="po-link">PO Set #{{ e.po_set_id }}</a>
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td style="max-width:380px; font-size:0.88rem; color:var(--text-main);">
+            <code>{{ e.detail or '—' }}</code>
+          </td>
+          <td class="muted" style="font-size:0.85rem;">
+            {{ e.source }}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" style="text-align:center; padding:36px; color:var(--text-muted);">
+            <div style="font-size:1.8rem; margin-bottom:6px;">📝</div>
+            <div style="font-weight:600; color:var(--text-main);">Audit log is clean</div>
+            <div style="font-size:0.85rem; margin-top:4px;">No override actions or manual interventions have been executed.</div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}
