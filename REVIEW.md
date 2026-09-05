@@ -206,23 +206,23 @@ Branch `feat/reliability-fixes`, 17 commits. **116 passed, ruff clean, coverage 
 | BLOCKER-9 | Example-config fallback | **FIXED** | `load_config` raises; lifespan validates; API-key warning; `test_config_failfast.py` |
 | BLOCKER-10 | Anchor tautology | **Already fixed in tree** | real `reconcile_po_set` fixture test |
 | W-1 | COMBINED re-verification | **FIXED** | reconcile re-reads section evidence (`combined_unverified` hold); reclassify→COMBINED forces re-extract; red-green proven via stash |
-| W-2 | Invoice-name fallback | **OPEN** | queued (Batch A remainder: restrict standard sets to SI) |
+| W-2 | Invoice-name fallback | **FIXED** | `_invoice_name(loose=False)` standard sets name strictly from SI; COMBINED/force keep loose fallback; `test_standard_set_names_strictly_from_si` |
 | W-3 | Sync swallow + sleep | **FIXED** | exceptions logged; deterministic 409 test; sleep removed (stable 3×) |
-| W-4 | Pairwise conflict check | **OPEN** | queued (Batch A remainder: all-pairs) |
+| W-4 | Pairwise conflict check | **FIXED** | all-pairs `itertools.combinations`; pre-fix detection hash-order flaky (missed 6/8 seeds), post-fix stable 8/8 |
 | W-5 | customs_doc_count writers | **Already fixed in tree** | both writers count distinct types |
 | W-6 | redo_extract attempt cap | **Already fixed in tree** | resets count to 0 |
 | W-7 | Flow holds no lock | **FIXED** | `services/sync_lock.py`; flow acquires or skips; route passes held lock |
 | W-8 | Status pre-set strand | **FIXED (corrected)** | forward-progress pending kept (load-bearing for stale-sweep), restore-on-refusal added — suite caught the naive removal |
 | W-9 | filelock undeclared | **FIXED** | `filelock>=3.16.0` in pyproject + lock |
 | W-10 | Retry hardcoded | **FIXED** | `_extract_task_for` via `with_options` from config + test |
-| W-11 | manual_merger errors/tmps | **OPEN** | queued (Batch D: 422 mapping, BackgroundTask cleanup, 100MB cap) |
-| W-12 | Upload write-before-dedup | **OPEN** | queued (Batch D: dedup-first, PDF sniff, allowlist) |
+| W-11 | manual_merger errors/tmps | **FIXED** | 422 error mapping; BackgroundTask tmp cleanup (3/3 tmps proven gone); 100MB stream cap; `.pdf` allowlist |
+| W-12 | Upload write-before-dedup | **FIXED** | dedup-check before write (poison-file test); `%PDF` + page sniff; idempotent 302 |
 | W-13 | Config not fail-fast | **FIXED** | see BLOCKER-9 |
 | W-14 | Audit loses po_set_id | **FIXED** | audit-first + `ON DELETE SET NULL` migration `00628c4756fc` (chain + downgrade verified on scratch DB) |
 | W-15 | Engine per call | **Already fixed in tree** | module-level cache; committed |
 | W-16 | Decoy false-positive | **FIXED** | warning log with doc id + both PO values |
 | W-17 | No stale-sync recovery | **FIXED** | sidecar watchdog 3600s (human decision); read-only status |
-| W-18 | Upload type allowlist | **OPEN** | queued (Batch D) |
+| W-18 | Upload type allowlist | **FIXED** | `.pdf` suffix enforced + stored with fixed `.pdf` name (both upload paths) |
 | W-19 | Stability on missing file | **Already fixed in tree** | returns False |
 | W-20 | Step-10 all-or-nothing | **FIXED** | per-line mapping (FR-8.1a confirmed real pattern, recorded in SPEC); ambiguous anchors wait |
 | W-21 | COMBINED+separate double-merge | **FIXED** | COMBINED-exclusive packet per FR-14.7 + 1-page test |
@@ -230,4 +230,4 @@ Branch `feat/reliability-fixes`, 17 commits. **116 passed, ruff clean, coverage 
 | W-G1/G2 | gitignore gaps | **FIXED** | committed on safe-hygiene branch |
 | W-G3 | Untracked migrations | **FIXED** | locking.py + all 3 migrations committed with models |
 
-**Still open:** W-2, W-4 (Batch A remainder), W-11, W-12, W-18 (Batch D), real-sample VLM validation (needs API balance).
+**Still open:** real-sample VLM validation (needs API balance). Everything else is fixed and test-locked.
