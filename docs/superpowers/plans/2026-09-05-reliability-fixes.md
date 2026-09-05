@@ -236,7 +236,7 @@ Run → FAIL (returns example config or wrong error).
 ### Task 10 (P1): Merge guards — status pre-set + zero-evidence refusal (W-8, W-22)
 
 **Files:**
-- Modify: `src/app/services/reconciliation.py` (both merge call sites: do NOT pre-set `pending`; call `merge_po_set`; if None → restore prior status + `logger.warning`)
+- Modify: `src/app/services/reconciliation.py` (both merge call sites: reconciled-sets clear to `pending` for the merge as forward progress, but on `merge_po_set` returning None restore the prior status + `logger.warning` — never strand or demote)
 - Modify: `src/app/services/merge.py::merge_po_set` (refuse when total line items == 0 → return None + warning; auto path only, `force_merge` unchanged)
 - Test: `tests/test_merge.py` (zero-line reconciled-shaped set → None, status untouched) + `tests/test_reconciliation.py` (merge returning None preserves prior status).
 

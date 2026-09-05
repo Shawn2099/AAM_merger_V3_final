@@ -130,10 +130,24 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
 
             from app.services.merge import merge_po_set
 
+            # Forward progress: this set just verified reconciled, so clear
+            # to pending for the merge. If merge refuses (None), restore the
+            # prior status instead of stranding in pending (W-8).
+            prior_status = ps.status
             ps.status = POSetStatus.pending
             s.commit()
             merged_path = merge_po_set(po_set_id, cfg)
             s.refresh(ps)
+            if merged_path is None:
+                if ps.status != prior_status:
+                    ps.status = prior_status
+                    s.commit()
+                    s.refresh(ps)
+                logger.warning(
+                    "Merge refused for COMBINED PO Set %s — kept %s",
+                    po_set_id,
+                    prior_status,
+                )
             return {
                 "status": ps.status.value if hasattr(ps.status, "value") else str(ps.status),
                 "po_set_id": po_set_id,
@@ -336,10 +350,21 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
         # Auto-merge (FR-14.1)
         from app.services.merge import merge_po_set
 
+        # Forward progress only: reconciled just now → clear to pending for
+        # the merge; restore prior status if merge refuses (W-8).
+        prior_status = ps.status
         ps.status = POSetStatus.pending
         s.commit()
         merged_path = merge_po_set(po_set_id, cfg)
         s.refresh(ps)
+        if merged_path is None:
+            if ps.status != prior_status:
+                ps.status = prior_status
+                s.commit()
+                s.refresh(ps)
+            logger.warning(
+                "Auto-merge refused for PO Set %s — kept %s", po_set_id, prior_status
+            )
         return {
             "status": ps.status.value if hasattr(ps.status, "value") else str(ps.status),
             "po_set_id": po_set_id,
