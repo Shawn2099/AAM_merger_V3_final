@@ -41,20 +41,14 @@ def client(tmp_db, monkeypatch):
     # ensure sync routes see same DB via config
     monkeypatch.setenv("AAM_CONFIG_PATH", str(Path("config.example.yaml")))
     # patch load_config to return tmp_db for routes
-    import app.api.routes.sync as sync_mod
-
-    # monkeypatch load_config inside routes to return tmp_db
     monkeypatch.setattr("app.api.routes.sync.load_config", lambda path=None: tmp_db)
     monkeypatch.setattr("app.api.routes.po_sets.load_config", lambda path=None: tmp_db)
     monkeypatch.setattr("app.flows.sync.load_config", lambda path=None: tmp_db)
     monkeypatch.setattr("app.services.sync_lock.load_config", lambda path=None: tmp_db)
-    # reset global sync lock
-    sync_mod._sync_running = False
     from app.main import app
 
     with TestClient(app) as c:
         yield c
-    sync_mod._sync_running = False
 
 
 def _create_po_set(cfg, po_no="PO9999", status=POSetStatus.pending):
@@ -70,13 +64,21 @@ def _create_po_set(cfg, po_no="PO9999", status=POSetStatus.pending):
         return ps.id
 
 
-def test_concurrent_sync_409(client):
-    # first POST /sync -> 200, second immediate -> 409 "Sync already running"
-    r1 = client.post("/sync")
-    assert r1.status_code == 200, r1.text
-    r2 = client.post("/sync")
-    assert r2.status_code == 409, r2.text
-    assert "Sync already running" in r2.text
+def test_concurrent_sync_409(client, tmp_db):
+    # Deterministic: hold the sync lock directly, POST must 409; release,
+    # POST must start a sync (200). No timing dependence on worker sleep.
+    import app.services.sync_lock as sl
+
+    holder = sl.acquire_sync_lock()
+    assert holder is not None
+    try:
+        r_locked = client.post("/sync")
+        assert r_locked.status_code == 409, r_locked.text
+        assert "Sync already running" in r_locked.text
+    finally:
+        sl.release_sync_lock(holder)
+    r_free = client.post("/sync")
+    assert r_free.status_code == 200, r_free.text
 
 
 def test_po_lock_409(client, tmp_db):

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 
 from fastapi import APIRouter, HTTPException
 
@@ -23,10 +22,10 @@ def _run_sync(lock, cfg_path: str | None = None) -> None:
 
     Uses daemon thread so TestClient does not block on BackgroundTasks.
     The held lock is passed through so sync_flow does not self-deadlock.
+    The lock is held for the entire flow run, so the 409 window is exact —
+    no artificial sleep needed.
     """
     try:
-        # Keep lock active for at least 0.5s for immediate second POST 409 window in tests
-        time.sleep(0.5)
         from app.flows.sync import sync_flow
 
         sync_flow(cfg_path=cfg_path, held_lock=lock)
