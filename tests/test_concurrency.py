@@ -259,6 +259,43 @@ def test_route_release_passes_action(tmp_db, monkeypatch):
         assert ps.locked_by_action is None
 
 
+def test_atomic_acquire_race(tmp_db):
+    """Two threads racing acquire_lock on one row → exactly one winner
+    (FR-CONC-2: single conditional UPDATE, rowcount decides)."""
+    import threading
+
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import POSet, POSetStatus
+    from app.models.base import Base
+    from app.services.locking import acquire_lock
+
+    eng = get_engine(tmp_db)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="RACE", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        pid = ps.id
+
+    results = []
+    barrier = threading.Barrier(2)
+
+    def attempt():
+        with Session(eng) as s:
+            ps = s.get(POSet, pid)
+            barrier.wait(timeout=10)
+            results.append(acquire_lock(ps, "race", s, tmp_db))
+
+    ts = [threading.Thread(target=attempt) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert sorted(results) == [False, True]
+
+
 def test_running_sync_detected(tmp_db, monkeypatch):
     """Held sync lock → _is_sync_running True; released → False (FR-CONC-3)."""
     import app.services.sync_lock as sl

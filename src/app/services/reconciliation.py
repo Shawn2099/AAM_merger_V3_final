@@ -169,6 +169,16 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
                 and d.po_no_normalized
                 and d.po_no_normalized != ps.po_no_normalized
             ):
+                # W-16: log both values — re-extraction overwrites
+                # doc.po_no_normalized from the VLM while po_set_id stays,
+                # so VLM po-reference drift can false-positive here.
+                logger.warning(
+                    "PO reference mismatch: doc %s (%s) != PO Set %s (%s)",
+                    d.id,
+                    d.po_no_normalized,
+                    ps.id,
+                    ps.po_no_normalized,
+                )
                 ps.status = POSetStatus.quarantined
                 s.commit()
                 quarantine_copy(ps.id, cfg)
