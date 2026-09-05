@@ -49,11 +49,10 @@ def tmp_cfg(tmp_path):
 
 @pytest.fixture()
 def client(tmp_cfg, monkeypatch):
-    import app.api.routes.sync as sync_mod
-
     monkeypatch.setattr("app.api.routes.sync.load_config", lambda path=None: tmp_cfg)
     monkeypatch.setattr("app.api.routes.po_sets.load_config", lambda path=None: tmp_cfg)
     monkeypatch.setattr("app.flows.sync.load_config", lambda path=None: tmp_cfg)
+    monkeypatch.setattr("app.services.sync_lock.load_config", lambda path=None: tmp_cfg)
     # dashboard module may also use load_config
     try:
         import importlib.util
@@ -65,12 +64,10 @@ def client(tmp_cfg, monkeypatch):
     except ImportError:
         pass
     # also patch app.main load_config if needed
-    sync_mod._sync_running = False
     from app.main import app
 
     with TestClient(app) as c:
         yield c
-    sync_mod._sync_running = False
 
 
 def _create_poset(cfg, po_no="PO1000", status=POSetStatus.pending, has_customs=False):
@@ -451,6 +448,46 @@ def test_unclassified_view_and_reclassify(tmp_cfg, client):
         assert d.po_set_id is not None
         ps = s.get(POSet, d.po_set_id)
         assert ps.po_no_normalized == "MANUALPO999"
+
+
+def test_reclassify_to_combined_forces_reextract(tmp_cfg, client):
+    """W-1: hand-tagging a doc COMBINED resets extraction so the FR-6.7
+    section gate re-validates it before any merge."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="unk_hash_combined",
+            original_filename="maybe_combined.pdf",
+            stored_path="data/stored/maybe_combined.pdf",
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.valid,
+            extraction_attempt_count=2,
+        )
+        s.add(doc)
+        s.commit()
+        s.refresh(doc)
+        doc_id = doc.id
+
+    r_post = client.post(
+        f"/unclassified/{doc_id}/reclassify",
+        data={"doc_type": "COMBINED", "po_no": "REC999"},
+        headers={"HX-Request": "true"},
+    )
+    assert r_post.status_code == 200
+
+    with Session(eng) as s:
+        d = s.get(Document, doc_id)
+        assert d.doc_type == DocType.COMBINED
+        assert d.extraction_status == ExtractionStatus.pending
+        assert d.extraction_attempt_count == 0
 
 
 def test_manual_merger_back_link_points_to_dashboard(client):

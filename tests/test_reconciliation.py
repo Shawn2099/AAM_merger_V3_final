@@ -978,3 +978,101 @@ def test_sync_flow_sweep_reconciles_stale_mismatched_set(tmp_path):
         ps_after = s.get(POSet, ps_id)
         assert ps_after.status == POSetStatus.merged
         assert ps_after.merged_output_path is not None
+
+
+def _make_combined_set(tmp_path, raw_sections, suffix):
+    """Fixture helper: POSet with one COMBINED doc carrying given section evidence."""
+    import json
+    from pathlib import Path
+
+    from sqlalchemy.orm import Session
+
+    from app.core.config import load_config
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus, LineItem, POSet, POSetStatus
+    from app.models.base import Base
+
+    cfg = load_config("config.example.yaml")
+    cfg.paths.database_path = str(tmp_path / f"comb_{suffix}.db")
+    cfg.paths.stored_documents_folder = str(tmp_path / f"stored_comb_{suffix}")
+    cfg.paths.output_folder = str(tmp_path / f"out_comb_{suffix}")
+    Path(cfg.paths.stored_documents_folder).mkdir(parents=True, exist_ok=True)
+    Path(cfg.paths.output_folder).mkdir(parents=True, exist_ok=True)
+
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO_COMB", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+
+        pdf = tmp_path / f"stored_comb_{suffix}" / "combined.pdf"
+        _create_dummy_pdf(pdf)
+        doc = Document(
+            sha256_hash=f"h_comb_{suffix}",
+            original_filename="combined.pdf",
+            stored_path=str(pdf),
+            doc_type=DocType.COMBINED,
+            extraction_status=ExtractionStatus.valid,
+            po_set_id=ps_id,
+            po_no_normalized="PO_COMB",
+            invoice_no="INV-COMB-1",
+            raw_extraction_json=json.dumps(raw_sections),
+        )
+        s.add(doc)
+        s.commit()
+        s.add(
+            LineItem(
+                document_id=doc.id,
+                line_item_no="1",
+                description="Combo Widget",
+                quantity=5000,
+                unit_price=100000,
+            )
+        )
+        s.commit()
+    return ps_id, cfg, eng
+
+
+def test_combined_incomplete_sections_waits_unverified(tmp_path):
+    """W-1: COMBINED missing SI section evidence never merges (FR-6.7)."""
+    from sqlalchemy.orm import Session
+
+    from app.models import POSet, POSetStatus
+    from app.services.reconciliation import reconcile_po_set
+
+    ps_id, cfg, eng = _make_combined_set(
+        tmp_path,
+        {"has_po_section": True, "has_dn_section": True, "has_si_section": False},
+        "partial",
+    )
+    res = reconcile_po_set(ps_id, cfg)
+    assert res["status"] == "pending"
+    assert res["reason"] == "combined_unverified"
+    with Session(eng) as s:
+        ps_after = s.get(POSet, ps_id)
+        assert ps_after.status == POSetStatus.pending
+        assert ps_after.merged_output_path is None
+
+
+def test_combined_full_sections_merges(tmp_path):
+    """W-1: COMBINED with all 3 sections still auto-merges (no regression)."""
+    from sqlalchemy.orm import Session
+
+    from app.models import POSet, POSetStatus
+    from app.services.reconciliation import reconcile_po_set
+
+    ps_id, cfg, eng = _make_combined_set(
+        tmp_path,
+        {"has_po_section": True, "has_dn_section": True, "has_si_section": True},
+        "full",
+    )
+    res = reconcile_po_set(ps_id, cfg)
+    assert res["status"] == "merged"
+    with Session(eng) as s:
+        ps_after = s.get(POSet, ps_id)
+        assert ps_after.status == POSetStatus.merged
+        assert ps_after.merged_output_path is not None

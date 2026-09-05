@@ -672,13 +672,19 @@ def reclassify_document(
         if doc is None:
             raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
         doc.doc_type = new_doc_type
+        if new_doc_type == DocType.COMBINED:
+            # A hand-tagged COMBINED carries no VLM section evidence — force
+            # re-extraction so the FR-6.7 gate validates it before any merge.
+            from app.models import ExtractionStatus as ES
+
+            doc.extraction_status = ES.pending
+            doc.extraction_attempt_count = 0
         if po_no and po_no.strip():
-            import re
+            from app.services.grouping import normalize_po_no
 
             raw = po_no.strip()
-            norm = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
             doc.po_no_raw = raw
-            doc.po_no_normalized = norm
+            doc.po_no_normalized = normalize_po_no(raw)
             ps = get_or_create_po_set(raw, cfg)
             doc.po_set_id = ps.id
         s.commit()

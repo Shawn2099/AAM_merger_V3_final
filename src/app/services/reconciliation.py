@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from rapidfuzz import fuzz
+import json
+import logging
+
 from sqlalchemy.orm import Session
 
 from app.core.config import AppConfig
 from app.core.database import get_engine
 from app.models import DocType, POSet, POSetStatus
 from app.models.base import Base
-from app.services.matching import _norm, find_unmatched, match_line
+from app.services.matching import find_unmatched, get_matching_candidates, match_line
 from app.services.quarantine import quarantine_copy
+
+logger = logging.getLogger(__name__)
 
 
 def aggregate(lines):
@@ -86,6 +90,36 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
                     "flags": [],
                 }
 
+            # COMBINED 3-section re-verification (FR-6.7/W-1): the extraction
+            # gate runs once at VLM time, but reclassify/manual paths can tag
+            # a doc COMBINED with no section evidence. Re-read the persisted
+            # raw JSON here; missing/incomplete evidence waits visibly instead
+            # of auto-merging an unverified packet.
+            for cd in combined_docs:
+                try:
+                    raw = json.loads(cd.raw_extraction_json) if cd.raw_extraction_json else {}
+                except Exception:
+                    raw = {}
+                if not (
+                    raw.get("has_po_section")
+                    and raw.get("has_dn_section")
+                    and raw.get("has_si_section")
+                ):
+                    logger.warning(
+                        "COMBINED doc %s unverified (missing PO/DN/SI section "
+                        "evidence) — holding PO Set %s pending",
+                        cd.id,
+                        po_set_id,
+                    )
+                    ps.status = POSetStatus.pending
+                    s.commit()
+                    return {
+                        "status": "pending",
+                        "reason": "combined_unverified",
+                        "po_set_id": po_set_id,
+                        "flags": [],
+                    }
+
             # Customs gate check (FR-12.3)
             from app.services.customs import is_blocked
 
@@ -96,6 +130,8 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
 
             from app.services.merge import merge_po_set
 
+            ps.status = POSetStatus.pending
+            s.commit()
             merged_path = merge_po_set(po_set_id, cfg)
             s.refresh(ps)
             return {
@@ -106,10 +142,38 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
             }
 
         # 2. Standard multi-doc sets (PO + DN + SI)
-        if not po_docs or (not dn_docs and not si_docs):
+        # Needs at least PO and SI to evaluate reconciliation; otherwise pending
+        if not po_docs or not si_docs:
             ps.status = POSetStatus.pending
             s.commit()
             return {"status": "pending", "po_set_id": po_set_id, "flags": []}
+
+        # Decoy PO / Cross-document PO Reference Validation (SPEC §7.3 FR-6.3)
+        for d in docs:
+            if (
+                _get_type(d) in (DocType.PO.value, DocType.DN.value, DocType.SI.value)
+                and d.po_no_normalized
+                and d.po_no_normalized != ps.po_no_normalized
+            ):
+                ps.status = POSetStatus.quarantined
+                s.commit()
+                quarantine_copy(ps.id, cfg)
+                msg = (
+                    f"PO reference mismatch: doc {d.original_filename} "
+                    f"({d.po_no_normalized}) != PO Set ({ps.po_no_normalized})"
+                )
+                return {
+                    "status": "quarantined",
+                    "reason": "po_reference_mismatch",
+                    "po_set_id": po_set_id,
+                    "flags": [
+                        {
+                            "priority": 1,
+                            "type": "identification",
+                            "message": msg,
+                        }
+                    ],
+                }
 
         po_lines = [
             {
@@ -179,7 +243,7 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
         # Forward match & conflicting description check (FR-8.4)
         flags = []
         for p in po_lines:
-            m_res = match_line(p, dn_lines, si_lines, thr=thr)
+            m_res = match_line(p, dn_lines, si_lines, all_po_lines=po_lines, thr=thr)
             if m_res.get("quarantine"):
                 ps.status = POSetStatus.quarantined
                 s.commit()
@@ -201,26 +265,9 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
         reconciled_all = True
         for p in po_lines:
             p_no = p.get("line_item_no")
-            p_desc = p.get("description") or ""
 
-            if p_no:
-                matching_dn = [d for d in dn_lines if d.get("line_item_no") == p_no]
-                matching_si = [s for s in si_lines if s.get("line_item_no") == p_no]
-            else:
-                matching_dn = [
-                    d
-                    for d in dn_lines
-                    if not d.get("line_item_no")
-                    and fuzz.token_sort_ratio(_norm(p_desc), _norm(d.get("description") or ""))
-                    >= thr
-                ]
-                matching_si = [
-                    s
-                    for s in si_lines
-                    if not s.get("line_item_no")
-                    and fuzz.token_sort_ratio(_norm(p_desc), _norm(s.get("description") or ""))
-                    >= thr
-                ]
+            matching_dn = get_matching_candidates(p, dn_lines, all_po_lines=po_lines, thr=thr)
+            matching_si = get_matching_candidates(p, si_lines, all_po_lines=po_lines, thr=thr)
 
             agg_dn = sum(d["quantity"] for d in matching_dn)
             agg_si = sum(s["quantity"] for s in matching_si)
@@ -258,6 +305,22 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
         flags.sort(key=lambda f: f.get("priority", 99))
 
         if not reconciled_all:
+            # Partial fulfillment check: if unfulfilled lines exist (agg_dn == 0 or agg_si == 0),
+            # PO set is waiting for future deliveries/invoices -> stays pending
+            has_unfulfilled = any(
+                (flag.get("agg_dn_quantity") == 0 or flag.get("agg_si_quantity") == 0)
+                for flag in flags
+                if flag.get("type") == "quantity"
+            )
+            if has_unfulfilled:
+                ps.status = POSetStatus.pending
+                s.commit()
+                return {
+                    "status": "pending",
+                    "reason": "partial_fulfillment",
+                    "po_set_id": po_set_id,
+                    "flags": flags,
+                }
             ps.status = POSetStatus.mismatched
             s.commit()
             return {"status": "mismatched", "po_set_id": po_set_id, "flags": flags}
@@ -273,6 +336,8 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
         # Auto-merge (FR-14.1)
         from app.services.merge import merge_po_set
 
+        ps.status = POSetStatus.pending
+        s.commit()
         merged_path = merge_po_set(po_set_id, cfg)
         s.refresh(ps)
         return {
