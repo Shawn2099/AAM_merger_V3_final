@@ -192,6 +192,7 @@ Numbering mirrors business doc sections for traceability.
 ### 7.5 Line-item matching (business doc §8)
 
 - **[FR-8.1]** The system shall treat `line_item_no` as the sole primary matching key when present.
+- **[FR-8.1a]** ERP step-10 alignment (confirmed real vendor pattern, 2026-09-05): when PO lines use step-10 numbering (10, 20, 30, …) and DN/SI lines use unit numbering (1, 2, 3, …), PO line `N` shall map to DN/SI line `N/10`. This is a `line_item_no`-derived mapping, not a positional signal, and it never overrides an exact `line_item_no` match.
 - **[FR-8.2]** When `line_item_no` is absent, the system shall fall back to fuzzy description matching using `rapidfuzz` token-sort similarity, with a threshold of 85% stored as a configurable constant (not hardcoded inline). Description matching shall never override or double-check a present `line_item_no` match.
 - **[FR-8.3]** The system shall not use `slno`, positional order, or `part_no` as matching signals under any circumstance.
 - **[FR-8.4]** When two documents of the same type reference the same `line_item_no` with consistent descriptions, the system shall sum their quantities (§7.6). When descriptions conflict for the same `line_item_no`, the system shall route the entire PO Set to `quarantined`.
