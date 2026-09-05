@@ -372,3 +372,21 @@ def test_zero_evidence_auto_merge_refused(tmp_path):
         ps_after = s.get(POSet, ps_id)
         assert ps_after.status == POSetStatus.pending
         assert ps_after.merged_output_path is None
+
+
+def test_standard_set_names_strictly_from_si(tmp_path):
+    """W-2: standard set where only the DN carries an invoice number cannot
+    be named from it → auto-merge refuses instead of misnaming the packet."""
+    from app.services.merge import merge_po_set
+
+    cfg = _cfg_with_tmp(tmp_path)
+    po_set_id = _create_poset_with_docs(
+        tmp_path,
+        cfg,
+        docs_info=[
+            {"doc_type": "SI"},
+            {"doc_type": "DN", "invoice_no": "DN-INV-9"},
+            {"doc_type": "PO"},
+        ],
+    )
+    assert merge_po_set(po_set_id, cfg) is None

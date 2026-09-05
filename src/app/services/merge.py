@@ -22,8 +22,13 @@ def _doc_type_val(doc) -> str:
         return str(dt)
 
 
-def _invoice_name(po_set: POSet) -> str | None:
-    """FR-14.5: filename is Invoice/SI number, no fallback beyond guarantee."""
+def _invoice_name(po_set: POSet, loose: bool = False) -> str | None:
+    """FR-14.5: filename is Invoice/SI number.
+
+    Standard sets name strictly from the SI doc (W-2). COMBINED-only sets
+    and force-merge use the loose fallback (any doc's si_no/invoice_no),
+    since no SI doc may exist there.
+    """
     docs = po_set.documents or []
     # prefer SI's si_no/invoice_no
     for d in docs:
@@ -34,6 +39,8 @@ def _invoice_name(po_set: POSet) -> str | None:
             inv = getattr(d, "invoice_no", None)
             if inv:
                 return inv  # type: ignore[return-value]
+    if not loose:
+        return None
     # for COMBINED or fallback, try any doc with si_no/invoice_no
     for d in docs:
         si_no = getattr(d, "si_no", None)
@@ -154,7 +161,12 @@ def merge_po_set(po_set_id: int, cfg) -> Path | None:
             )
             return None
 
-        invoice = _invoice_name(ps)
+        invoice = _invoice_name(
+            ps,
+            loose=any(
+                _doc_type_val(d) == DocType.COMBINED.value for d in (ps.documents or [])
+            ),
+        )
         if not invoice:
             # SPEC says SI presence guaranteed when reconciled; if missing, cannot name file -> None
             return None
@@ -208,7 +220,7 @@ def force_merge(po_set_id: int, cfg) -> Path:
         if not ordered:
             # still create empty? better raise — but spec says merge with whatever exists
             # create empty placeholder out
-            invoice = _invoice_name(ps) or ps.po_no_normalized
+            invoice = _invoice_name(ps, loose=True) or ps.po_no_normalized
             safe = "".join(c for c in str(invoice) if c.isalnum() or c in ("-", "_", "."))
             if not safe:
                 safe = ps.po_no_normalized
@@ -240,7 +252,7 @@ def force_merge(po_set_id: int, cfg) -> Path:
             assert ps.merged_output_path is not None
             return Path(ps.merged_output_path)
 
-        invoice = _invoice_name(ps) or ps.po_no_normalized
+        invoice = _invoice_name(ps, loose=True) or ps.po_no_normalized
         safe = "".join(c for c in str(invoice) if c.isalnum() or c in ("-", "_", "."))
         if not safe:
             safe = str(invoice)

@@ -4,6 +4,7 @@ fuzzy fallback, reverse checks (FR-8.1-8.5).
 
 from __future__ import annotations
 
+import itertools
 import re
 
 from rapidfuzz import fuzz
@@ -81,21 +82,22 @@ def match_line(
     dn_cands = get_matching_candidates(po, dn_lines, all_po_lines=all_po_lines, thr=thr)
     si_cands = get_matching_candidates(po, si_lines, all_po_lines=all_po_lines, thr=thr)
 
-    # Check conflicting descriptions on duplicate same-type candidates (FR-8.4)
+    # Check conflicting descriptions on duplicate same-type candidates (FR-8.4).
+    # Every pair is compared: with 3+ distinct descriptions, checking only
+    # the first two lets a conflicting third slip through (W-4).
     if len(dn_cands) >= 2:
         norm_descs = {_norm(d.get("description") or "") for d in dn_cands}
         if len(norm_descs) > 1:
-            # Check pairwise token sort ratio; if different items -> quarantine
-            descs_list = list(norm_descs)
-            if fuzz.token_sort_ratio(descs_list[0], descs_list[1]) < thr:
-                return {"matched": False, "quarantine": True}
+            for a, b in itertools.combinations(sorted(norm_descs), 2):
+                if fuzz.token_sort_ratio(a, b) < thr:
+                    return {"matched": False, "quarantine": True}
 
     if len(si_cands) >= 2:
         norm_descs = {_norm(s.get("description") or "") for s in si_cands}
         if len(norm_descs) > 1:
-            descs_list = list(norm_descs)
-            if fuzz.token_sort_ratio(descs_list[0], descs_list[1]) < thr:
-                return {"matched": False, "quarantine": True}
+            for a, b in itertools.combinations(sorted(norm_descs), 2):
+                if fuzz.token_sort_ratio(a, b) < thr:
+                    return {"matched": False, "quarantine": True}
 
     matched = bool(dn_cands or not dn_lines) and bool(si_cands or not si_lines)
     return {"matched": matched, "quarantine": False}

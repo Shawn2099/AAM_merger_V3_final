@@ -155,3 +155,30 @@ def test_step_10_reverse_per_line():
     ]
     dn_lines = [{"line_item_no": "1", "description": "Bolt"}]
     assert find_unmatched(po_lines, dn_lines, [], thr=85) == []
+
+
+def test_conflict_third_description_quarantine():
+    """W-4: with 3+ distinct descriptions on one line, every pair is
+    compared — a conflicting third description cannot slip through."""
+    from app.services.matching import match_line
+
+    po = {"line_item_no": "5", "description": "Widget A"}
+    dn = [
+        {"line_item_no": "5", "description": "Widget A", "qty": 10},
+        {"line_item_no": "5", "description": "Widget A+", "qty": 10},
+        {"line_item_no": "5", "description": "Totally different gadget", "qty": 10},
+    ]
+    assert match_line(po, dn, [], thr=85)["quarantine"] is True
+
+
+def test_conflict_third_description_quarantine_si():
+    """W-4, SI branch: same all-pairs rule."""
+    from app.services.matching import match_line
+
+    po = {"line_item_no": "5", "description": "Widget A"}
+    si = [
+        {"line_item_no": "5", "description": "Widget A", "qty": 10},
+        {"line_item_no": "5", "description": "Widget A+", "qty": 10},
+        {"line_item_no": "5", "description": "Totally different gadget", "qty": 10},
+    ]
+    assert match_line(po, [], si, thr=85)["quarantine"] is True
