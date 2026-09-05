@@ -9,12 +9,14 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import load_config
 from app.core.database import get_engine
 from app.models import AuditLog, DocType, Document, LineItem, POSet, POSetStatus
 from app.models.base import Base
+from app.services.locking import acquire_lock, is_locked, release_lock
 
 router = APIRouter()
 
@@ -23,21 +25,6 @@ _templates = Jinja2Templates(directory="templates")
 
 # 5 statuses as defined in SPEC §6.3 — enum values are the source of truth
 _ALLOWED_STATUSES = {s.value for s in POSetStatus}
-
-
-def _is_locked(ps: POSet, cfg) -> bool:
-    if ps.locked_by_action is None:
-        return False
-    from datetime import UTC, datetime
-
-    updated = ps.updated_at
-    if updated is None:
-        return True
-    if updated.tzinfo is None:
-        updated = updated.replace(tzinfo=UTC)
-    now = datetime.now(UTC)
-    timeout = cfg.concurrency.po_set_lock_timeout_seconds
-    return (now - updated).total_seconds() <= timeout
 
 
 def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) -> list[dict]:
@@ -53,9 +40,21 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
         ]
     else:
         pools = q.all()
+
+    if not pools:
+        return []
+
+    po_set_ids = [ps.id for ps in pools]
+    doc_count_rows = (
+        session.query(Document.po_set_id, func.count(Document.id))
+        .filter(Document.po_set_id.in_(po_set_ids))
+        .group_by(Document.po_set_id)
+        .all()
+    )
+    doc_counts = dict(doc_count_rows)
+
     out = []
     for ps in pools:
-        docs = session.query(Document).filter_by(po_set_id=ps.id).all()
         status_val = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
         has_merged_file = bool(ps.merged_output_path and Path(ps.merged_output_path).exists())
         out.append(
@@ -64,11 +63,11 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
                 "po_no_normalized": ps.po_no_normalized,
                 "status": ps.status,
                 "status_val": status_val,
-                "doc_count": len(docs),
+                "doc_count": doc_counts.get(ps.id, 0),
                 "has_merged_file": has_merged_file,
                 "updated_at": ps.updated_at,
                 "locked_by_action": ps.locked_by_action,
-                "is_locked": _is_locked(ps, cfg),
+                "is_locked": is_locked(ps, cfg),
             }
         )
     out.sort(key=lambda x: x["updated_at"] or x["id"], reverse=True)  # type: ignore[no-matching-overload]
@@ -85,30 +84,27 @@ def _sync_running_state() -> bool:
 
 
 def _get_stats(session: Session) -> dict:
-    all_sets = session.query(POSet).all()
+    rows = session.query(POSet.status, func.count(POSet.id)).group_by(POSet.status).all()
+    counts = {}
+    for st, cnt in rows:
+        st_val = st.value if hasattr(st, "value") else str(st)
+        counts[st_val] = cnt
+
+    total_c = sum(counts.values())
+    merged_c = counts.get("merged", 0)
+    pct = round(merged_c / total_c * 100) if total_c > 0 else 0
     unclassified_count = (
         session.query(Document).filter(Document.doc_type == DocType.UNKNOWN).count()
     )
-
-    def count_status(s_name: str) -> int:
-        return sum(
-            1
-            for ps in all_sets
-            if (ps.status.value if hasattr(ps.status, "value") else str(ps.status)) == s_name
-        )
-
-    merged_c = count_status("merged")
-    total_c = len(all_sets)
-    pct = round(merged_c / total_c * 100) if total_c > 0 else 0
 
     return {
         "total": total_c,
         "merged": merged_c,
         "merged_pct": pct,
-        "mismatched": count_status("mismatched"),
-        "blocked_customs": count_status("blocked_customs"),
-        "quarantined": count_status("quarantined"),
-        "pending": count_status("pending"),
+        "mismatched": counts.get("mismatched", 0),
+        "blocked_customs": counts.get("blocked_customs", 0),
+        "quarantined": counts.get("quarantined", 0),
+        "pending": counts.get("pending", 0),
         "unclassified": unclassified_count,
     }
 
@@ -135,8 +131,8 @@ def dashboard(request: Request, status: str | None = None):
     Base.metadata.create_all(eng)
     with Session(eng) as s:
         for ps in s.query(POSet).all():
-            if ps.locked_by_action is not None and not _is_locked(ps, cfg):
-                ps.locked_by_action = None
+            if ps.locked_by_action is not None and not is_locked(ps, cfg):
+                release_lock(ps, s)
         s.commit()
         po_sets = _po_sets_with_doc_count(s, status, cfg)
         sync_running = _sync_running_state()
@@ -198,11 +194,10 @@ def po_set_detail_view(po_set_id: int, request: Request):
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
-        if ps.locked_by_action is not None and not _is_locked(ps, cfg):
-            ps.locked_by_action = None
-            s.commit()
+        if ps.locked_by_action is not None and not is_locked(ps, cfg):
+            release_lock(ps, s)
             s.refresh(ps)
-        is_locked = _is_locked(ps, cfg)
+        locked = is_locked(ps, cfg)
         docs = s.query(Document).filter_by(po_set_id=po_set_id).all()
         doc_ids = [d.id for d in docs]
         flags = []
@@ -409,7 +404,7 @@ def po_set_detail_view(po_set_id: int, request: Request):
                 "line_items": enriched,
                 "matrix_rows": matrix_rows,
                 "flags": flags,
-                "is_locked": is_locked,
+                "is_locked": locked,
                 "has_merged_file": has_merged_file,
                 "unclassified_count": unclassified_count,
             },
@@ -456,7 +451,7 @@ def download_merged_pdf(po_set_id: int):
 
 
 @router.post("/po_sets/{po_set_id}/upload", response_class=HTMLResponse)
-async def upload_manual_doc(
+def upload_manual_doc(
     po_set_id: int,
     request: Request,
     file: UploadFile = File(...),  # noqa: B008
@@ -480,25 +475,22 @@ async def upload_manual_doc(
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
-        if ps.locked_by_action is not None and _is_locked(ps, cfg):
+        if not acquire_lock(ps, "manual_upload", s, cfg):
             raise HTTPException(
                 status_code=409,
                 detail=f"action already in progress on this PO Set: {ps.locked_by_action}",
             )
-        ps.locked_by_action = "manual_upload"
-        s.commit()
         try:
-            data = await file.read()
+            data = file.file.read()
             if not data:
                 raise HTTPException(status_code=422, detail="empty file")
             import hashlib
 
             sha = hashlib.sha256(data).hexdigest()
-            # cross-platform stored path via pathlib
-            stored = (
-                Path(cfg.paths.stored_documents_folder)
-                / f"{sha}{Path(file.filename or 'upload.pdf').suffix or '.pdf'}"
-            )
+            # sanitize filename
+            safe_name = Path(file.filename or "upload.pdf").name
+            safe_suffix = Path(safe_name).suffix or ".pdf"
+            stored = Path(cfg.paths.stored_documents_folder) / f"{sha}{safe_suffix}"
             stored.parent.mkdir(parents=True, exist_ok=True)
             stored.write_bytes(data)
             # check dedup by hash
@@ -508,7 +500,7 @@ async def upload_manual_doc(
 
                 doc = Document(
                     sha256_hash=sha,
-                    original_filename=file.filename or "upload.pdf",
+                    original_filename=safe_name,
                     stored_path=str(stored),
                     doc_type=DocType(doc_type),
                     extraction_status=ES.valid,
@@ -516,31 +508,22 @@ async def upload_manual_doc(
                 )
                 s.add(doc)
                 s.flush()
-            else:
-                # reuse existing hash; keep original association, just ensure file exists  # noqa: E501
-                pass
-            # update customs_doc_count if applicable
-            if doc_type in (DocType.CUSTOMS.value, DocType.SHIPPING.value):
-                # recount
-                docs = s.query(Document).filter_by(po_set_id=po_set_id).all()
-                cnt = sum(
-                    1
-                    for d in docs
-                    if (d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type))
-                    in (DocType.CUSTOMS.value, DocType.SHIPPING.value)
-                )
-                ps.customs_doc_count = cnt
+            # update customs_doc_count (distinct required types: CUSTOMS and SHIPPING)
+            docs = s.query(Document).filter_by(po_set_id=po_set_id).all()
+            types_present = {
+                d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type) for d in docs
+            }
+            cnt = (1 if DocType.CUSTOMS.value in types_present else 0) + (
+                1 if DocType.SHIPPING.value in types_present else 0
+            )
+            ps.customs_doc_count = cnt
             s.commit()
         except HTTPException:
             raise
         except Exception as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
         finally:
-            # release lock
-            ps2 = s.get(POSet, po_set_id)
-            if ps2 is not None and ps2.locked_by_action == "manual_upload":
-                ps2.locked_by_action = None
-                s.commit()
+            release_lock(ps, s, "manual_upload")
     return RedirectResponse(url=f"/po_sets/{po_set_id}/view", status_code=302)
 
 
@@ -580,12 +563,25 @@ def quarantine_view(request: Request):
     Base.metadata.create_all(eng)
     with Session(eng) as s:
         qs = s.query(POSet).filter(POSet.status == POSetStatus.quarantined).all()
-        enriched = []
-        for ps in qs:
-            cnt = s.query(Document).filter_by(po_set_id=ps.id).count()
-            enriched.append(
-                {"id": ps.id, "po_no_normalized": ps.po_no_normalized, "doc_count": cnt}
+        po_set_ids = [ps.id for ps in qs]
+        doc_counts = (
+            dict(
+                s.query(Document.po_set_id, func.count(Document.id))
+                .filter(Document.po_set_id.in_(po_set_ids))
+                .group_by(Document.po_set_id)
+                .all()
             )
+            if po_set_ids
+            else {}
+        )
+        enriched = [
+            {
+                "id": ps.id,
+                "po_no_normalized": ps.po_no_normalized,
+                "doc_count": doc_counts.get(ps.id, 0),
+            }
+            for ps in qs
+        ]
         unclassified_count = s.query(Document).filter(Document.doc_type == DocType.UNKNOWN).count()
         return _templates.TemplateResponse(
             request,
@@ -605,12 +601,25 @@ def quarantine_table(request: Request):
     Base.metadata.create_all(eng)
     with Session(eng) as s:
         qs = s.query(POSet).filter(POSet.status == POSetStatus.quarantined).all()
-        enriched = []
-        for ps in qs:
-            cnt = s.query(Document).filter_by(po_set_id=ps.id).count()
-            enriched.append(
-                {"id": ps.id, "po_no_normalized": ps.po_no_normalized, "doc_count": cnt}
+        po_set_ids = [ps.id for ps in qs]
+        doc_counts = (
+            dict(
+                s.query(Document.po_set_id, func.count(Document.id))
+                .filter(Document.po_set_id.in_(po_set_ids))
+                .group_by(Document.po_set_id)
+                .all()
             )
+            if po_set_ids
+            else {}
+        )
+        enriched = [
+            {
+                "id": ps.id,
+                "po_no_normalized": ps.po_no_normalized,
+                "doc_count": doc_counts.get(ps.id, 0),
+            }
+            for ps in qs
+        ]
         return _templates.TemplateResponse(
             request,
             "_quarantine_table.html",

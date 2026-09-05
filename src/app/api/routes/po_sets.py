@@ -13,7 +13,7 @@ and ``locked_by_action``; dashboard templates should render buttons with
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import logging
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
@@ -23,36 +23,18 @@ from app.core.config import load_config
 from app.core.database import get_engine
 from app.models import POSet
 from app.models.base import Base
+from app.services.locking import acquire_lock, is_locked, release_lock
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/po_sets", tags=["po_sets"])
-
-
-def _is_locked(ps: POSet, cfg) -> bool:
-    """Check if POSet is currently locked, respecting timeout auto-release."""
-    if ps.locked_by_action is None:
-        return False
-    # compare updated_at vs now
-    updated = ps.updated_at
-    if updated is None:
-        return True
-    # ensure timezone-aware
-    if updated.tzinfo is None:
-        updated = updated.replace(tzinfo=UTC)
-    now = datetime.now(UTC)
-    timeout = cfg.concurrency.po_set_lock_timeout_seconds
-    elapsed = (now - updated).total_seconds()
-    return not elapsed > timeout
 
 
 def _auto_release_if_stale(ps: POSet, cfg, session: Session) -> bool:
     """If lock is stale (> timeout), clear it and return True (released)."""
     if ps.locked_by_action is None:
         return False
-    if not _is_locked(ps, cfg):
-        # stale - clear
-        ps.locked_by_action = None
-        session.commit()
-        session.refresh(ps)
+    if not is_locked(ps, cfg):
+        release_lock(ps, session)
         return True
     return False
 
@@ -65,39 +47,26 @@ def _acquire_lock(po_set_id: int, action: str, cfg) -> POSet:
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
-        # auto-release stale
-        if ps.locked_by_action is not None and not _is_locked(ps, cfg):
-            ps.locked_by_action = None
-            s.commit()
-            s.refresh(ps)
-        if ps.locked_by_action is not None:
+        if not acquire_lock(ps, action, s, cfg):
             raise HTTPException(
                 status_code=409,
                 detail=f"action already in progress on this PO Set: {ps.locked_by_action}",
             )
-        ps.locked_by_action = action
-        s.commit()
-        s.refresh(ps)
         return ps
 
 
-def _release_lock(po_set_id: int, cfg) -> None:
+def _release_lock(po_set_id: int, cfg, action: str) -> None:
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     with Session(eng) as s:
         ps = s.get(POSet, po_set_id)
-        if ps is not None and ps.locked_by_action is not None:
-            ps.locked_by_action = None
-            s.commit()
-
-
-def _release_lock_with_session(s: Session, ps: POSet) -> None:
-    ps.locked_by_action = None
-    s.commit()
+        if ps is not None:
+            # action-scoped: never clear another in-flight action's lock (FR-CONC-2)
+            release_lock(ps, s, action)
 
 
 def _po_to_dict(ps: POSet, cfg) -> dict:
-    locked = _is_locked(ps, cfg)
+    locked = is_locked(ps, cfg)
     # HTMX disable: when locked, buttons should be disabled (FR-CONC-3)
     return {
         "id": ps.id,
@@ -122,8 +91,8 @@ def list_po_sets():
         # auto-release stale locks on list view so dashboard doesn't permanently disable buttons
         all_sets = s.query(POSet).all()
         for ps in all_sets:
-            if ps.locked_by_action is not None and not _is_locked(ps, cfg):
-                ps.locked_by_action = None
+            if ps.locked_by_action is not None and not is_locked(ps, cfg):
+                release_lock(ps, s)
         s.commit()
         rows = s.query(POSet).all()
         return [_po_to_dict(ps, cfg) for ps in rows]
@@ -140,9 +109,8 @@ def get_po_set(po_set_id: int):
         if ps is None:
             raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
         # auto-release stale before responding so UI doesn't show stale lock
-        if ps.locked_by_action is not None and not _is_locked(ps, cfg):
-            ps.locked_by_action = None
-            s.commit()
+        if ps.locked_by_action is not None and not is_locked(ps, cfg):
+            release_lock(ps, s)
             s.refresh(ps)
         return _po_to_dict(ps, cfg)
 
@@ -157,9 +125,8 @@ def get_po_set_detail_html(po_set_id: int):
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
-        if ps.locked_by_action is not None and not _is_locked(ps, cfg):
-            ps.locked_by_action = None
-            s.commit()
+        if ps.locked_by_action is not None and not is_locked(ps, cfg):
+            release_lock(ps, s)
             s.refresh(ps)
         d = _po_to_dict(ps, cfg)
         disabled = 'disabled title="action already in progress"' if d["is_locked"] else ""
@@ -187,215 +154,127 @@ def get_po_set_detail_html(po_set_id: int):
 def force_merge(po_set_id: int):
     """Force Merge - acquires per-PO lock, 409 if already locked (FR-CONC-1/2)."""
     cfg = load_config()
-    # acquire lock (or 409)
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
-    with Session(eng) as s:
-        ps = s.get(POSet, po_set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
-        if ps.locked_by_action is not None and not _is_locked(ps, cfg):
-            ps.locked_by_action = None
-            s.commit()
-            s.refresh(ps)
-        if ps.locked_by_action is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=f"action already in progress on this PO Set: {ps.locked_by_action}",
-            )
-        # acquire
-        ps.locked_by_action = "force_merge"
-        s.commit()
-        try:
-            # attempt actual merge if service exists; otherwise stub success
-            try:
-                from app.services.merge import force_merge as svc_force_merge
+    _acquire_lock(po_set_id, "force_merge", cfg)
+    try:
+        from app.services.merge import force_merge as svc_force_merge
 
-                result = svc_force_merge(po_set_id, cfg)
-                detail = {"merged_path": str(result) if result else None}
-            except Exception as e:
-                # if merge fails due to validation, still return 200 for lock test? Use 422 for real errors
-                # but ensure lock is released
-                detail = {"error": str(e)}
-            return {"status": "force_merge queued", "po_set_id": po_set_id, "detail": detail}
-        finally:
-            # release lock - in real long-running action, release after completion
-            # For FR-CONC-2 test, we want second immediate call while first still holds lock.
-            # Since this handler releases at end, the test manually re-locks via DB to simulate concurrency.
-            # To make sequential second call also 409 without manual DB hack, we keep lock for a tiny window.
-            # But we release here for correctness; test's manual lock covers the concurrent case.
-            ps.locked_by_action = None
-            s.commit()
+        result = svc_force_merge(po_set_id, cfg)
+        detail = {"merged_path": str(result) if result else None}
+        return {"status": "merged", "po_set_id": po_set_id, "detail": detail}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Force merge failed for PO Set %s: %s", po_set_id, e)
+        raise HTTPException(status_code=422, detail=f"Force merge failed: {e}") from e
+    finally:
+        _release_lock(po_set_id, cfg, "force_merge")
 
 
 @router.post("/{po_set_id}/toggle_customs")
 def toggle_customs(po_set_id: int):
     """Customs toggle - also per-PO locked (FR-CONC-1)."""
     cfg = load_config()
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
-    with Session(eng) as s:
-        ps = s.get(POSet, po_set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
-        if ps.locked_by_action is not None and not _is_locked(ps, cfg):
-            ps.locked_by_action = None
-            s.commit()
-            s.refresh(ps)
-        if ps.locked_by_action is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=f"action already in progress on this PO Set: {ps.locked_by_action}",
-            )
-        ps.locked_by_action = "toggle_customs"
-        s.commit()
-        try:
-            from app.services.customs import toggle_customs as svc_toggle
+    _acquire_lock(po_set_id, "toggle_customs", cfg)
+    try:
+        from app.services.customs import toggle_customs as svc_toggle
 
-            updated = svc_toggle(po_set_id, cfg)
-            return {
-                "status": "toggled",
-                "po_set_id": po_set_id,
-                "has_customs_toggle": updated.has_customs_toggle,
-            }
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=422, detail=str(e)) from e
-        finally:
-            ps.locked_by_action = None
-            s.commit()
+        updated = svc_toggle(po_set_id, cfg)
+        return {
+            "status": "toggled",
+            "po_set_id": po_set_id,
+            "has_customs_toggle": updated.has_customs_toggle,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    finally:
+        _release_lock(po_set_id, cfg, "toggle_customs")
 
 
 @router.post("/{po_set_id}/redo_extract")
 def redo_extract(po_set_id: int):
     """Redo/Re-extract - per-PO locked (FR-CONC-1). 409 if already locked."""
     cfg = load_config()
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
-    with Session(eng) as s:
-        ps = s.get(POSet, po_set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
-        if ps.locked_by_action is not None and not _is_locked(ps, cfg):
-            ps.locked_by_action = None
-            s.commit()
-            s.refresh(ps)
-        if ps.locked_by_action is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=f"action already in progress on this PO Set: {ps.locked_by_action}",
-            )
-        ps.locked_by_action = "redo_extract"
-        s.commit()
-        try:
-            from app.services.extraction import extract_document, is_manual_only
-            from app.services.reconciliation import reconcile_po_set
+    _acquire_lock(po_set_id, "redo_extract", cfg)
+    try:
+        from app.models import Document, ExtractionStatus
+        from app.services.extraction import extract_document, is_manual_only
+        from app.services.reconciliation import reconcile_po_set
 
-            docs = list(ps.documents or [])
-            extraction_results = []
-            for doc in docs:
-                dtype = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
-                if not is_manual_only(dtype) and (doc.extraction_attempt_count or 0) < 3:
-                    try:
-                        extracted = extract_document(doc.id, cfg)
-                        extraction_results.append(
-                            {
-                                "doc_id": doc.id,
-                                "status": extracted.extraction_status.value
-                                if hasattr(extracted.extraction_status, "value")
-                                else str(extracted.extraction_status),
-                            }
-                        )
-                    except Exception as e:
-                        extraction_results.append({"doc_id": doc.id, "error": str(e)})
-
-            rec_res = reconcile_po_set(po_set_id, cfg)
-            return {
-                "status": "redo_extract_complete",
-                "po_set_id": po_set_id,
-                "extractions": extraction_results,
-                "reconciliation": rec_res,
-            }
-        finally:
-            ps.locked_by_action = None
+        eng = get_engine(cfg)
+        with Session(eng) as s:
+            docs = s.query(Document).filter(Document.po_set_id == po_set_id).all()
+            docs_to_extract = []
+            for d in docs:
+                dt_val = d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type)
+                if not is_manual_only(dt_val):
+                    # Explicit operator intent: reset attempt count so extraction can re-run
+                    d.extraction_attempt_count = 0
+                    d.extraction_status = ExtractionStatus.pending
+                    docs_to_extract.append((d.id, dt_val))
             s.commit()
+
+        extraction_results = []
+        for doc_id, _dtype in docs_to_extract:
+            try:
+                extracted = extract_document(doc_id, cfg)
+                extraction_results.append(
+                    {
+                        "doc_id": doc_id,
+                        "status": extracted.extraction_status.value
+                        if hasattr(extracted.extraction_status, "value")
+                        else str(extracted.extraction_status),
+                    }
+                )
+            except Exception as e:
+                extraction_results.append({"doc_id": doc_id, "error": str(e)})
+
+        rec_res = reconcile_po_set(po_set_id, cfg)
+        return {
+            "status": "redo_extract_complete",
+            "po_set_id": po_set_id,
+            "extractions": extraction_results,
+            "reconciliation": rec_res,
+        }
+    finally:
+        _release_lock(po_set_id, cfg, "redo_extract")
 
 
 @router.post("/{po_set_id}/redo_match")
 def redo_match(po_set_id: int):
     """Redo matching (no VLM) - per-PO locked (FR-CONC-1)."""
     cfg = load_config()
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
-    with Session(eng) as s:
-        ps = s.get(POSet, po_set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
-        if ps.locked_by_action is not None and not _is_locked(ps, cfg):
-            ps.locked_by_action = None
-            s.commit()
-            s.refresh(ps)
-        if ps.locked_by_action is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=f"action already in progress on this PO Set: {ps.locked_by_action}",
-            )
-        ps.locked_by_action = "redo_match"
-        s.commit()
-        try:
-            from app.services.reconciliation import reconcile_po_set
+    _acquire_lock(po_set_id, "redo_match", cfg)
+    try:
+        from app.services.reconciliation import reconcile_po_set
 
-            rec_res = reconcile_po_set(po_set_id, cfg)
-            return {
-                "status": "redo_match_complete",
-                "po_set_id": po_set_id,
-                "reconciliation": rec_res,
-            }
-        finally:
-            ps.locked_by_action = None
-            s.commit()
+        rec_res = reconcile_po_set(po_set_id, cfg)
+        return {
+            "status": "redo_match_complete",
+            "po_set_id": po_set_id,
+            "reconciliation": rec_res,
+        }
+    finally:
+        _release_lock(po_set_id, cfg, "redo_match")
 
 
 @router.delete("/{po_set_id}/quarantine")
 def delete_quarantined(po_set_id: int):
     """Delete quarantined PO Set - per-PO locked (FR-CONC-1)."""
     cfg = load_config()
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
-    with Session(eng) as s:
-        ps = s.get(POSet, po_set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
-        if ps.locked_by_action is not None and not _is_locked(ps, cfg):
-            ps.locked_by_action = None
-            s.commit()
-            s.refresh(ps)
-        if ps.locked_by_action is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=f"action already in progress on this PO Set: {ps.locked_by_action}",
-            )
-        ps.locked_by_action = "quarantine_delete"
-        s.commit()
-        try:
-            from app.services.quarantine import delete_quarantined as svc_delete
+    _acquire_lock(po_set_id, "quarantine_delete", cfg)
+    try:
+        from app.services.quarantine import delete_quarantined as svc_delete
 
-            audit = svc_delete(po_set_id, cfg)
-            return {"status": "deleted", "audit_id": audit.id}
-        except HTTPException:
-            raise
-        except Exception as e:
-            # map "not quarantined" value error to 409/422
-            if "not quarantined" in str(e).lower():
-                raise HTTPException(status_code=409, detail=str(e)) from e
-            raise HTTPException(status_code=422, detail=str(e)) from e
-        finally:
-            # if row was deleted, no need to clear lock; else clear
-            try:
-                remaining = s.get(POSet, po_set_id)
-                if remaining is not None and remaining.locked_by_action is not None:
-                    remaining.locked_by_action = None
-                    s.commit()
-            except Exception:
-                pass
+        audit = svc_delete(po_set_id, cfg)
+        return {"status": "deleted", "audit_id": audit.id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        # map "not quarantined" value error to 409/422
+        if "not quarantined" in str(e).lower():
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    finally:
+        _release_lock(po_set_id, cfg, "quarantine_delete")

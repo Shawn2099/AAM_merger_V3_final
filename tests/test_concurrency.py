@@ -175,3 +175,71 @@ def test_sync_lock_shared_across_threads(tmp_db, monkeypatch):
     lock.acquire(timeout=0)
     lock.release()
     assert lock.is_locked is False
+
+
+def test_release_is_action_scoped(tmp_db):
+    """release_lock must only clear the lock held by the given action
+    (FR-CONC-2): request A finishing must not stomp request B's fresh lock."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import POSet, POSetStatus
+    from app.models.base import Base
+    from app.services.locking import acquire_lock, release_lock
+
+    eng = get_engine(tmp_db)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="STOMP", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        pid = ps.id
+    with Session(eng) as s:
+        ps = s.get(POSet, pid)
+        assert acquire_lock(ps, "action_a", s, tmp_db) is True
+    with Session(eng) as s:
+        ps = s.get(POSet, pid)
+        release_lock(ps, s, "action_b")  # wrong owner must NOT clear
+        s.refresh(ps)
+        assert ps.locked_by_action == "action_a"
+    with Session(eng) as s:
+        ps = s.get(POSet, pid)
+        release_lock(ps, s, "action_a")
+        s.refresh(ps)
+        assert ps.locked_by_action is None
+
+
+def test_route_release_passes_action(tmp_db, monkeypatch):
+    """Route finally-blocks must release only their own action: releasing as
+    a different action must leave the lock intact (FR-CONC-2 lock-stomp)."""
+    from sqlalchemy.orm import Session
+
+    import app.api.routes.po_sets as po_routes
+    from app.core.database import get_engine
+    from app.models import POSet, POSetStatus
+    from app.models.base import Base
+    from app.services.locking import acquire_lock
+
+    monkeypatch.setattr(po_routes, "load_config", lambda: tmp_db)
+    eng = get_engine(tmp_db)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="STOMP2", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        pid = ps.id
+    with Session(eng) as s:
+        ps = s.get(POSet, pid)
+        assert acquire_lock(ps, "force_merge", s, tmp_db) is True
+    # a different action's finally-block must NOT clear this lock
+    po_routes._release_lock(pid, tmp_db, "toggle_customs")
+    with Session(eng) as s:
+        ps = s.get(POSet, pid)
+        assert ps.locked_by_action == "force_merge"
+    # the owning action releases cleanly
+    po_routes._release_lock(pid, tmp_db, "force_merge")
+    with Session(eng) as s:
+        ps = s.get(POSet, pid)
+        assert ps.locked_by_action is None
