@@ -481,21 +481,46 @@ def upload_manual_doc(
                 detail=f"action already in progress on this PO Set: {ps.locked_by_action}",
             )
         try:
-            data = file.file.read()
+            # Bounded read (W-12): cap enforced on the stream, not after.
+            from app.core.limits import MAX_UPLOAD_BYTES
+
+            data = file.file.read(MAX_UPLOAD_BYTES + 1)
             if not data:
                 raise HTTPException(status_code=422, detail="empty file")
+            if len(data) > MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"file exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)}MB upload cap",
+                )
             import hashlib
 
             sha = hashlib.sha256(data).hexdigest()
-            # sanitize filename
+            # sanitize filename + extension allowlist (W-18)
             safe_name = Path(file.filename or "upload.pdf").name
-            safe_suffix = Path(safe_name).suffix or ".pdf"
-            stored = Path(cfg.paths.stored_documents_folder) / f"{sha}{safe_suffix}"
-            stored.parent.mkdir(parents=True, exist_ok=True)
-            stored.write_bytes(data)
-            # check dedup by hash
+            if Path(safe_name).suffix.lower() != ".pdf":
+                raise HTTPException(status_code=422, detail="only .pdf uploads accepted")
+            # dedup by hash BEFORE writing (W-12): duplicates are idempotent
             existing = s.query(Document).filter_by(sha256_hash=sha).first()
             if existing is None:
+                # PDF content sniff (W-12): magic header + readable pages
+                if not data.startswith(b"%PDF"):
+                    raise HTTPException(status_code=422, detail="not a PDF file")
+                try:
+                    import io
+
+                    from pypdf import PdfReader
+
+                    if len(PdfReader(io.BytesIO(data)).pages) < 1:
+                        raise HTTPException(status_code=422, detail="PDF has no pages")
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=422, detail=f"unreadable PDF: {e}"
+                    ) from e
+                stored = Path(cfg.paths.stored_documents_folder) / f"{sha}.pdf"
+                stored.parent.mkdir(parents=True, exist_ok=True)
+                stored.write_bytes(data)
                 from app.models import ExtractionStatus as ES
 
                 doc = Document(

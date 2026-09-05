@@ -496,6 +496,155 @@ def test_manual_merger_back_link_points_to_dashboard(client):
     assert 'href="/dashboard"' in r.text
 
 
+def _pdf_bytes() -> bytes:
+    import io
+
+    from pypdf import PdfWriter
+
+    w = PdfWriter()
+    w.add_blank_page(width=200, height=200)
+    buf = io.BytesIO()
+    w.write(buf)
+    return buf.getvalue()
+
+
+def test_upload_duplicate_does_not_rewrite(tmp_cfg, client):
+    """W-12: duplicate upload is idempotent — stored bytes + rows untouched."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import Document
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO_DUP", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+
+    payload = _pdf_bytes()
+    for _ in range(2):
+        r = client.post(
+            f"/po_sets/{ps_id}/upload",
+            files={"file": ("customs.pdf", payload, "application/pdf")},
+            data={"doc_type": "CUSTOMS"},
+        )
+        # RedirectResponse to the set view (TestClient follows → 200 + 302 history)
+        assert r.status_code == 200, r.text
+        assert r.history and r.history[0].status_code == 302
+
+    with Session(eng) as s:
+        docs = s.query(Document).filter_by(po_set_id=ps_id).all()
+        assert len(docs) == 1
+        stored = Path(docs[0].stored_path)
+        assert stored.read_bytes() == payload
+        # poison the stored file: a duplicate upload must not rewrite it
+        stored.write_bytes(b"SENTINEL")
+
+    r = client.post(
+        f"/po_sets/{ps_id}/upload",
+        files={"file": ("customs.pdf", payload, "application/pdf")},
+        data={"doc_type": "CUSTOMS"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.history and r.history[0].status_code == 302
+    with Session(eng) as s:
+        assert s.query(Document).filter_by(po_set_id=ps_id).count() == 1
+        docs = s.query(Document).filter_by(po_set_id=ps_id).all()
+        assert Path(docs[0].stored_path).read_bytes() == b"SENTINEL"
+
+
+def test_upload_rejects_non_pdf(tmp_cfg, client):
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO_TXT", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+
+    r = client.post(
+        f"/po_sets/{ps_id}/upload",
+        files={"file": ("evil.txt", b"not a pdf at all", "text/plain")},
+        data={"doc_type": "CUSTOMS"},
+    )
+    assert r.status_code == 422
+
+
+def test_upload_rejects_oversize(tmp_cfg, client, monkeypatch):
+    from sqlalchemy.orm import Session
+
+    import app.core.limits as limits
+    from app.core.database import get_engine
+    from app.models.base import Base
+
+    monkeypatch.setattr(limits, "MAX_UPLOAD_BYTES", 1024)
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO_BIG", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+
+    r = client.post(
+        f"/po_sets/{ps_id}/upload",
+        files={"file": ("big.pdf", b"%PDF" + b"x" * 2048, "application/pdf")},
+        data={"doc_type": "CUSTOMS"},
+    )
+    assert r.status_code == 422
+
+
+def test_manual_merge_bad_order_422(client):
+    """W-11: bad order maps to 422, not an unhandled 500."""
+    r = client.post(
+        "/manual/merge",
+        files={"files": ("a.pdf", _pdf_bytes(), "application/pdf")},
+        data={"order": "abc", "output_filename": "out.pdf"},
+    )
+    assert r.status_code == 422
+
+
+def test_manual_merge_success_cleans_tmp(client, tmp_path, monkeypatch):
+    """W-11: input + output tmps are removed after the response is sent."""
+    import tempfile
+    from pathlib import Path as _Path
+
+    real_mkstemp = tempfile.mkstemp
+    created: list[str] = []
+
+    def spy_mkstemp(suffix=None, prefix=None, dir=None, **kw):
+        fd, p = real_mkstemp(suffix=suffix, prefix=prefix or "tmp", dir=str(tmp_path), **kw)
+        created.append(p)
+        return fd, p
+
+    monkeypatch.setattr(tempfile, "mkstemp", spy_mkstemp)
+    r = client.post(
+        "/manual/merge",
+        files=[
+            ("files", ("a.pdf", _pdf_bytes(), "application/pdf")),
+            ("files", ("b.pdf", _pdf_bytes(), "application/pdf")),
+        ],
+        data={"order": "1,0", "output_filename": "merged.pdf"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.content.startswith(b"%PDF")
+    # every tmp this endpoint created (2 inputs + 1 output) is gone
+    assert len(created) == 3
+    for p in created:
+        assert not _Path(p).exists(), p
+
+
 def test_document_preview_and_merged_download(tmp_cfg, client, tmp_path):
     eng = get_engine(tmp_cfg)
     Base.metadata.create_all(eng)
