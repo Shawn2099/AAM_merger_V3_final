@@ -14,6 +14,16 @@ from app.models.base import Base
 
 logger = logging.getLogger(__name__)
 
+#: Doc types allowed to mint a new PO Set (BLOCKER-5). DN/SI/UNKNOWN docs
+#: attach to an already-open set or wait visibly unattached — they must
+#: never mint orphan sets from decoy/secondary PO codes.
+_ANCHOR_TYPES = ("PO", "COMBINED")
+
+
+def _doc_type_val(doc) -> str:
+    dt = doc.doc_type
+    return dt.value if hasattr(dt, "value") else str(dt)
+
 
 @task(name="extract_task", retries=3, retry_delay_seconds=[2, 5, 15])
 def extract_task(doc_id: int, cfg_path: str | None = None) -> str:
@@ -130,12 +140,19 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
                 logger.warning("Extract task failed for doc %s", doc.id, exc_info=True)
                 errors += 1
 
-            # Group into PO Set (FR-7.1-7.2)
+            # Group into PO Set (FR-7.1-7.2). Only PO/COMBINED mint;
+            # DN/SI/UNKNOWN attach to an open set or wait unattached.
             try:
                 with Session(eng) as s2:
                     d2 = s2.get(_Doc, doc.id)
                     if d2 and d2.po_no_normalized:
-                        ps = get_or_create_po_set(d2.po_no_raw or d2.po_no_normalized, cfg)
+                        ps = get_or_create_po_set(
+                            d2.po_no_raw or d2.po_no_normalized,
+                            cfg,
+                            create=_doc_type_val(d2) in _ANCHOR_TYPES,
+                        )
+                        if ps is None:
+                            continue
                         if d2.po_set_id is None:
                             d2.po_set_id = ps.id
                             s2.commit()
@@ -163,7 +180,13 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
             try:
                 d = s.get(_Doc, doc.id)
                 if d and d.po_no_normalized:
-                    ps = get_or_create_po_set(d.po_no_raw or d.po_no_normalized, cfg)
+                    ps = get_or_create_po_set(
+                        d.po_no_raw or d.po_no_normalized,
+                        cfg,
+                        create=_doc_type_val(d) in _ANCHOR_TYPES,
+                    )
+                    if ps is None:
+                        continue
                     if d.po_set_id is None:
                         d.po_set_id = ps.id
                         s.commit()
@@ -173,10 +196,15 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
                 errors += 1
 
     # Resolve unattached documents (e.g. Delivery Notes without PO printed on face)
-    from app.services.grouping import resolve_unattached_documents
+    from app.services.grouping import attach_unattached_to_open_sets, resolve_unattached_documents
 
     unattached_touched = resolve_unattached_documents(cfg)
     touched_po_set_ids.update(unattached_touched)
+
+    # Attach DN/SI/UNKNOWN docs that waited for their PO anchor (BLOCKER-5).
+    # Never mints: keys without an open set keep waiting indefinitely.
+    attached_touched = attach_unattached_to_open_sets(cfg)
+    touched_po_set_ids.update(attached_touched)
 
     # Phase 1: Reconcile newly touched PO Sets (FR-4.8, FR-14.1)
     reconciled_count = 0

@@ -160,3 +160,65 @@ def test_resolve_ambiguous_dn_stays_unattached(tmp_path):
     with Session(eng) as s:
         orphan = s.query(Document).filter(Document.sha256_hash == "h_orphan").first()
         assert orphan.po_set_id is None
+
+
+def test_dn_never_mints_orphan_set(tmp_path):
+    """BLOCKER-5: DN/SI must not mint sets from decoy codes — they wait
+    unattached until a PO/COMBINED anchors the key (wait indefinitely)."""
+    from sqlalchemy.orm import Session
+
+    from app.core.config import load_config
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus, POSet
+    from app.models.base import Base
+    from app.services.grouping import attach_unattached_to_open_sets, get_or_create_po_set
+
+    cfg = load_config("config.example.yaml")
+    cfg.paths.database_path = tmp_path / "test_decoy.db"
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+
+    # DN key with no open set: attach-only returns None, mints nothing
+    assert get_or_create_po_set("PO_DECOY", cfg, create=False) is None
+    with Session(eng) as s:
+        assert s.query(POSet).count() == 0
+
+    # PO anchors the key (mints)
+    ps = get_or_create_po_set("PO_DECOY", cfg, create=True)
+    assert ps is not None
+
+    with Session(eng) as s:
+        s.add(
+            Document(
+                sha256_hash="h_decoy_dn",
+                original_filename="dn.pdf",
+                stored_path="dummy.pdf",
+                doc_type=DocType.DN,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=None,
+                po_no_normalized="PODECOY",
+                dn_no="DN-X",
+            )
+        )
+        s.add(
+            Document(
+                sha256_hash="h_lonely_dn",
+                original_filename="lonely.pdf",
+                stored_path="dummy2.pdf",
+                doc_type=DocType.DN,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=None,
+                po_no_normalized="PONOANCHOR",
+                dn_no="DN-Y",
+            )
+        )
+        s.commit()
+
+    touched = attach_unattached_to_open_sets(cfg)
+    assert ps.id in touched
+    with Session(eng) as s:
+        decoy = s.query(Document).filter(Document.sha256_hash == "h_decoy_dn").first()
+        assert decoy.po_set_id == ps.id
+        lonely = s.query(Document).filter(Document.sha256_hash == "h_lonely_dn").first()
+        assert lonely.po_set_id is None  # waits indefinitely, stays visible
+        assert s.query(POSet).count() == 1  # no orphan set minted

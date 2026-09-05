@@ -6,7 +6,7 @@ def normalize_po_no(raw: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "", raw).upper()
 
 
-def get_or_create_po_set(po_no: str, cfg):
+def get_or_create_po_set(po_no: str, cfg, create: bool = True):
     from sqlalchemy.orm import Session
 
     from app.core.database import get_engine
@@ -26,11 +26,55 @@ def get_or_create_po_set(po_no: str, cfg):
         )
         if ps is not None:
             return ps
+        if not create:
+            # Attach-only (BLOCKER-5): DN/SI/UNKNOWN docs must never mint
+            # orphan sets from decoy codes — they wait visibly unattached
+            # (unclassified view) until a PO/COMBINED anchors the key.
+            return None
         ps = POSet(po_no_normalized=norm, status=POSetStatus.pending)
         s.add(ps)
         s.commit()
         s.refresh(ps)
         return ps
+
+
+def attach_unattached_to_open_sets(cfg) -> set[int]:
+    """Attach unattached valid docs to open same-key PO Sets. Never mints:
+    keys without an open set wait indefinitely for more files (human
+    decision 2026-09-05). Returns touched PO Set ids."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import Document, ExtractionStatus, POSet, POSetStatus
+
+    eng = get_engine(cfg)
+    touched: set[int] = set()
+    with Session(eng) as s:
+        unattached = (
+            s.query(Document)
+            .filter(
+                Document.po_set_id.is_(None),
+                Document.extraction_status == ExtractionStatus.valid,
+                Document.po_no_normalized.isnot(None),
+            )
+            .all()
+        )
+        for doc in unattached:
+            ps = (
+                s.query(POSet)
+                .filter(
+                    POSet.po_no_normalized == doc.po_no_normalized,
+                    POSet.status != POSetStatus.merged,
+                )
+                .order_by(POSet.id.asc())
+                .first()
+            )
+            if ps is None:
+                continue  # no anchor yet — keep waiting, stay visible
+            doc.po_set_id = ps.id
+            touched.add(ps.id)
+        s.commit()
+    return touched
 
 
 def resolve_unattached_documents(cfg) -> set[int]:
