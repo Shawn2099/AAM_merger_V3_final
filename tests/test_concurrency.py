@@ -47,6 +47,7 @@ def client(tmp_db, monkeypatch):
     monkeypatch.setattr("app.api.routes.sync.load_config", lambda path=None: tmp_db)
     monkeypatch.setattr("app.api.routes.po_sets.load_config", lambda path=None: tmp_db)
     monkeypatch.setattr("app.flows.sync.load_config", lambda path=None: tmp_db)
+    monkeypatch.setattr("app.services.sync_lock.load_config", lambda path=None: tmp_db)
     # reset global sync lock
     sync_mod._sync_running = False
     from app.main import app
@@ -152,10 +153,10 @@ def test_sync_lock_shared_across_threads(tmp_db, monkeypatch):
     which makes cross-thread release() a silent no-op."""
     import threading
 
-    import app.api.routes.sync as sync_mod
+    import app.services.sync_lock as sl_mod
 
-    monkeypatch.setattr(sync_mod, "load_config", lambda path=None: tmp_db)
-    lock = sync_mod.get_sync_lock()
+    monkeypatch.setattr(sl_mod, "load_config", lambda path=None: tmp_db)
+    lock = sl_mod.get_sync_lock()
     lock.acquire(timeout=0)
     outcome = []
 
@@ -243,3 +244,75 @@ def test_route_release_passes_action(tmp_db, monkeypatch):
     with Session(eng) as s:
         ps = s.get(POSet, pid)
         assert ps.locked_by_action is None
+
+
+def test_running_sync_detected(tmp_db, monkeypatch):
+    """Held sync lock → _is_sync_running True; released → False (FR-CONC-3)."""
+    import app.services.sync_lock as sl
+
+    monkeypatch.setattr(sl, "load_config", lambda path=None: tmp_db)
+    assert sl._is_sync_running() is False
+    lock = sl.acquire_sync_lock()
+    assert lock is not None
+    assert sl._is_sync_running() is True
+    sl.release_sync_lock(lock)
+    assert sl._is_sync_running() is False
+
+
+def test_stale_sync_lock_breaks(tmp_db, monkeypatch):
+    """Sidecar older than SYNC_STALE_SECONDS → lock treated as dead residue."""
+    import os
+    import time
+
+    import app.services.sync_lock as sl
+
+    monkeypatch.setattr(sl, "load_config", lambda path=None: tmp_db)
+    lock = sl.acquire_sync_lock()
+    assert lock is not None
+    sc = sl._sidecar_for(Path(lock.lock_file))
+    assert sc.exists()
+    sl.release_sync_lock(lock)  # holder dies, files may remain
+    if sc.exists():
+        old = time.time() - (sl.SYNC_STALE_SECONDS + 10)
+        os.utime(sc, (old, old))
+        assert sl._is_sync_running() is False
+        assert sl.acquire_sync_lock() is not None
+    else:
+        assert sl._is_sync_running() is False
+
+
+def test_sync_flow_skips_when_locked(tmp_db, monkeypatch):
+    """Direct sync_flow (cron path) with a held lock → skipped summary (W-7)."""
+    import app.services.sync_lock as sl
+    from app.flows.sync import sync_flow
+
+    monkeypatch.setattr(sl, "load_config", lambda path=None: tmp_db)
+    monkeypatch.setattr("app.flows.sync.load_config", lambda path=None: tmp_db)
+    holder = sl.acquire_sync_lock()
+    assert holder is not None
+    try:
+        # .fn runs the raw flow logic without Prefect server round-trips
+        run_fn = getattr(sync_flow, "fn", sync_flow)
+        res = run_fn()
+        assert res.get("status") == "skipped"
+        assert res.get("reason") == "sync_already_running"
+    finally:
+        sl.release_sync_lock(holder)
+
+
+def test_sync_flow_accepts_held_lock(tmp_db, monkeypatch):
+    """Route path: sync_flow with held_lock runs without self-deadlock."""
+    import app.services.sync_lock as sl
+    from app.flows.sync import sync_flow
+
+    monkeypatch.setattr(sl, "load_config", lambda path=None: tmp_db)
+    monkeypatch.setattr("app.flows.sync.load_config", lambda path=None: tmp_db)
+    holder = sl.acquire_sync_lock()
+    assert holder is not None
+    try:
+        run_fn = getattr(sync_flow, "fn", sync_flow)
+        res = run_fn(held_lock=holder)
+        assert res.get("status") != "skipped"
+        assert "processed" in res
+    finally:
+        sl.release_sync_lock(holder)

@@ -35,7 +35,7 @@ def extract_task(doc_id: int, cfg_path: str | None = None) -> str:
 
 
 @flow(name="sync_flow")
-def sync_flow(cfg_path: str | None = None) -> dict:
+def sync_flow(cfg_path: str | None = None, held_lock=None) -> dict:
     """One Prefect flow per Sync run (FR-4.1-4.8).
 
     Pipeline sequence:
@@ -44,7 +44,38 @@ def sync_flow(cfg_path: str | None = None) -> dict:
     3. Grouping by normalized PO number into POSet
     4. Reconciliation orchestrator (matching, exact qty aggregate, customs check, auto-merge)
     5. Input folder clearing for merged sets (FR-4.8)
+
+    Concurrency (FR-4.3): the inter-process sync lock is held for the whole
+    run. Route-triggered runs pass their already-held lock via held_lock;
+    direct invocations (midnight cron) acquire here and return a `skipped`
+    summary when another sync holds it.
     """
+    from app.services.sync_lock import acquire_sync_lock, release_sync_lock
+
+    own_lock = None
+    if held_lock is None:
+        own_lock = acquire_sync_lock(cfg_path)
+        if own_lock is None:
+            logger.warning("Sync skipped: another sync is already running")
+            return {
+                "status": "skipped",
+                "reason": "sync_already_running",
+                "processed": 0,
+                "extracted": 0,
+                "errors": 0,
+                "touched_po_sets": 0,
+                "reconciled_count": 0,
+            }
+    try:
+        # The OS lock is held for the whole run: either own_lock (acquired
+        # above, released below) or held_lock (owned by the route caller).
+        return _sync_flow_locked(cfg_path)
+    finally:
+        if own_lock is not None:
+            release_sync_lock(own_lock)
+
+
+def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     cfg = load_config(cfg_path) if cfg_path else load_config()
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
@@ -127,7 +158,13 @@ def sync_flow(cfg_path: str | None = None) -> dict:
                 logger.warning("Grouping failed for pending doc %s", doc.id, exc_info=True)
                 errors += 1
 
-    # Reconcile all touched PO Sets and clear input files on merge (FR-4.8, FR-14.1)
+    # Resolve unattached documents (e.g. Delivery Notes without PO printed on face)
+    from app.services.grouping import resolve_unattached_documents
+
+    unattached_touched = resolve_unattached_documents(cfg)
+    touched_po_set_ids.update(unattached_touched)
+
+    # Phase 1: Reconcile newly touched PO Sets (FR-4.8, FR-14.1)
     reconciled_count = 0
     for ps_id in touched_po_set_ids:
         try:
@@ -140,6 +177,30 @@ def sync_flow(cfg_path: str | None = None) -> dict:
                         delete_input_files(ps_merged, input_folder)
         except Exception:
             logger.warning("Reconciliation failed for PO Set %s", ps_id, exc_info=True)
+            errors += 1
+
+    # Phase 2: Re-reconcile all open (non-merged) sets — catches stale mismatched/pending
+    # sets whose documents were already present before this run started.
+    with Session(eng) as s_sweep:
+        open_sets = (
+            s_sweep.query(_POSet)
+            .filter(_POSet.status != POSetStatus.merged)
+            .with_entities(_POSet.id)
+            .all()
+        )
+    for (ps_id,) in open_sets:
+        if ps_id in touched_po_set_ids:
+            continue  # already reconciled in phase 1
+        try:
+            res = reconcile_po_set(ps_id, cfg)
+            reconciled_count += 1
+            if res.get("status") == POSetStatus.merged.value or res.get("status") == "merged":
+                with Session(eng) as s3:
+                    ps_merged = s3.get(_POSet, ps_id)
+                    if ps_merged:
+                        delete_input_files(ps_merged, input_folder)
+        except Exception:
+            logger.warning("Re-reconcile sweep failed for PO Set %s", ps_id, exc_info=True)
             errors += 1
 
     return {
