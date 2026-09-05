@@ -134,6 +134,17 @@ def test_sync_tasks_have_retry_backoff():
     assert delay == [2, 5, 15], f"extract_task delay={delay}"
 
 
+def test_extract_task_retry_follows_config(tmp_db):
+    """Retry envelope must follow config, not just decorator defaults (NFR-2)."""
+    from app.flows.sync import _extract_task_for
+
+    tmp_db.extraction.max_retries = 2
+    tmp_db.extraction.retry_backoff_seconds = [1, 2]
+    t = _extract_task_for(tmp_db)
+    assert t.retries == 2
+    assert list(t.retry_delay_seconds) == [1, 2]
+
+
 def test_sync_flow_is_flow():
     """P2: sync_flow must be a Prefect flow (one flow per Sync, FR-4.3)."""
     from prefect import Flow

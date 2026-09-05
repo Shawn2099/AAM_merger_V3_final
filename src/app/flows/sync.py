@@ -20,6 +20,8 @@ def extract_task(doc_id: int, cfg_path: str | None = None) -> str:
     """Extract and classify a single document via native VLM — one Prefect task per doc (FR-6.1-6.8).
 
     Wraps app.services.extraction.extract_document with Prefect retry envelope.
+    Decorator values are fallback defaults; _extract_task_for applies the
+    live config via with_options at every call site (FR-6.5, NFR-2).
     """
     cfg = load_config(cfg_path) if cfg_path else load_config()
     eng = get_engine(cfg)
@@ -31,6 +33,18 @@ def extract_task(doc_id: int, cfg_path: str | None = None) -> str:
         doc.extraction_status.value
         if hasattr(doc.extraction_status, "value")
         else doc.extraction_status
+    )
+
+
+def _extract_task_for(cfg):
+    """extract_task with retry policy driven by config (NFR-2).
+
+    Tasks run sequentially in the sync loop (one call at a time), so
+    prefect.max_concurrent_extraction_tasks is trivially satisfied.
+    """
+    return extract_task.with_options(
+        retries=cfg.extraction.max_retries,
+        retry_delay_seconds=list(cfg.extraction.retry_backoff_seconds),
     )
 
 
@@ -111,7 +125,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
 
             # Extract & Classify via VLM
             try:
-                extract_task(doc.id, cfg_path=cfg_path)
+                _extract_task_for(cfg)(doc.id, cfg_path=cfg_path)
             except Exception:
                 logger.warning("Extract task failed for doc %s", doc.id, exc_info=True)
                 errors += 1
@@ -142,7 +156,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
         pending = s.query(_Doc).filter(_Doc.extraction_status == ExtractionStatus.pending).all()
         for doc in pending:
             try:
-                extract_task(doc.id, cfg_path=cfg_path)
+                _extract_task_for(cfg)(doc.id, cfg_path=cfg_path)
             except Exception:
                 logger.warning("Extract task failed for pending doc %s", doc.id, exc_info=True)
                 errors += 1
