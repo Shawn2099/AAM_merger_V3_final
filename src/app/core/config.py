@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Literal
@@ -9,6 +10,8 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class PathsConfig(BaseModel):
@@ -28,7 +31,7 @@ class ServerConfig(BaseModel):
 
 class VLMConfig(BaseModel):
     provider: str = "openrouter"
-    model: str = "openai/gpt-4o"
+    model: str = "openai/gpt-5.6-luna"
     request_timeout_seconds: int = 60
     api_key_env_var: str = "OPENROUTER_API_KEY"
 
@@ -109,17 +112,19 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     """Load YAML config + .env. SPEC §13.1 — validated at startup, fail fast."""
     cfg_path = Path(path or os.getenv("AAM_CONFIG_PATH", "config.yaml"))
     if not cfg_path.exists():
-        # allow example fallback in dev
-        alt = Path("config.example.yaml")
-        if alt.exists():
-            cfg_path = alt
-        else:
-            raise FileNotFoundError(f"Config not found: {cfg_path}")
+        # SPEC §13.1: refuse to start — never silently fall back to the
+        # committed example (dev paths/credentials would run in prod).
+        raise FileNotFoundError(
+            f"Config not found: {cfg_path} — copy config.example.yaml to "
+            f"{cfg_path} and adjust paths for this host"
+        )
     data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     cfg = AppConfig.model_validate(data)
     # secrets never in YAML — resolve via env
     api_key = os.getenv(cfg.vlm.api_key_env_var)
     if not api_key:
-        # not fatal at import time, but warn for extraction
-        pass
+        logger.warning(
+            "%s not set — VLM extraction will fail closed; set it in .env or env var",
+            cfg.vlm.api_key_env_var,
+        )
     return cfg
