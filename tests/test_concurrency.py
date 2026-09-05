@@ -82,22 +82,20 @@ def test_po_lock_409(client, tmp_db):
     # lock PO Set with force_merge, second action -> 409
     po_id = _create_po_set(tmp_db, po_no="PO1001")
     r1 = client.post(f"/po_sets/{po_id}/force_merge")
-    # first force_merge may acquire lock; if it completes immediately, we manually lock to simulate concurrent
-    # ensure lock is held: if r1 was 200 but released, set lock via DB then retry
     if r1.status_code == 200:
-        # simulate long-running by re-locking directly
+        # simulate long-running by re-locking directly with locked_at
         eng = get_engine(tmp_db)
         from sqlalchemy.orm import Session
 
         with Session(eng) as s:
             ps = s.get(POSet, po_id)
             ps.locked_by_action = "force_merge"
+            ps.locked_at = datetime.now(UTC)
             s.commit()
         r2 = client.post(f"/po_sets/{po_id}/force_merge")
         assert r2.status_code == 409, r2.text
         assert "already in progress" in r2.text.lower()
     else:
-        # if first already 409 due to test isolation, just check message
         assert r1.status_code in (200, 409)
         r2 = client.post(f"/po_sets/{po_id}/force_merge")
         assert r2.status_code == 409
@@ -112,8 +110,8 @@ def test_po_lock_timeout_releases(tmp_db, client):
     with Session(eng) as s:
         ps = s.get(POSet, po_id)
         ps.locked_by_action = "force_merge"
-        # set updated_at to 400s ago (beyond 300s timeout)
-        ps.updated_at = datetime.now(UTC) - timedelta(seconds=400)
+        # set locked_at to 400s ago (beyond 300s timeout)
+        ps.locked_at = datetime.now(UTC) - timedelta(seconds=400)
         s.commit()
     # now second action should NOT 409 because lock is stale and auto-released
     r = client.post(f"/po_sets/{po_id}/force_merge")
@@ -146,3 +144,34 @@ def test_sync_flow_is_flow():
     # name check
     flow_name = getattr(sync_flow, "name", None) or getattr(sync_flow, "__name__", "")
     assert "sync" in str(flow_name).lower()
+
+
+def test_sync_lock_shared_across_threads(tmp_db, monkeypatch):
+    """FileLock acquired in the request thread must be releasable in the
+    _run_sync daemon thread (FR-4.3). filelock is thread-local by default,
+    which makes cross-thread release() a silent no-op."""
+    import threading
+
+    import app.api.routes.sync as sync_mod
+
+    monkeypatch.setattr(sync_mod, "load_config", lambda path=None: tmp_db)
+    lock = sync_mod.get_sync_lock()
+    lock.acquire(timeout=0)
+    outcome = []
+
+    def worker():
+        try:
+            lock.release()
+            outcome.append("released")
+        except Exception as e:
+            outcome.append(f"error:{e}")
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+    assert outcome == ["released"]
+    assert lock.is_locked is False
+    # lock must be re-acquirable after cross-thread release
+    lock.acquire(timeout=0)
+    lock.release()
+    assert lock.is_locked is False
