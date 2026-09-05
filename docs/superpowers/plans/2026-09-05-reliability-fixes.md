@@ -267,8 +267,8 @@ Run → FAIL (returns example config or wrong error).
 ### Task 13 (P1): Per-line step-10 + sibling-type filter (W-20)
 
 **Files:**
-- Modify: `src/app/services/matching.py::get_matching_candidates` (per-PO-line step-10 attempt: if `po_line_no` is digit, multiple of 10, and any candidate equals `n//10` → return those; keep whole-set gate as additional path, not required)
-- Modify: `src/app/services/grouping.py::resolve_unattached_documents` (strategy-1 sibling query filters `doc_type IN (SI, PO)`; multiple distinct candidate sets → leave unattached)
+- Modify: `src/app/services/matching.py::get_matching_candidates` (per-PO-line step-10 attempt: if `po_line_no` is digit, multiple of 10, and any candidate equals `n//10` → return those; keep whole-set gate as additional path, not required. Human decision 2026-09-05: mapping is per-line, but the full-qty-match gate stays absolute — every PO line must match fully to merge)
+- Modify: `src/app/services/grouping.py::resolve_unattached_documents` (strategy-1/2: anchor types stay OPEN — human decision 2026-09-05: multi-DN POs and -1/-2 filename variants are normal, any logical common anchor may attach; but multiple DISTINCT candidate sets → leave unattached instead of first-wins)
 - Test: `tests/test_matching.py` (mixed PO lines [10, "A"] map 10→1 without whole-set gate) + `tests/test_grouping.py` (DN-DN same dn_no does not attach; ambiguous prefixes stay unattached).
 
 - [ ] Steps 1-4. Commit `fix(matching): per-line step-10; sibling filter by type`.
@@ -278,7 +278,7 @@ Run → FAIL (returns example config or wrong error).
 ### Task 14 (P1): DN/SI attach-only grouping, no orphan DN-only sets (BLOCKER-5)
 
 **Files:**
-- Modify: `src/app/services/grouping.py::get_or_create_po_set(po_no, cfg, create=True)`; `src/app/flows/sync.py` grouping sites pass `create=(doc is PO/COMBINED)`; add sweep attaching unattached valid docs to open same-key sets (mint only if a PO/COMBINED doc carries the key, else leave unattached for operator review in unclassified view)
+- Modify: `src/app/services/grouping.py::get_or_create_po_set(po_no, cfg, create=True)`; `src/app/flows/sync.py` grouping sites pass `create=(doc is PO/COMBINED)`; add sweep attaching unattached valid docs to open same-key sets (mint only if a PO/COMBINED doc carries the key, else leave unattached — human decision 2026-09-05: wait indefinitely for more files, DN waits visibly in unclassified view, never force-minted into orphan sets)
 - Test: `tests/test_grouping.py` (DN with decoy PO → `po_set_id None`, no orphan set minted; PO arrival later attaches it).
 
 - [ ] Steps 1-4. Commit `fix(grouping): DN/SI attach-only, PO mints sets`.
