@@ -55,6 +55,7 @@ class Document(Base):
     original_filename: Mapped[str] = mapped_column(Text, nullable=False)
     stored_path: Mapped[str] = mapped_column(Text, nullable=False)
     doc_type: Mapped[DocType] = mapped_column(Enum(DocType), nullable=False)
+    raw_extraction_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     po_no_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     po_no_normalized: Mapped[str | None] = mapped_column(Text, nullable=True)
     dn_no: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -104,6 +105,9 @@ class POSet(Base):
     merged_output_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     locked_by_action: Mapped[str | None] = mapped_column(Text, nullable=True)  # FR-CONC-1, SPEC §9
+    locked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )  # FR-CONFIG-2
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )
@@ -118,7 +122,11 @@ class AuditLog(Base):
     __tablename__ = "audit_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    po_set_id: Mapped[int | None] = mapped_column(ForeignKey("po_sets.id"), nullable=True)
+    # ON DELETE SET NULL (W-14): audit rows survive their PO Set's deletion
+    # (e.g. quarantine_delete inserts the row first with the real id).
+    po_set_id: Mapped[int | None] = mapped_column(
+        ForeignKey("po_sets.id", ondelete="SET NULL"), nullable=True
+    )
     action: Mapped[AuditAction] = mapped_column(Enum(AuditAction), nullable=False)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
     timestamp: Mapped[datetime] = mapped_column(
