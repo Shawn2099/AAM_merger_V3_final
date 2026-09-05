@@ -8,3 +8,8 @@
 6. Midnight Schedule: `uv run python scripts/deploy_prefect.py` (registers `aam-midnight-sync` with `0 0 * * *` cron).
 7. NSSM: `nssm install AAMMerger "C:\...\ .venv\Scripts\python.exe" " -m uvicorn app.main:app --host 0.0.0.0 --port 8000"` + second service for Prefect worker, auto-restart.
 8. Backup: `backup.folder` in config.yaml → simple folder copy, `interval_hours` customizable (SPEC NFR-6). No network-share DB — WAL requires local shared memory on one host.
+
+## Dev 24x7 (WS2016 parity)
+./scripts/run_local.sh --with-prefect  # starts 4200 + worker if needed
+# or: make prefect
+# UI: http://127.0.0.1:4200

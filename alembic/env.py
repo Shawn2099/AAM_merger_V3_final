@@ -22,11 +22,10 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    try:
-        cfg = load_config()
-        return f"sqlite:///{Path(cfg.paths.database_path).as_posix()}"
-    except Exception:
-        return config.get_main_option("sqlalchemy.url")
+    cfg = load_config()
+    db_url = f"sqlite:///{Path(cfg.paths.database_path).as_posix()}"
+    config.set_main_option("sqlalchemy.url", db_url)
+    return db_url
 
 
 def run_migrations_offline() -> None:

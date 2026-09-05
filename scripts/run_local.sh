@@ -10,7 +10,22 @@ cd "$ROOT"
 PORT="${PORT:-8000}"
 HOST="${HOST:-127.0.0.1}"
 NO_SERVER=0
-if [[ "${1:-}" == "--no-server" ]]; then NO_SERVER=1; fi
+WITH_PREFECT=0
+for arg in "$@"; do case "$arg" in --with-prefect) WITH_PREFECT=1;; --no-server) NO_SERVER=1;; --help) echo "Usage: $0 [--with-prefect] [--no-server]"; exit 0;; esac; done
+
+ensure_prefect() {
+  if ! curl --noproxy '*' -sf http://127.0.0.1:4200/api/health >/dev/null 2>&1; then
+    echo "[prefect] starting server 4200..."
+    NO_PROXY=127.0.0.1,localhost,::1 setsid -f prefect server start --host 127.0.0.1 --port 4200 </dev/null >>/tmp/prefect-server.log 2>&1
+    for i in $(seq 1 15); do curl --noproxy '*' -sf http://127.0.0.1:4200/api/health >/dev/null && break; sleep 1; done
+  fi
+  if ! pgrep -f "prefect worker.*aam-merger-process-pool" >/dev/null; then
+    echo "[prefect] starting worker..."
+    NO_PROXY=127.0.0.1,localhost,::1 setsid -f prefect worker start --pool aam-merger-process-pool </dev/null >>/tmp/prefect-worker.log 2>&1
+    sleep 2
+  fi
+  UV_CACHE_DIR=/tmp/uv-cache uv run python scripts/deploy_prefect.py 2>&1 | tail -n 3
+}
 
 echo "== AAM Merger V3 — local run (dev @ $(git rev-parse --short HEAD 2>/dev/null || echo '?')) =="
 echo "Root: $ROOT | Host: $HOST:$PORT | NO_SERVER=$NO_SERVER"
@@ -38,6 +53,8 @@ echo "  deps ok"
 echo "[3/6] alembic upgrade head"
 UV_CACHE_DIR=/tmp/uv-cache uv run alembic upgrade head 2>&1 | tail -n 5 || true
 echo "  db ok (sqlite WAL at $(grep sqlalchemy.url alembic.ini | cut -d= -f2-))"
+
+if [ "$WITH_PREFECT" -eq 1 ]; then ensure_prefect; fi
 
 # 4) gates
 echo "[4/6] gates: pytest + ruff + ty"
@@ -110,7 +127,7 @@ echo "  HTMX partial: $code ($(wc -c < /tmp/curl_htmx.txt) bytes) — should be 
 check "http://$HOST:$PORT/dashboard/table?status=pending" "dashboard/table fragment"
 check "http://$HOST:$PORT/audit" "audit read-only"
 check "http://$HOST:$PORT/quarantine" "quarantine"
-check "http://$HOST:$PORT/manual_merger" "manual_merger (GET form)"
+check "http://$HOST:$PORT/manual/merger" "manual_merger (GET form)"
 # API
 check "http://$HOST:$PORT/sync/status" "sync status"
 check "http://$HOST:$PORT/po_sets" "po_sets list (if exists, else 404 ok)"
@@ -121,7 +138,7 @@ echo "  Dashboard:        http://$HOST:$PORT/dashboard"
 echo "  Dashboard table:  http://$HOST:$PORT/dashboard/table?status=pending"
 echo "  Audit:            http://$HOST:$PORT/audit"
 echo "  Health:           http://$HOST:$PORT/health"
-echo "  Manual merger:    http://$HOST:$PORT/manual_merger"
+echo "  Manual merger:    http://$HOST:$PORT/manual/merger"
 echo "  Try: curl -X POST http://$HOST:$PORT/sync   # 200 or 409 'Sync already running'"
 echo "  Put a PDF in ./data/input then POST /sync — ingest dedup → stored_path → classify → group"
 echo ""

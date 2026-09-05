@@ -24,13 +24,23 @@ data/samples/*
 !data/samples/.gitkeep
 data/Automation/
 data/backup/
+data/*.json
+data/extraction_dump.json
+data/raw_extractions/
+data/raw_extractions/*
+data/.sync.lock
+data/*.lock
 *.sqlite3
 *.sqlite-wal
 *.sqlite-shm
 *.db
-*.db-shm
-*.db-wal
+*.db-*
+*.bak
+*.db.bak
 aam_merger.sqlite3
+logs/
+data/backup/
+data/backup/*
 
 # python
 __pycache__/

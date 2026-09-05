@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **AAM_MERGER-FINAL** (384 symbols, 464 relationships, 0 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **AAM_merger_V3_final** (1290 symbols, 1636 relationships, 8 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -24,10 +24,10 @@ This project is indexed by GitNexus as **AAM_MERGER-FINAL** (384 symbols, 464 re
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/AAM_MERGER-FINAL/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/AAM_MERGER-FINAL/clusters` | All functional areas |
-| `gitnexus://repo/AAM_MERGER-FINAL/processes` | All execution flows |
-| `gitnexus://repo/AAM_MERGER-FINAL/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/AAM_merger_V3_final/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/AAM_merger_V3_final/clusters` | All functional areas |
+| `gitnexus://repo/AAM_merger_V3_final/processes` | All execution flows |
+| `gitnexus://repo/AAM_merger_V3_final/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 
