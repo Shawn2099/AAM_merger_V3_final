@@ -50,10 +50,13 @@
     </div>
   </div>
 
-  <div style="display:flex; gap:20px; flex-wrap:wrap; font-size:0.85rem; color:var(--text-muted); border-top:1px solid var(--border); padding-top:12px;">
+  <div style="display:flex; gap:20px; flex-wrap:wrap; font-size:0.85rem; color:var(--text-muted); border-top:1px solid var(--border); padding-top:12px; align-items:center;">
     <div><strong>Last Updated:</strong> {{ po_set.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC') if po_set.updated_at else '—' }}</div>
-    <div><strong>Customs Requirement:</strong> <span style="font-weight:600; color:{{ 'var(--primary)' if po_set.has_customs_toggle else 'var(--text-muted)' }};">{{ 'ENABLED (2 Docs Required)' if po_set.has_customs_toggle else 'DISABLED' }}</span></div>
-    <div><strong>Customs Documents Attached:</strong> <span style="font-weight:600;">{{ po_set.customs_doc_count }} / 2</span></div>
+    <div><strong>Customs Requirement:</strong> <span style="font-weight:600; color:{{ 'var(--primary)' if po_set.has_customs_toggle else 'var(--text-muted)' }};">{{ 'ENABLED (CUSTOMS + SHIPPING Required)' if po_set.has_customs_toggle else 'DISABLED' }}</span></div>
+    {% if po_set.has_customs_toggle %}
+      <div><strong>Customs Clearance:</strong> <span style="font-weight:600;">{% if po_set.customs_doc_count >= 1 and po_set.status.value != 'blocked_customs' %}✅ Attached{% elif 'CUSTOMS' in documents|map(attribute='doc_type')|map(attribute='value')|list %}✅ Attached{% else %}❌ Missing{% endif %}</span></div>
+      <div><strong>Shipping (AWB):</strong> <span style="font-weight:600;">{% if po_set.customs_doc_count == 2 and po_set.status.value != 'blocked_customs' %}✅ Attached{% elif 'SHIPPING' in documents|map(attribute='doc_type')|map(attribute='value')|list %}✅ Attached{% else %}❌ Missing{% endif %}</span></div>
+    {% endif %}
   </div>
 
   <!-- Quick Action Controls -->

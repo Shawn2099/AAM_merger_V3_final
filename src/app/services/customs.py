@@ -55,37 +55,23 @@ def toggle_customs(po_set_id: int, cfg) -> POSet:
         # flip
         ps.has_customs_toggle = not ps.has_customs_toggle
 
-        # update customs_doc_count based on attached docs
-        customs_count = 0
+        # update customs_doc_count based on distinct required types attached (0, 1, or 2)
+        types_present = set()
         for d in ps.documents or []:
             try:
                 val = d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type)
             except Exception:
                 val = str(d.doc_type)
             if val in (DocType.CUSTOMS.value, DocType.SHIPPING.value):
-                customs_count += 1
-        ps.customs_doc_count = customs_count
+                types_present.add(val)
+        ps.customs_doc_count = len(types_present)
 
         if ps.has_customs_toggle:
-            # FR-12.1: allowed from any status, force into blocked_customs
-            # Only force if actually blocked; if both docs already present is_blocked False
-            # then keep current status (don't force blocked when gate already satisfied)
+            # FR-12.1: if blocked, force into blocked_customs; if gate already satisfied, ensure not blocked
             if is_blocked(ps):
                 ps.status = POSetStatus.blocked_customs
-            else:
-                # already satisfied: if status was blocked_customs keep? but toggle just turned on
-                # and docs already satisfy -> not blocked, set to pending to reflect open
-                # If previous status was mismatched/quarantined/merged, toggling on with docs
-                # present should not overwrite that status — keep it. Only force blocked when needed.
-                # For determinism when previous was pending, stay pending.
-                if ps.status == POSetStatus.blocked_customs:
-                    ps.status = POSetStatus.pending
-                # else leave as-is; the simplest: ensure not blocked_customs when not blocked
-                # but brief says flip -> blocked_customs, so when pending and toggle on with no docs, blocked
-                # When pending and toggle on with docs present, remain pending (not blocked)
-                pass
-            # Edge: if ps.status was pending and toggle ON with no docs, is_blocked True handled above
-            # so blocked_customs already set.
+            elif ps.status == POSetStatus.blocked_customs:
+                ps.status = POSetStatus.pending
         else:
             # toggled OFF -> clear blocked_customs if it was set
             if ps.status == POSetStatus.blocked_customs:

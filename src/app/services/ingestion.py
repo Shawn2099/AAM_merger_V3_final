@@ -14,11 +14,15 @@ from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus
 
 
 def is_file_stable(p: Path, interval: int, count: int) -> bool:
+    if not p.exists():
+        return False
     sizes = []
     for _ in range(count):
-        sizes.append(p.stat().st_size if p.exists() else -1)
+        if not p.exists():
+            return False
+        sizes.append(p.stat().st_size)
         time.sleep(interval)
-    return len(set(sizes)) == 1
+    return len(set(sizes)) == 1 and sizes[0] >= 0
 
 
 def ingest_file(src: Path, cfg: AppConfig) -> Document:
@@ -61,6 +65,7 @@ def clear_input_if_merged(po_set: POSet) -> bool:
 def delete_input_files(po_set: POSet, input_folder: Path | str) -> list[str]:
     """FR-4.8: delete input files once PO Set is merged and extracted data is persisted.
 
+    Matches by original_filename and by SHA-256 hash for renamed duplicates.
     Never deletes stored_path copies.
     """
     deleted: list[str] = []
@@ -68,14 +73,42 @@ def delete_input_files(po_set: POSet, input_folder: Path | str) -> list[str]:
         return deleted
 
     in_dir = Path(input_folder)
-    for doc in po_set.documents or []:
-        # check extraction data persisted (FR-4.8 condition)
-        if doc.extraction_status == ExtractionStatus.valid and doc.original_filename:
-            target = in_dir / doc.original_filename
-            if target.exists():
+    if not in_dir.exists():
+        return deleted
+
+    # Collect valid document hashes and filenames
+    valid_hashes = {
+        doc.sha256_hash
+        for doc in (po_set.documents or [])
+        if doc.extraction_status == ExtractionStatus.valid and doc.sha256_hash
+    }
+    valid_names = {
+        doc.original_filename
+        for doc in (po_set.documents or [])
+        if doc.extraction_status == ExtractionStatus.valid and doc.original_filename
+    }
+
+    # 1. Delete by direct filename
+    for name in valid_names:
+        target = in_dir / name
+        if target.exists():
+            try:
+                target.unlink(missing_ok=True)
+                deleted.append(name)
+            except Exception:
+                pass
+
+    # 2. Delete any remaining duplicate files matching the SHA-256 hashes
+    if valid_hashes:
+        for f in list(in_dir.glob("*.pdf")) + list(in_dir.glob("*.PDF")):
+            if f.exists():
                 try:
-                    target.unlink(missing_ok=True)
-                    deleted.append(doc.original_filename)
+                    f_hash = hashlib.sha256(f.read_bytes()).hexdigest()
+                    if f_hash in valid_hashes:
+                        f.unlink(missing_ok=True)
+                        if f.name not in deleted:
+                            deleted.append(f.name)
                 except Exception:
                     pass
+
     return deleted

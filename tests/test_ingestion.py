@@ -100,3 +100,45 @@ def test_delete_input_files_skipped_if_not_merged(tmp_path):
     deleted = delete_input_files(ps, input_dir)
     assert len(deleted) == 0
     assert in_file.exists()
+
+
+def test_delete_input_files_by_hash_match(tmp_path):
+    """FR-4.8: delete input files also clears duplicate/renamed files in input matching SHA256."""
+    import hashlib
+
+    from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus
+    from app.services.ingestion import delete_input_files
+
+    input_dir = tmp_path / "input_hash"
+    input_dir.mkdir(parents=True, exist_ok=True)
+
+    data = b"identical pdf content"
+    sha = hashlib.sha256(data).hexdigest()
+
+    # Renamed file in input folder
+    renamed_input = input_dir / "renamed_copy.pdf"
+    renamed_input.write_bytes(data)
+
+    stored_file = tmp_path / "stored.pdf"
+    stored_file.write_bytes(data)
+
+    doc = Document(
+        id=1,
+        sha256_hash=sha,
+        original_filename="original.pdf",
+        stored_path=str(stored_file),
+        doc_type=DocType.SI,
+        extraction_status=ExtractionStatus.valid,
+    )
+    ps = POSet(
+        id=1,
+        po_no_normalized="PO_HASH",
+        status=POSetStatus.merged,
+        merged_output_path=str(tmp_path / "out.pdf"),
+        documents=[doc],
+    )
+
+    deleted = delete_input_files(ps, input_dir)
+    assert "renamed_copy.pdf" in deleted
+    assert not renamed_input.exists()
+    assert stored_file.exists()

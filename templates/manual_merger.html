@@ -211,15 +211,6 @@
       </div>
     </form>
   </div>
-
-  <div class="card" style="background:#fffaf5;">
-    <h2>When to use this tool?</h2>
-    <ul style="margin-left:20px; line-height:1.8; color:var(--muted); font-size:0.9rem;">
-      <li><strong>Resolving Quarantine:</strong> Grab files from a quarantined PO and combine them in custom order.</li>
-      <li><strong>One-off Packets:</strong> Merge invoices with receipts or certificates not tied to a Purchase Order.</li>
-      <li><strong>Custom Page Order:</strong> Arrange pages in any sequence by dragging cards above.</li>
-    </ul>
-  </div>
 </div>
 
 <script>
@@ -251,6 +242,8 @@ function refreshList() {
       <span style="font-size:1.2rem;">📄</span>
       <span style="font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${f.name}</span>
       <span class="muted" style="font-size:0.8rem;">${formatSize(f.file.size)}</span>
+      <button type="button" class="btn-remove" onclick="moveFile(${idx},-1)" title="Move up" ${idx===0?'disabled style="opacity:0.3"':''}>↑</button>
+      <button type="button" class="btn-remove" onclick="moveFile(${idx},1)" title="Move down" ${idx===files.length-1?'disabled style="opacity:0.3"':''}>↓</button>
       <button type="button" class="btn-remove" onclick="removeFile(${idx})" title="Remove file">✕</button>
     `;
 
@@ -283,6 +276,16 @@ function refreshList() {
 
 function removeFile(index) {
   files.splice(index, 1);
+  refreshList();
+  syncOrder();
+  syncFileInput();
+}
+
+function moveFile(index, dir) {
+  const to = index + dir;
+  if (to < 0 || to >= files.length) return;
+  const item = files.splice(index, 1)[0];
+  files.splice(to, 0, item);
   refreshList();
   syncOrder();
   syncFileInput();
