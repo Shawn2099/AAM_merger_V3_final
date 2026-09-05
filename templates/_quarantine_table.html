@@ -1,32 +1,58 @@
 <div id="quarantine-table" hx-get="/quarantine/table" hx-trigger="every 3s" hx-swap="outerHTML">
-{% if po_sets %}
-<table>
-  <thead><tr><th>PO No</th><th>Status</th><th>Documents</th><th>Actions</th></tr></thead>
-  <tbody>
-    {% for ps in po_sets %}
-    <tr>
-      <td>{{ ps.po_no_normalized }}</td>
-      <td><span class="badge badge-quarantined">quarantined</span></td>
-      <td>{{ ps.doc_count }}</td>
-      <td>
-        <a href="/po_sets/{{ ps.id }}/view" class="btn btn-secondary" style="padding:4px 8px; font-size:0.82rem;">Detail</a>
-        <button class="btn btn-danger" style="padding:4px 8px; font-size:0.82rem;" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.add('open')">Delete</button>
-        <div id="qd-modal-{{ ps.id }}" class="modal-backdrop">
-          <div class="modal" role="dialog" aria-modal="true">
-            <h3>Confirm Delete Quarantined PO {{ ps.po_no_normalized }}?</h3>
-            <p class="muted">Irreversible — deletes DB rows, keeps files, writes audit log <code>quarantine_delete</code> (FR-13.6).</p>
-            <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
-              <button class="btn btn-secondary" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.remove('open')">Cancel</button>
-              <button class="btn btn-danger" hx-delete="/po_sets/{{ ps.id }}/quarantine" hx-swap="none" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.remove('open')">Confirm Delete</button>
+  {% if po_sets %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>PO Number</th>
+        <th>Status</th>
+        <th>Attached Documents</th>
+        <th style="text-align:right;">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ps in po_sets %}
+      <tr>
+        <td>
+          <a href="/po_sets/{{ ps.id }}/view" class="po-link" title="Open PO Set Detail">
+            {{ ps.po_no_normalized }}
+          </a>
+        </td>
+        <td>
+          <span class="badge badge-quarantined">🚨 Quarantined</span>
+        </td>
+        <td>
+          <span style="font-weight:600;">{{ ps.doc_count }}</span>
+          <span class="muted" style="font-size:0.85rem;">docs</span>
+        </td>
+        <td style="text-align:right;">
+          <div style="display:inline-flex; gap:6px;">
+            <a href="/po_sets/{{ ps.id }}/view" class="btn btn-secondary btn-sm">Inspect &amp; Resolve</a>
+            <button class="btn btn-danger btn-sm" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.add('open')">Delete</button>
+          </div>
+
+          <!-- Quarantine Delete Modal -->
+          <div id="qd-modal-{{ ps.id }}" class="modal-backdrop">
+            <div class="modal-dialog" role="dialog" aria-modal="true" style="text-align:left;">
+              <h3 style="color:#991b1b; margin-bottom:8px;">Confirm Delete Quarantined Record?</h3>
+              <p class="muted" style="margin-bottom:16px;">
+                This deletes PO Set <strong>{{ ps.po_no_normalized }}</strong> from the active pipeline. Stored and quarantine PDF files on disk are safely preserved. An audit log entry (<code>quarantine_delete</code>) will be recorded.
+              </p>
+              <div style="display:flex; gap:8px; justify-content:flex-end;">
+                <button class="btn btn-secondary" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.remove('open')">Cancel</button>
+                <button class="btn btn-danger" hx-delete="/po_sets/{{ ps.id }}/quarantine" hx-swap="none" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.remove('open')">Confirm Delete</button>
+              </div>
             </div>
           </div>
-        </div>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p class="muted" style="text-align:center; padding:16px;">No quarantined PO Sets</p>
-{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="text-align:center; padding:36px 20px; color:var(--text-muted);">
+    <div style="font-size:2rem; margin-bottom:6px;">🛡️</div>
+    <div style="font-weight:600; color:var(--text-main);">Quarantine is empty</div>
+    <div style="font-size:0.85rem; margin-top:4px;">No PO Sets have failed validation or encountered critical conflicts.</div>
+  </div>
+  {% endif %}
 </div>

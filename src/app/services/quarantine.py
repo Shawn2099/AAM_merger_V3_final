@@ -79,20 +79,21 @@ def delete_quarantined(po_set_id: int, cfg) -> AuditLog:
             s.query(LineItem).filter(LineItem.document_id.in_(doc_ids)).delete(
                 synchronize_session=False
             )
-        # delete documents scoped to this POSet
-        s.query(Document).filter_by(po_set_id=po_set_id).delete(synchronize_session=False)
-        # delete po_set row itself
-        s.delete(ps)
-        s.flush()
-        # audit: po_set_id=None since parent row is deleted (FK ON would block reference)
+        # audit FIRST with the real po_set_id (FK-valid at insert); the
+        # ON DELETE SET NULL below preserves the row with full detail (W-14).
         detail = json.dumps({"po_no_normalized": po_no, "document_count": len(doc_ids)})
         audit = AuditLog(
-            po_set_id=None,
+            po_set_id=po_set_id,
             action=AuditAction.quarantine_delete,
             detail=detail,
             source="system",
         )
         s.add(audit)
+        s.flush()
+        # delete documents scoped to this POSet
+        s.query(Document).filter_by(po_set_id=po_set_id).delete(synchronize_session=False)
+        # delete po_set row itself (SET NULL fires on the audit row)
+        s.delete(ps)
         s.commit()
         s.refresh(audit)
         return audit

@@ -1,7 +1,8 @@
-"""Prefect sync flow — one flow per Sync, task per doc (FR-4.3)."""
+"""Prefect sync flow — one flow per Sync, task per doc (FR-4.1-4.8, FR-12.3, FR-14.1-14.7)."""
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from prefect import flow, task
@@ -11,55 +12,26 @@ from app.core.config import load_config
 from app.core.database import get_engine
 from app.models.base import Base
 
+logger = logging.getLogger(__name__)
 
-@task(name="classify_task", retries=3, retry_delay_seconds=[2, 5, 15])
-def classify_task(doc_id: int, cfg_path: str | None = None) -> str:
-    """Classify a single document — one Prefect task per doc (Task 9).
+#: Doc types allowed to mint a new PO Set (BLOCKER-5). DN/SI/UNKNOWN docs
+#: attach to an already-open set or wait visibly unattached — they must
+#: never mint orphan sets from decoy/secondary PO codes.
+_ANCHOR_TYPES = ("PO", "COMBINED")
 
-    Loads Document by id, runs keyword heuristic via app.services.classification,
-    updates doc.doc_type if UNKNOWN, returns doc_type string.
-    """
-    cfg = load_config(cfg_path) if cfg_path else load_config()
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
-    from app.models import Document
-    from app.services.classification import classify
 
-    with Session(eng) as s:
-        doc = s.get(Document, doc_id)
-        if doc is None:
-            return "UNKNOWN"
-        # use stored_path or original_filename heuristic; here use raw from doc_type or filename
-        raw = doc.original_filename or ""
-        # call classify stub — expects dict with raw
-        try:
-            result = classify({"raw": raw})
-        except Exception:
-            result = "UNKNOWN"
-        # update doc_type if still UNKNOWN
-        if str(doc.doc_type) == "UNKNOWN" or doc.doc_type is None:
-            from app.models import DocType
-
-            try:
-                # classify returns str like "PO"; map to enum if possible
-                enum_val = (
-                    DocType(result)
-                    if result in DocType.__members__.values()
-                    or result in [e.value for e in DocType]
-                    else DocType.UNKNOWN
-                )  # type: ignore[arg-type]
-            except Exception:
-                enum_val = DocType.UNKNOWN
-            doc.doc_type = enum_val
-            s.commit()
-        return result
+def _doc_type_val(doc) -> str:
+    dt = doc.doc_type
+    return dt.value if hasattr(dt, "value") else str(dt)
 
 
 @task(name="extract_task", retries=3, retry_delay_seconds=[2, 5, 15])
 def extract_task(doc_id: int, cfg_path: str | None = None) -> str:
-    """Extract a single document — one Prefect task per doc (FR-6.7).
+    """Extract and classify a single document via native VLM — one Prefect task per doc (FR-6.1-6.8).
 
-    Wraps app.services.extraction.extract_document with retry.
+    Wraps app.services.extraction.extract_document with Prefect retry envelope.
+    Decorator values are fallback defaults; _extract_task_for applies the
+    live config via with_options at every call site (FR-6.5, NFR-2).
     """
     cfg = load_config(cfg_path) if cfg_path else load_config()
     eng = get_engine(cfg)
@@ -74,30 +46,82 @@ def extract_task(doc_id: int, cfg_path: str | None = None) -> str:
     )
 
 
-@flow(name="sync_flow")
-def sync_flow(cfg_path: str | None = None) -> dict:
-    """One Prefect flow per Sync run (FR-4.3). Iterates input_folder, classifies per doc.
+def _extract_task_for(cfg):
+    """extract_task with retry policy driven by config (NFR-2).
 
-    For each file found, ingests (dedup) and fires a classify_task.
-    Returns summary dict.
+    Tasks run sequentially in the sync loop (one call at a time), so
+    prefect.max_concurrent_extraction_tasks is trivially satisfied.
     """
+    return extract_task.with_options(
+        retries=cfg.extraction.max_retries,
+        retry_delay_seconds=list(cfg.extraction.retry_backoff_seconds),
+    )
+
+
+@flow(name="sync_flow")
+def sync_flow(cfg_path: str | None = None, held_lock=None) -> dict:
+    """One Prefect flow per Sync run (FR-4.1-4.8).
+
+    Pipeline sequence:
+    1. Ingestion & dedup (SHA-256)
+    2. VLM Extraction & Classification per doc (task with retry)
+    3. Grouping by normalized PO number into POSet
+    4. Reconciliation orchestrator (matching, exact qty aggregate, customs check, auto-merge)
+    5. Input folder clearing for merged sets (FR-4.8)
+
+    Concurrency (FR-4.3): the inter-process sync lock is held for the whole
+    run. Route-triggered runs pass their already-held lock via held_lock;
+    direct invocations (midnight cron) acquire here and return a `skipped`
+    summary when another sync holds it.
+    """
+    from app.services.sync_lock import acquire_sync_lock, release_sync_lock
+
+    own_lock = None
+    if held_lock is None:
+        own_lock = acquire_sync_lock(cfg_path)
+        if own_lock is None:
+            logger.warning("Sync skipped: another sync is already running")
+            return {
+                "status": "skipped",
+                "reason": "sync_already_running",
+                "processed": 0,
+                "extracted": 0,
+                "errors": 0,
+                "touched_po_sets": 0,
+                "reconciled_count": 0,
+            }
+    try:
+        # The OS lock is held for the whole run: either own_lock (acquired
+        # above, released below) or held_lock (owned by the route caller).
+        return _sync_flow_locked(cfg_path)
+    finally:
+        if own_lock is not None:
+            release_sync_lock(own_lock)
+
+
+def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     cfg = load_config(cfg_path) if cfg_path else load_config()
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
-    from app.services.ingestion import ingest_file, is_file_stable
+    from app.models import Document as _Doc
+    from app.models import POSet as _POSet
+    from app.models import POSetStatus
+    from app.services.grouping import get_or_create_po_set
+    from app.services.ingestion import delete_input_files, ingest_file, is_file_stable
+    from app.services.reconciliation import reconcile_po_set
 
     input_folder = Path(cfg.paths.input_folder)
     input_folder.mkdir(parents=True, exist_ok=True)
 
     processed = 0
-    classified = 0
     errors = 0
+    touched_po_set_ids: set[int] = set()
 
-    # discover PDFs
+    # Discover PDFs in input folder
     files = list(input_folder.glob("*.pdf")) + list(input_folder.glob("*.PDF"))
     for f in files:
         try:
-            # stability check: 2 polls configurable
+            # Stability poll (FR-4.5)
             stable = is_file_stable(
                 f,
                 interval=cfg.ingestion.stability_poll_interval_seconds,
@@ -105,60 +129,126 @@ def sync_flow(cfg_path: str | None = None) -> dict:
             )
             if not stable:
                 continue
+
             doc = ingest_file(f, cfg)
             processed += 1
-            # classify + extract per doc (real Luna)
+
+            # Extract & Classify via VLM
             try:
-                classify_task(doc.id, cfg_path=cfg_path)
-                classified += 1
+                _extract_task_for(cfg)(doc.id, cfg_path=cfg_path)
             except Exception:
+                logger.warning("Extract task failed for doc %s", doc.id, exc_info=True)
                 errors += 1
+
+            # Group into PO Set (FR-7.1-7.2). Only PO/COMBINED mint;
+            # DN/SI/UNKNOWN attach to an open set or wait unattached.
             try:
-                extract_task(doc.id, cfg_path=cfg_path)
+                with Session(eng) as s2:
+                    d2 = s2.get(_Doc, doc.id)
+                    if d2 and d2.po_no_normalized:
+                        ps = get_or_create_po_set(
+                            d2.po_no_raw or d2.po_no_normalized,
+                            cfg,
+                            create=_doc_type_val(d2) in _ANCHOR_TYPES,
+                        )
+                        if ps is None:
+                            continue
+                        if d2.po_set_id is None:
+                            d2.po_set_id = ps.id
+                            s2.commit()
+                        touched_po_set_ids.add(ps.id)
             except Exception:
+                logger.warning("Grouping failed for doc %s", doc.id, exc_info=True)
                 errors += 1
+
         except Exception:
+            logger.warning("Ingestion loop failed for file %s", f, exc_info=True)
             errors += 1
             continue
 
-    # handle pending docs not yet in input folder (already ingested but pending)
-    from app.models import Document, ExtractionStatus
+    # Also handle pending docs already in DB (e.g. from prior runs)
+    from app.models import ExtractionStatus
 
     with Session(eng) as s:
-        pending = (
-            s.query(Document).filter(Document.extraction_status == ExtractionStatus.pending).all()
-        )
+        pending = s.query(_Doc).filter(_Doc.extraction_status == ExtractionStatus.pending).all()
         for doc in pending:
             try:
-                classify_task(doc.id, cfg_path=cfg_path)
-                classified += 1
+                _extract_task_for(cfg)(doc.id, cfg_path=cfg_path)
             except Exception:
+                logger.warning("Extract task failed for pending doc %s", doc.id, exc_info=True)
                 errors += 1
-            # also extract via VLM (real Luna, no mock) — single call for COMBINED, retry [2,5,15]
             try:
-                extract_task(doc.id, cfg_path=cfg_path)
+                d = s.get(_Doc, doc.id)
+                if d and d.po_no_normalized:
+                    ps = get_or_create_po_set(
+                        d.po_no_raw or d.po_no_normalized,
+                        cfg,
+                        create=_doc_type_val(d) in _ANCHOR_TYPES,
+                    )
+                    if ps is None:
+                        continue
+                    if d.po_set_id is None:
+                        d.po_set_id = ps.id
+                        s.commit()
+                    touched_po_set_ids.add(ps.id)
             except Exception:
+                logger.warning("Grouping failed for pending doc %s", doc.id, exc_info=True)
                 errors += 1
-            # group into PO Set if po_no available
-            try:
-                from app.services.grouping import get_or_create_po_set
 
-                with Session(get_engine(cfg)) as s2:
-                    d = s2.get(Document, doc.id)
-                    if d and d.po_no_normalized:
-                        get_or_create_po_set(d.po_no_raw or d.po_no_normalized, cfg)
-                        if d.po_set_id is None:
-                            from app.models import POSet
+    # Resolve unattached documents (e.g. Delivery Notes without PO printed on face)
+    from app.services.grouping import attach_unattached_to_open_sets, resolve_unattached_documents
 
-                            ps = (
-                                s2.query(POSet)
-                                .filter_by(po_no_normalized=d.po_no_normalized)
-                                .first()
-                            )
-                            if ps:
-                                d.po_set_id = ps.id
-                                s2.commit()
-            except Exception:
-                pass
+    unattached_touched = resolve_unattached_documents(cfg)
+    touched_po_set_ids.update(unattached_touched)
 
-    return {"processed": processed, "classified": classified, "errors": errors}
+    # Attach DN/SI/UNKNOWN docs that waited for their PO anchor (BLOCKER-5).
+    # Never mints: keys without an open set keep waiting indefinitely.
+    attached_touched = attach_unattached_to_open_sets(cfg)
+    touched_po_set_ids.update(attached_touched)
+
+    # Phase 1: Reconcile newly touched PO Sets (FR-4.8, FR-14.1)
+    reconciled_count = 0
+    for ps_id in touched_po_set_ids:
+        try:
+            res = reconcile_po_set(ps_id, cfg)
+            reconciled_count += 1
+            if res.get("status") == POSetStatus.merged.value or res.get("status") == "merged":
+                with Session(eng) as s3:
+                    ps_merged = s3.get(_POSet, ps_id)
+                    if ps_merged:
+                        delete_input_files(ps_merged, input_folder)
+        except Exception:
+            logger.warning("Reconciliation failed for PO Set %s", ps_id, exc_info=True)
+            errors += 1
+
+    # Phase 2: Re-reconcile all open (non-merged) sets — catches stale mismatched/pending
+    # sets whose documents were already present before this run started.
+    with Session(eng) as s_sweep:
+        open_sets = (
+            s_sweep.query(_POSet)
+            .filter(_POSet.status != POSetStatus.merged)
+            .with_entities(_POSet.id)
+            .all()
+        )
+    for (ps_id,) in open_sets:
+        if ps_id in touched_po_set_ids:
+            continue  # already reconciled in phase 1
+        try:
+            res = reconcile_po_set(ps_id, cfg)
+            reconciled_count += 1
+            if res.get("status") == POSetStatus.merged.value or res.get("status") == "merged":
+                with Session(eng) as s3:
+                    ps_merged = s3.get(_POSet, ps_id)
+                    if ps_merged:
+                        delete_input_files(ps_merged, input_folder)
+        except Exception:
+            logger.warning("Re-reconcile sweep failed for PO Set %s", ps_id, exc_info=True)
+            errors += 1
+
+    return {
+        "processed": processed,
+        "extracted": processed - errors,
+        "errors": errors,
+        "touched_po_sets": len(touched_po_set_ids),
+        "reconciled_count": reconciled_count,
+    }

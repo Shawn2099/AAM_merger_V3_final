@@ -67,6 +67,19 @@ def _create_poset_with_docs(tmp_path, cfg, po_no="PO-1234", status=None, docs_in
                 invoice_no=info.get("invoice_no"),
             )
             s.add(doc)
+            s.flush()
+            # one evidence line per doc — auto-merge requires line items (W-22)
+            from app.models import LineItem as _LineItem
+
+            s.add(
+                _LineItem(
+                    document_id=doc.id,
+                    line_item_no="1",
+                    description=f"{dt} item",
+                    quantity=1000,
+                    unit_price=1000,
+                )
+            )
         s.commit()
         return ps_id
 
@@ -295,3 +308,85 @@ def test_force_merge_bypasses_and_writes_audit(tmp_path):
         ps = s.get(POSet, po_set_id)
         assert ps.status.value == "merged"
         assert ps.merged_output_path == str(out)
+
+
+def test_combined_excludes_separate_docs(tmp_path):
+    """FR-14.7: COMBINED + separate docs → authoritative COMBINED packet only,
+    separate docs remain visible but non-authoritative (no content doubling)."""
+    from pypdf import PdfReader
+
+    from app.services.merge import merge_po_set
+
+    cfg = _cfg_with_tmp(tmp_path)
+    po_set_id = _create_poset_with_docs(
+        tmp_path,
+        cfg,
+        docs_info=[
+            {"doc_type": "COMBINED", "invoice_no": "INV-COMB-1", "width": 100},
+            {"doc_type": "SI", "si_no": "INV-SI-9", "width": 400},
+            {"doc_type": "DN", "width": 300},
+            {"doc_type": "PO", "width": 200},
+        ],
+    )
+    out = merge_po_set(po_set_id, cfg)
+    assert out is not None
+    reader = PdfReader(str(out))
+    assert len(reader.pages) == 1
+
+
+def test_zero_evidence_auto_merge_refused(tmp_path):
+    """W-22: auto-merge with zero line items refuses, status untouched."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus
+    from app.models.base import Base
+    from app.services.merge import merge_po_set
+
+    cfg = _cfg_with_tmp(tmp_path)
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO_EMPTY", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+        pdf = tmp_path / "po_empty.pdf"
+        _tiny_pdf(pdf)
+        s.add(
+            Document(
+                sha256_hash="h_empty_po",
+                original_filename="po.pdf",
+                stored_path=str(pdf),
+                doc_type=DocType.PO,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=ps_id,
+                si_no="INV-EMPTY",
+            )
+        )
+        s.commit()
+
+    assert merge_po_set(ps_id, cfg) is None
+    with Session(eng) as s:
+        ps_after = s.get(POSet, ps_id)
+        assert ps_after.status == POSetStatus.pending
+        assert ps_after.merged_output_path is None
+
+
+def test_standard_set_names_strictly_from_si(tmp_path):
+    """W-2: standard set where only the DN carries an invoice number cannot
+    be named from it → auto-merge refuses instead of misnaming the packet."""
+    from app.services.merge import merge_po_set
+
+    cfg = _cfg_with_tmp(tmp_path)
+    po_set_id = _create_poset_with_docs(
+        tmp_path,
+        cfg,
+        docs_info=[
+            {"doc_type": "SI"},
+            {"doc_type": "DN", "invoice_no": "DN-INV-9"},
+            {"doc_type": "PO"},
+        ],
+    )
+    assert merge_po_set(po_set_id, cfg) is None

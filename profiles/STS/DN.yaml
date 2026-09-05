@@ -1,0 +1,139 @@
+# STS / DN extraction profile — EXAMPLE / REFERENCE (status: draft, not activated)
+#
+# Conventions used in this file:
+#   [CONFIRMED] = observed in real AAM samples / business doc §17. Safe to enforce.
+#   [ILLUSTRATIVE] = plausible placeholder. MUST be replaced with observed values
+#                    during profile building before activation (§30 gate).
+#
+# Profiles contain terminology, quirks, hazards, and validation rules ONLY.
+# NEVER coordinates, crop regions, or positional field rules (addendum §5).
+
+profile_id: "STS/DN"
+profile_version: "1.0"
+status: "draft"   # draft → activating (held-out validation running) → active → retired
+
+# ---------------------------------------------------------------------------
+# Family identification (what Stage 1 looks for; stored here for audit,
+# not injected as extraction rules)
+# ---------------------------------------------------------------------------
+company_identifiers:
+  # [CONFIRMED] vendor across STS/IRE/Ensign sample sets.
+  - "RAAS"
+  - "IBRAHIM ALI ALSHAB TRADING EST."
+document_titles:
+  # [CONFIRMED] DN face titles observed.
+  - "DELIVERY NOTE"
+  - "PACKING LIST"
+  - "GDN"
+
+# ---------------------------------------------------------------------------
+# Terminology variants (field-name → observed labels, all [CONFIRMED] patterns,
+# exact label sets completed during profile building)
+# ---------------------------------------------------------------------------
+terminology:
+  po_reference_labels:
+    - "PO No"
+    - "P.O. No"
+    - "PO Reference"
+    - "Order No"
+  dn_number_labels:
+    - "DN No"
+    - "Delivery Note No"
+    - "GDN No"
+  line_number_labels:
+    - "Item No"
+    - "Sl No"
+    - "#"
+  quantity_labels:
+    - "Qty"
+    - "Quantity"
+  unit_price_labels:
+    - "Unit Price"
+    - "Rate"
+
+# ---------------------------------------------------------------------------
+# Numbering styles (global vs per-line)
+# ---------------------------------------------------------------------------
+numbering_style:
+  document_number:
+    # [CONFIRMED] STS DNs carry a global GDN-prefixed number, e.g. GDN-ARS-26-4619.
+    pattern: "^GDN-[A-Z]+-\\d+-\\d+$"
+    scope: "global"
+  po_reference:
+    # [CONFIRMED] numeric PO refs, e.g. 210851 (printed "PO-210851").
+    pattern: "^\\d+$"
+    scope: "global"
+  line_references: []
+  # STS DN lines carry NO per-line references in observed samples: no per-line
+  # po/dn/invoice numbers. If a future STS DN shows them, add the field name
+  # here and Layer-3 validation will expect it. (Addendum §7.)
+
+# ---------------------------------------------------------------------------
+# Quirks (brand traits the model must know; all [CONFIRMED])
+# ---------------------------------------------------------------------------
+quirks:
+  - id: "LINE-ITEM-N-SUBLINE"
+    description: >
+      RAAS embeds a "Line Item - N" sub-line inside the description field on DN
+      (and SI) documents, distinct from the actual line_item_no column. It is
+      NEVER a separate line item. Do not emit it, do not count it.
+  - id: "DN-BUNDLE-SUFFIX"
+    description: >
+      Multi-DN PDFs are titled "(2 DNs)" / "(3 DNs)". A bundle is still DN,
+      never COMBINED. Emit the first po_reference; include ALL line_items
+      across all pages in order.
+  - id: "BLANK-PART-NO"
+    description: >
+      part_no is blank on every observed STS DN. Do not invent it, do not
+      use neighbouring columns as substitutes. Leave item_code null.
+
+# ---------------------------------------------------------------------------
+# Hazards (known mis-extraction traps)
+# ---------------------------------------------------------------------------
+hazards:
+  - id: "TOTAL-ROWS-ARE-NOT-ITEMS"
+    description: >
+      Subtotal / VAT / tax / total / amount-in-words rows must be excluded
+      from line_items. Only rows with a product description AND quantity > 0.
+    severity: "high"   # a total row emitted as a line breaks reconciliation
+  - id: "HEADER-DESCRIPTION-SPLIT"
+    description: >
+      A single line item's description may split across a header line plus a
+      detail block. Emit as ONE line item, never two.
+    severity: "high"
+
+# ---------------------------------------------------------------------------
+# Numeric rules (observed formats for this family)
+# ---------------------------------------------------------------------------
+numeric_rules:
+  quantity_formats: ["integer", "1-decimal", "2-decimal"]
+  # [CONFIRMED] STS DN quantities observed as integers ("50") and decimals
+  # ("12.5"); prices as 2dp ("350.00", "1000.00"). Verbatim strings only.
+  unit_price_formats: ["2-decimal"]
+  thousands_separator: ","        # [ILLUSTRATIVE] confirm from samples
+  decimal_separator: "."
+  max_supported_decimals: 3       # canonical limit (addendum §20); more → review
+
+# ---------------------------------------------------------------------------
+# Validation rules (Layer-3 checks specific to STS/DN)
+# ---------------------------------------------------------------------------
+validation:
+  - id: "DN-NUMBER-FORMAT"
+    rule: "document_number must match numbering_style.document_number.pattern"
+    on_fail: "review"
+  - id: "PO-REF-PRESENT"
+    rule: "po_reference must be present and match ^\\d+$"
+    on_fail: "review"
+  - id: "POSITIVE-LINES"
+    rule: "every line_item quantity > 0 (V3 FR-10.3 already quarantines ≤ 0)"
+    on_fail: "review"
+
+# ---------------------------------------------------------------------------
+# Activation record (§30 gate — filled at activation, never beforehand)
+# ---------------------------------------------------------------------------
+activation:
+  activated_on: null
+  activated_by: null
+  held_out_samples: []    # ≥5 document IDs, disjoint from building samples
+  calibration_record: null
+  deactivated_on: null

@@ -9,12 +9,18 @@ from sqlalchemy.engine import Engine
 
 from .config import AppConfig
 
+_engine_cache: dict[str, Engine] = {}
+
 
 def get_engine(cfg: AppConfig) -> Engine:
-    db_path = Path(cfg.paths.database_path)
+    db_path = Path(cfg.paths.database_path).resolve()
+    key = db_path.as_posix()
+    if key in _engine_cache:
+        return _engine_cache[key]
+
     db_path.parent.mkdir(parents=True, exist_ok=True)
     # SQLite URL — pathlib as_posix for cross-platform, WAL via pragmas
-    url = f"sqlite:///{db_path.as_posix()}"
+    url = f"sqlite:///{key}"
     engine = create_engine(url, connect_args={"check_same_thread": False})
 
     @event.listens_for(engine, "connect")
@@ -25,4 +31,5 @@ def get_engine(cfg: AppConfig) -> Engine:
         cursor.execute("PRAGMA foreign_keys=ON;")
         cursor.close()
 
+    _engine_cache[key] = engine
     return engine

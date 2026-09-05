@@ -1,7 +1,6 @@
-"""Merge — pypdf SI→DN→PO→(AWB→Customs), filename invoice_no, immutable FR-14.1-14.7."""
-
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -12,6 +11,8 @@ from app.core.database import get_engine
 from app.models import AuditAction, AuditLog, DocType, POSet, POSetStatus
 from app.models.base import Base
 
+logger = logging.getLogger(__name__)
+
 
 def _doc_type_val(doc) -> str:
     dt = doc.doc_type
@@ -21,8 +22,13 @@ def _doc_type_val(doc) -> str:
         return str(dt)
 
 
-def _invoice_name(po_set: POSet) -> str | None:
-    """FR-14.5: filename is Invoice/SI number, no fallback beyond guarantee."""
+def _invoice_name(po_set: POSet, loose: bool = False) -> str | None:
+    """FR-14.5: filename is Invoice/SI number.
+
+    Standard sets name strictly from the SI doc (W-2). COMBINED-only sets
+    and force-merge use the loose fallback (any doc's si_no/invoice_no),
+    since no SI doc may exist there.
+    """
     docs = po_set.documents or []
     # prefer SI's si_no/invoice_no
     for d in docs:
@@ -33,14 +39,16 @@ def _invoice_name(po_set: POSet) -> str | None:
             inv = getattr(d, "invoice_no", None)
             if inv:
                 return inv  # type: ignore[return-value]
-    # fallback any doc's invoice_no/si_no
+    if not loose:
+        return None
+    # for COMBINED or fallback, try any doc with si_no/invoice_no
     for d in docs:
-        inv2 = getattr(d, "invoice_no", None)
-        if inv2:
-            return inv2  # type: ignore[return-value]
-        si2 = getattr(d, "si_no", None)
-        if si2:
-            return si2  # type: ignore[return-value]
+        si_no = getattr(d, "si_no", None)
+        if si_no:
+            return si_no  # type: ignore[return-value]
+        inv = getattr(d, "invoice_no", None)
+        if inv:
+            return inv  # type: ignore[return-value]
     return None
 
 
@@ -55,6 +63,17 @@ def _ordered_docs(po_set: POSet) -> list:
     combined = [d for d in docs if _doc_type_val(d) == DocType.COMBINED.value]
     shipping = [d for d in docs if _doc_type_val(d) == DocType.SHIPPING.value]
     customs = [d for d in docs if _doc_type_val(d) == DocType.CUSTOMS.value]
+    if combined and (si or dn or po):
+        # FR-14.7: the COMBINED bundle is the authoritative merge; separate
+        # docs remain visible in the set but are excluded from this packet —
+        # merging both would double the content in one delivery.
+        excluded = [getattr(d, "original_filename", "?") for d in si + dn + po]
+        logger.warning(
+            "PO Set %s: COMBINED authoritative, excluding separate docs %s",
+            getattr(po_set, "id", "?"),
+            excluded,
+        )
+        return combined + shipping + customs
     # Order: SI→DN→PO→(SHIPPING→CUSTOMS); COMBINED after PO before shipping
     return si + dn + po + combined + shipping + customs
 
@@ -66,16 +85,35 @@ def _is_blocked(po_set: POSet) -> bool:
     return not (DocType.CUSTOMS.value in vals and DocType.SHIPPING.value in vals)
 
 
-def _write_merged(ordered: list, out: Path) -> Path:
+def _resolve_output_path(
+    safe: str, po_set_id: int, output_folder: Path, current_path: str | None = None
+) -> Path:
+    out = output_folder / f"{safe}.pdf"
+    if current_path and Path(current_path).resolve() == out.resolve():
+        return out
+    if out.exists():
+        out = output_folder / f"{safe}-{po_set_id}.pdf"
+    return out
+
+
+def _write_merged(ordered: list, out: Path, allow_missing: bool = False) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     writer = PdfWriter()
+    missing: list[str] = []
     for doc in ordered:
         p = Path(doc.stored_path)
         if not p.exists():
+            doc_id = getattr(doc, "id", "?")
+            doc_name = getattr(doc, "original_filename", "unknown")
+            missing.append(f"Doc {doc_id} ({doc_name}): {p}")
             continue
         reader = PdfReader(str(p))
         for pg in reader.pages:
             writer.add_page(pg)
+
+    if missing and not allow_missing:
+        raise FileNotFoundError(f"Missing stored PDF(s) during merge: {'; '.join(missing)}")
+
     # pypdf requires at least one page; if empty, write empty PDF with no pages -> still create file
     writer.write(str(out))
     return out
@@ -113,17 +151,38 @@ def merge_po_set(po_set_id: int, cfg) -> Path | None:
         if not ordered:
             return None
 
-        invoice = _invoice_name(ps)
+        # W-22: refuse auto-merge with zero line-item evidence — a packet
+        # with no numeric reconciliation behind it must never go out.
+        # (force_merge bypasses by explicit operator intent.)
+        total_lines = sum(len(list(d.line_items or [])) for d in ordered)
+        if total_lines == 0:
+            logger.warning(
+                "Auto-merge refused for PO Set %s: zero line-item evidence", po_set_id
+            )
+            return None
+
+        invoice = _invoice_name(
+            ps,
+            loose=any(
+                _doc_type_val(d) == DocType.COMBINED.value for d in (ps.documents or [])
+            ),
+        )
         if not invoice:
             # SPEC says SI presence guaranteed when reconciled; if missing, cannot name file -> None
             return None
         safe = "".join(c for c in str(invoice) if c.isalnum() or c in ("-", "_", "."))
         if not safe:
             safe = str(invoice)
-        out = Path(cfg.paths.output_folder) / f"{safe}.pdf"
+        out = _resolve_output_path(
+            safe, ps.id, Path(cfg.paths.output_folder), ps.merged_output_path
+        )
 
         # Merge
-        _write_merged(ordered, out)
+        try:
+            _write_merged(ordered, out, allow_missing=False)
+        except FileNotFoundError as e:
+            logger.warning("Auto-merge failed for PO Set %s: %s", po_set_id, e)
+            return None
 
         ps.merged_output_path = str(out)
         ps.merged_at = datetime.now(UTC)
@@ -161,11 +220,13 @@ def force_merge(po_set_id: int, cfg) -> Path:
         if not ordered:
             # still create empty? better raise — but spec says merge with whatever exists
             # create empty placeholder out
-            invoice = _invoice_name(ps) or ps.po_no_normalized
+            invoice = _invoice_name(ps, loose=True) or ps.po_no_normalized
             safe = "".join(c for c in str(invoice) if c.isalnum() or c in ("-", "_", "."))
             if not safe:
                 safe = ps.po_no_normalized
-            out = Path(cfg.paths.output_folder) / f"{safe}.pdf"
+            out = _resolve_output_path(
+                safe, ps.id, Path(cfg.paths.output_folder), ps.merged_output_path
+            )
             out.parent.mkdir(parents=True, exist_ok=True)
             PdfWriter().write(str(out))
             ps.merged_output_path = str(out)
@@ -191,12 +252,14 @@ def force_merge(po_set_id: int, cfg) -> Path:
             assert ps.merged_output_path is not None
             return Path(ps.merged_output_path)
 
-        invoice = _invoice_name(ps) or ps.po_no_normalized
+        invoice = _invoice_name(ps, loose=True) or ps.po_no_normalized
         safe = "".join(c for c in str(invoice) if c.isalnum() or c in ("-", "_", "."))
         if not safe:
             safe = str(invoice)
-        out = Path(cfg.paths.output_folder) / f"{safe}.pdf"
-        _write_merged(ordered, out)
+        out = _resolve_output_path(
+            safe, ps.id, Path(cfg.paths.output_folder), ps.merged_output_path
+        )
+        _write_merged(ordered, out, allow_missing=True)
 
         ps.merged_output_path = str(out)
         ps.merged_at = datetime.now(UTC)

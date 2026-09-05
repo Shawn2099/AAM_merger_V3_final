@@ -181,7 +181,7 @@ Numbering mirrors business doc sections for traceability.
 - **[FR-6.4]** The system shall treat a split-across-lines description (header line + detail block) as a single line item, not two.
 - **[FR-6.5]** If extraction fails (hard failure — API/network error, or soft failure — schema validation failure), the system shall retry up to 3 times with backoff. After 3 failures, the system shall mark that document `failed` without blocking matching/reconciliation for the rest of that PO Set.
 - **[FR-6.6]** The system shall not compute or store any confidence score for extraction. Extraction status shall be binary: `valid` or `failed`.
-- **[FR-6.7]** For a `COMBINED` document, the system shall issue a single VLM call prompted to return all identifiable sub-document sections (PO/DN/SI) in one structured response. If the model cannot confidently identify all expected sections, the system shall treat this as an extraction failure for that document (retry, then `failed`) — never a partial pass.
+- **[FR-6.7]** For a `COMBINED` document, the system shall issue a single VLM call prompted to return all identifiable sub-document sections (PO/DN/SI) in one structured response with section presence booleans (`has_po_section: bool`, `has_dn_section: bool`, `has_si_section: bool`). If the model cannot confidently identify all three expected sections (`has_po_section and has_dn_section and has_si_section`), the system shall treat this as an extraction failure for that document (retry, then `failed`) — never a partial pass or premature auto-merge.
 - **[FR-6.8]** The system shall provide two distinct user-triggered actions: "Redo/Re-extract" (re-sends to VLM, costs an API call) and "Redo matching" (re-runs matching against already-stored data, no API call). These shall not be combined into a single action.
 
 ### 7.4 Grouping (business doc §7)
@@ -192,6 +192,7 @@ Numbering mirrors business doc sections for traceability.
 ### 7.5 Line-item matching (business doc §8)
 
 - **[FR-8.1]** The system shall treat `line_item_no` as the sole primary matching key when present.
+- **[FR-8.1a]** ERP step-10 alignment (confirmed real vendor pattern, 2026-09-05): when PO lines use step-10 numbering (10, 20, 30, …) and DN/SI lines use unit numbering (1, 2, 3, …), PO line `N` shall map to DN/SI line `N/10`. This is a `line_item_no`-derived mapping, not a positional signal, and it never overrides an exact `line_item_no` match.
 - **[FR-8.2]** When `line_item_no` is absent, the system shall fall back to fuzzy description matching using `rapidfuzz` token-sort similarity, with a threshold of 85% stored as a configurable constant (not hardcoded inline). Description matching shall never override or double-check a present `line_item_no` match.
 - **[FR-8.3]** The system shall not use `slno`, positional order, or `part_no` as matching signals under any circumstance.
 - **[FR-8.4]** When two documents of the same type reference the same `line_item_no` with consistent descriptions, the system shall sum their quantities (§7.6). When descriptions conflict for the same `line_item_no`, the system shall route the entire PO Set to `quarantined`.
@@ -201,7 +202,7 @@ Numbering mirrors business doc sections for traceability.
 
 - **[FR-9.1]** For every PO line item, the system shall independently compute Aggregate DN Quantity (sum across all DNs) and Aggregate SI Quantity (sum across all SIs). These sums shall never be added together.
 - **[FR-10.1]** For every PO line item, the system shall check `PO Quantity == Aggregate DN Quantity` AND, independently, `PO Quantity == Aggregate SI Quantity`, both as exact integer comparisons (no tolerance band). Both checks must independently pass.
-- **[FR-10.2]** Reconciliation shall be evaluated line-by-line. One failing line shall fail the entire PO Set — there is no partial-pass state.
+- **[FR-10.2]** Reconciliation shall be evaluated line-by-line. A line whose aggregate deliveries are both nonzero but unequal to the PO quantity (including over-delivery) shall fail the entire PO Set (`mismatched`) — there is no partial-pass state. A line with zero aggregate DN or SI deliveries is *awaiting delivery*, not a failure: the set waits in `pending` with reason `partial_fulfillment` (with per-line quantity flags) until every line is delivered, and only merges once all lines match (decision 2026-09-05).
 - **[FR-10.3]** If any quantity encountered is negative or zero, the system shall route that PO Set to `quarantined` rather than evaluating it as a normal reconciliation case.
 - **[FR-11.1]** The system shall perform an exact-match price check as a secondary condition. A price-only mismatch shall not block a merge that quantity has already cleared, but shall still be flagged for reviewer visibility.
 - **[FR-11.2]** When multiple flags exist on one line item, the system shall surface them to the reviewer in this priority order: (1) line-item identification, (2) quantity, (3) price.

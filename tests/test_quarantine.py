@@ -260,3 +260,45 @@ def test_manual_merge_output_user_selectable(tmp_path):
     out = manual_merge([a, b], order=[0, 1], output_path=custom_out)
     assert out == custom_out
     assert out.exists()
+
+
+def test_audit_fk_set_null_on_delete():
+    """W-14: audit_log FK must carry ON DELETE SET NULL (model-level)."""
+    from sqlalchemy import create_engine
+
+    from app.models.base import Base
+
+    eng = create_engine("sqlite://")
+    Base.metadata.create_all(eng)
+    con = eng.raw_connection().driver_connection
+    rows = con.execute("PRAGMA foreign_key_list(audit_log)").fetchall()
+    po_refs = [r for r in rows if r[2] == "po_sets"]
+    assert len(po_refs) == 1
+    # PRAGMA foreign_key_list: (id, seq, table, from, to, on_update, on_delete, match)
+    assert po_refs[0][6] == "SET NULL"
+
+
+def test_delete_audit_survives_with_detail(tmp_path):
+    """W-14: audit inserted with the real po_set_id, survives the parent
+    delete (nulled FK) with po_no + count in detail."""
+    import json
+
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import AuditLog
+    from app.services.quarantine import delete_quarantined
+
+    cfg = _cfg_with_tmp(tmp_path)
+    po_set_id = _create_quarantined_poset(tmp_path, cfg, po_no="PO-AUDIT-1")
+    audit = delete_quarantined(po_set_id, cfg)
+    assert audit.po_set_id is None
+    detail = json.loads(audit.detail)
+    assert detail["po_no_normalized"] == "PO-AUDIT-1"
+    assert detail["document_count"] == 3
+
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        surviving = s.query(AuditLog).filter_by(id=audit.id).one()
+        assert surviving.po_set_id is None
+        assert json.loads(surviving.detail)["document_count"] == 3

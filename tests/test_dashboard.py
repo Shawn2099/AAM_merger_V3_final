@@ -49,11 +49,10 @@ def tmp_cfg(tmp_path):
 
 @pytest.fixture()
 def client(tmp_cfg, monkeypatch):
-    import app.api.routes.sync as sync_mod
-
     monkeypatch.setattr("app.api.routes.sync.load_config", lambda path=None: tmp_cfg)
     monkeypatch.setattr("app.api.routes.po_sets.load_config", lambda path=None: tmp_cfg)
     monkeypatch.setattr("app.flows.sync.load_config", lambda path=None: tmp_cfg)
+    monkeypatch.setattr("app.services.sync_lock.load_config", lambda path=None: tmp_cfg)
     # dashboard module may also use load_config
     try:
         import importlib.util
@@ -65,12 +64,10 @@ def client(tmp_cfg, monkeypatch):
     except ImportError:
         pass
     # also patch app.main load_config if needed
-    sync_mod._sync_running = False
     from app.main import app
 
     with TestClient(app) as c:
         yield c
-    sync_mod._sync_running = False
 
 
 def _create_poset(cfg, po_no="PO1000", status=POSetStatus.pending, has_customs=False):
@@ -404,3 +401,294 @@ def test_dashboard_filter_htmx_returns_partial(tmp_cfg, client):
         pytest.fail(
             "HTMX dashboard filter should return partial _dashboard_table, not full dashboard.html"
         )
+
+
+def test_unclassified_view_and_reclassify(tmp_cfg, client):
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus, POSet
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="unk_hash_1",
+            original_filename="unknown_vendor.pdf",
+            stored_path="data/stored/unknown_vendor.pdf",
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.pending,
+        )
+        s.add(doc)
+        s.commit()
+        s.refresh(doc)
+        doc_id = doc.id
+
+    # GET /unclassified
+    r = client.get("/unclassified")
+    assert r.status_code == 200
+    assert "unknown_vendor.pdf" in r.text
+    assert "Unclassified Documents" in r.text
+
+    # POST /unclassified/{doc_id}/reclassify
+    r_post = client.post(
+        f"/unclassified/{doc_id}/reclassify",
+        data={"doc_type": "PO", "po_no": "MANUALPO999"},
+        headers={"HX-Request": "true"},
+    )
+    assert r_post.status_code == 200
+    assert "Reclassified" in r_post.text or "PO" in r_post.text
+
+    with Session(eng) as s:
+        d = s.get(Document, doc_id)
+        assert d.doc_type == DocType.PO
+        assert d.po_no_normalized == "MANUALPO999"
+        assert d.po_set_id is not None
+        ps = s.get(POSet, d.po_set_id)
+        assert ps.po_no_normalized == "MANUALPO999"
+
+
+def test_reclassify_to_combined_forces_reextract(tmp_cfg, client):
+    """W-1: hand-tagging a doc COMBINED resets extraction so the FR-6.7
+    section gate re-validates it before any merge."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="unk_hash_combined",
+            original_filename="maybe_combined.pdf",
+            stored_path="data/stored/maybe_combined.pdf",
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.valid,
+            extraction_attempt_count=2,
+        )
+        s.add(doc)
+        s.commit()
+        s.refresh(doc)
+        doc_id = doc.id
+
+    r_post = client.post(
+        f"/unclassified/{doc_id}/reclassify",
+        data={"doc_type": "COMBINED", "po_no": "REC999"},
+        headers={"HX-Request": "true"},
+    )
+    assert r_post.status_code == 200
+
+    with Session(eng) as s:
+        d = s.get(Document, doc_id)
+        assert d.doc_type == DocType.COMBINED
+        assert d.extraction_status == ExtractionStatus.pending
+        assert d.extraction_attempt_count == 0
+
+
+def test_manual_merger_back_link_points_to_dashboard(client):
+    r = client.get("/manual/merger")
+    assert r.status_code == 200
+    assert 'href="/dashboard"' in r.text
+
+
+def _pdf_bytes() -> bytes:
+    import io
+
+    from pypdf import PdfWriter
+
+    w = PdfWriter()
+    w.add_blank_page(width=200, height=200)
+    buf = io.BytesIO()
+    w.write(buf)
+    return buf.getvalue()
+
+
+def test_upload_duplicate_does_not_rewrite(tmp_cfg, client):
+    """W-12: duplicate upload is idempotent — stored bytes + rows untouched."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import Document
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO_DUP", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+
+    payload = _pdf_bytes()
+    for _ in range(2):
+        r = client.post(
+            f"/po_sets/{ps_id}/upload",
+            files={"file": ("customs.pdf", payload, "application/pdf")},
+            data={"doc_type": "CUSTOMS"},
+        )
+        # RedirectResponse to the set view (TestClient follows → 200 + 302 history)
+        assert r.status_code == 200, r.text
+        assert r.history and r.history[0].status_code == 302
+
+    with Session(eng) as s:
+        docs = s.query(Document).filter_by(po_set_id=ps_id).all()
+        assert len(docs) == 1
+        stored = Path(docs[0].stored_path)
+        assert stored.read_bytes() == payload
+        # poison the stored file: a duplicate upload must not rewrite it
+        stored.write_bytes(b"SENTINEL")
+
+    r = client.post(
+        f"/po_sets/{ps_id}/upload",
+        files={"file": ("customs.pdf", payload, "application/pdf")},
+        data={"doc_type": "CUSTOMS"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.history and r.history[0].status_code == 302
+    with Session(eng) as s:
+        assert s.query(Document).filter_by(po_set_id=ps_id).count() == 1
+        docs = s.query(Document).filter_by(po_set_id=ps_id).all()
+        assert Path(docs[0].stored_path).read_bytes() == b"SENTINEL"
+
+
+def test_upload_rejects_non_pdf(tmp_cfg, client):
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO_TXT", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+
+    r = client.post(
+        f"/po_sets/{ps_id}/upload",
+        files={"file": ("evil.txt", b"not a pdf at all", "text/plain")},
+        data={"doc_type": "CUSTOMS"},
+    )
+    assert r.status_code == 422
+
+
+def test_upload_rejects_oversize(tmp_cfg, client, monkeypatch):
+    from sqlalchemy.orm import Session
+
+    import app.core.limits as limits
+    from app.core.database import get_engine
+    from app.models.base import Base
+
+    monkeypatch.setattr(limits, "MAX_UPLOAD_BYTES", 1024)
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO_BIG", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+
+    r = client.post(
+        f"/po_sets/{ps_id}/upload",
+        files={"file": ("big.pdf", b"%PDF" + b"x" * 2048, "application/pdf")},
+        data={"doc_type": "CUSTOMS"},
+    )
+    assert r.status_code == 422
+
+
+def test_manual_merge_bad_order_422(client):
+    """W-11: bad order maps to 422, not an unhandled 500."""
+    r = client.post(
+        "/manual/merge",
+        files={"files": ("a.pdf", _pdf_bytes(), "application/pdf")},
+        data={"order": "abc", "output_filename": "out.pdf"},
+    )
+    assert r.status_code == 422
+
+
+def test_manual_merge_success_cleans_tmp(client, tmp_path, monkeypatch):
+    """W-11: input + output tmps are removed after the response is sent."""
+    import tempfile
+    from pathlib import Path as _Path
+
+    real_mkstemp = tempfile.mkstemp
+    created: list[str] = []
+
+    def spy_mkstemp(suffix=None, prefix=None, dir=None, **kw):
+        fd, p = real_mkstemp(suffix=suffix, prefix=prefix or "tmp", dir=str(tmp_path), **kw)
+        created.append(p)
+        return fd, p
+
+    monkeypatch.setattr(tempfile, "mkstemp", spy_mkstemp)
+    r = client.post(
+        "/manual/merge",
+        files=[
+            ("files", ("a.pdf", _pdf_bytes(), "application/pdf")),
+            ("files", ("b.pdf", _pdf_bytes(), "application/pdf")),
+        ],
+        data={"order": "1,0", "output_filename": "merged.pdf"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.content.startswith(b"%PDF")
+    # every tmp this endpoint created (2 inputs + 1 output) is gone
+    assert len(created) == 3
+    for p in created:
+        assert not _Path(p).exists(), p
+
+
+def test_document_preview_and_merged_download(tmp_cfg, client, tmp_path):
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    pdf_file = tmp_path / "test_preview.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 sample content")
+
+    with Session(eng) as s:
+        ps = POSet(
+            po_no_normalized="POPREV1", status=POSetStatus.merged, merged_output_path=str(pdf_file)
+        )
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        doc = Document(
+            sha256_hash="hash_prev_123",
+            original_filename="test_preview.pdf",
+            stored_path=str(pdf_file),
+            doc_type=DocType.PO,
+            po_set_id=ps.id,
+        )
+        s.add(doc)
+        s.commit()
+        s.refresh(doc)
+        doc_id = doc.id
+        ps_id = ps.id
+
+    # Test /documents/{doc_id}/preview
+    r_prev = client.get(f"/documents/{doc_id}/preview")
+    assert r_prev.status_code == 200
+    assert r_prev.headers["content-type"] == "application/pdf"
+    assert b"%PDF-1.4" in r_prev.content
+
+    # Test /po_sets/{ps_id}/merged_pdf
+    r_merged = client.get(f"/po_sets/{ps_id}/merged_pdf")
+    assert r_merged.status_code == 200
+    assert r_merged.headers["content-type"] == "application/pdf"
+    assert b"%PDF-1.4" in r_merged.content
+
+
+def test_static_assets_served(client):
+    r_css = client.get("/static/css/theme.css")
+    assert r_css.status_code == 200
+    assert "--primary" in r_css.text
+
+    r_js = client.get("/static/js/app.js")
+    assert r_js.status_code == 200
+    assert "pdfDrawer" in r_js.text

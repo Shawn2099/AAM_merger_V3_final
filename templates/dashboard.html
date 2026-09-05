@@ -1,28 +1,91 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — AAM Merger{% endblock %}
+{% block title %}Dashboard — AAM Merger V3{% endblock %}
+
 {% block content %}
-<div class="card">
-  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-    <h2 style="margin:0;">PO Sets</h2>
-    <span class="muted" style="margin-left:8px;">HTMX partial refresh every 2s</span>
-    <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+<!-- Executive KPI Summary Cards -->
+<div class="kpi-grid">
+  <a href="/dashboard" class="kpi-card kpi-all" title="View all PO Sets">
+    <span class="kpi-title">Total PO Sets</span>
+    <span class="kpi-value">{{ stats.total if stats else po_sets|length }}</span>
+    <span class="kpi-desc">Managed across pipeline</span>
+  </a>
+
+  <a href="/dashboard?status=merged" class="kpi-card kpi-merged" title="Filter by Merged (Ready)">
+    <span class="kpi-title">✅ Merged &amp; Ready</span>
+    <span class="kpi-value" style="color:var(--clr-merged-text);">
+      {{ stats.merged if stats else 0 }}
+      <small style="font-size:0.9rem; font-weight:600; opacity:0.8;">({{ stats.merged_pct if stats else 0 }}%)</small>
+    </span>
+    <span class="kpi-desc">Fully reconciled packets</span>
+  </a>
+
+  <a href="/dashboard?status=mismatched" class="kpi-card kpi-mismatched" title="Filter by Mismatched (Needs Review)">
+    <span class="kpi-title">⚠️ Needs Review</span>
+    <span class="kpi-value" style="color:var(--clr-mismatch-text);">{{ stats.mismatched if stats else 0 }}</span>
+    <span class="kpi-desc">Quantity discrepancies</span>
+  </a>
+
+  <a href="/dashboard?status=blocked_customs" class="kpi-card kpi-blocked" title="Filter by Awaiting Customs">
+    <span class="kpi-title">🔒 Awaiting Customs</span>
+    <span class="kpi-value" style="color:var(--clr-blocked-text);">{{ stats.blocked_customs if stats else 0 }}</span>
+    <span class="kpi-desc">Needs customs/shipping docs</span>
+  </a>
+
+  <a href="/dashboard?status=quarantined" class="kpi-card kpi-quarantined" title="Filter by Quarantined">
+    <span class="kpi-title">🚨 Quarantined</span>
+    <span class="kpi-value" style="color:var(--clr-quarantined-text);">{{ stats.quarantined if stats else 0 }}</span>
+    <span class="kpi-desc">Zero qty or critical conflict</span>
+  </a>
+</div>
+
+<!-- Main Table Card -->
+<div class="card" x-data="tableSearch()">
+  <div class="card-header">
+    <div>
+      <h2 class="card-title">
+        <span>PO Sets</span>
+        <span class="badge badge-gray" style="font-size:0.8rem;">{{ po_sets|length }} records</span>
+      </h2>
+      <p class="card-subtitle">Auto-syncs with input folder. Real-time document grouping &amp; 3-way matching.</p>
+    </div>
+
+    <!-- Sync Trigger & Live State -->
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span id="sync-spinner" class="htmx-indicator" style="align-items:center; gap:6px; color:var(--text-muted); font-size:0.85rem;">
+        <span class="spinner" style="border-color:#6366f1; border-top-color:transparent;"></span>
+        <span>Scanning &amp; Extracting…</span>
+      </span>
+
       <button
         id="sync-btn"
         class="btn btn-primary"
         hx-post="/sync"
         hx-swap="none"
-        hx-indicator="#sync-indicator"
-        {% if sync_running %}disabled title="Sync already running"{% endif %}
-      >Sync</button>
-      <span id="sync-indicator" class="htmx-indicator muted">Syncing…</span>
-      {% if sync_running %}<span class="badge badge-pending">Sync already running</span>{% endif %}
+        hx-indicator="#sync-spinner"
+        {% if sync_running %}disabled title="Sync is currently active in background"{% endif %}
+      >
+        <span style="font-size:1rem;">⚡</span>
+        <span>Scan Input Folder</span>
+      </button>
     </div>
   </div>
 
-  <div class="filter-row" style="margin-top:14px;">
-    <form method="get" action="/dashboard" id="filter-form">
-      <label for="status-filter" class="muted" style="margin-right:6px;">Filter by status:</label>
-      <select name="status" id="status-filter" onchange="this.form.submit()">
+  <!-- Filter & Search Toolbar -->
+  <div class="toolbar">
+    <!-- Instant Search Input -->
+    <div class="search-box">
+      <span class="search-icon">🔍</span>
+      <input 
+        type="text" 
+        placeholder="Filter by PO number, vendor, or status…" 
+        x-model="query" 
+        @input="filterRows()"
+      >
+    </div>
+
+    <!-- Status Filter Dropdown + Quick Tabs -->
+    <form method="get" action="/dashboard" id="filter-form" style="display:flex; align-items:center; gap:8px;">
+      <select name="status" id="status-filter" onchange="this.form.submit()" style="padding:6px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); font-size:0.85rem; background:#fff; font-weight:500;">
         <option value="" {% if not current_status %}selected{% endif %}>All statuses</option>
         <option value="pending" {% if current_status == 'pending' %}selected{% endif %}>pending</option>
         <option value="mismatched" {% if current_status == 'mismatched' %}selected{% endif %}>mismatched</option>
@@ -30,25 +93,53 @@
         <option value="blocked_customs" {% if current_status == 'blocked_customs' %}selected{% endif %}>blocked_customs</option>
         <option value="merged" {% if current_status == 'merged' %}selected{% endif %}>merged</option>
       </select>
-      <noscript><button type="submit" class="btn btn-secondary">Filter</button></noscript>
     </form>
-    <span class="muted">{{ po_sets|length }} PO Set(s){% if current_status %} — filtered: {{ current_status }}{% endif %}</span>
+
+    <!-- Status Tabs -->
+    <div class="status-tabs">
+      <a href="/dashboard" class="tab-btn {% if not current_status %}active{% endif %}">
+        <span>All</span>
+        <span class="tab-count">{{ stats.total if stats else po_sets|length }}</span>
+      </a>
+
+      <a href="/dashboard?status=pending" class="tab-btn {% if current_status == 'pending' %}active{% endif %}">
+        <span>Pending</span>
+        {% if stats %}<span class="tab-count">{{ stats.pending }}</span>{% endif %}
+      </a>
+
+      <a href="/dashboard?status=mismatched" class="tab-btn {% if current_status == 'mismatched' %}active{% endif %}">
+        <span>Needs Review</span>
+        {% if stats %}<span class="tab-count">{{ stats.mismatched }}</span>{% endif %}
+      </a>
+
+      <a href="/dashboard?status=blocked_customs" class="tab-btn {% if current_status == 'blocked_customs' %}active{% endif %}">
+        <span>Awaiting Customs</span>
+        {% if stats %}<span class="tab-count">{{ stats.blocked_customs }}</span>{% endif %}
+      </a>
+
+      <a href="/dashboard?status=merged" class="tab-btn {% if current_status == 'merged' %}active{% endif %}">
+        <span>Merged</span>
+        {% if stats %}<span class="tab-count">{{ stats.merged }}</span>{% endif %}
+      </a>
+
+      <a href="/dashboard?status=quarantined" class="tab-btn {% if current_status == 'quarantined' %}active{% endif %}">
+        <span>Quarantined</span>
+        {% if stats %}<span class="tab-count">{{ stats.quarantined }}</span>{% endif %}
+      </a>
+    </div>
   </div>
 
-  <div
-    id="po-table"
-    hx-get="/dashboard/table{% if current_status %}?status={{ current_status }}{% endif %}"
-    hx-trigger="every 2s"
-    hx-swap="outerHTML"
-  >
-    {% include "_dashboard_table.html" %}
+  <!-- Data Table Container -->
+  <div class="table-container">
+    <div 
+      id="po-table"
+      hx-get="/dashboard/table{% if current_status %}?status={{ current_status }}{% endif %}"
+      hx-trigger="every 2s"
+      hx-swap="outerHTML"
+    >
+      {% include "_dashboard_table.html" %}
+    </div>
   </div>
-</div>
 
-<div class="card">
-  <h3>Manual Upload — CUSTOMS / SHIPPING / COMMERCIAL_INVOICE</h3>
-  <p class="muted">Attach customs or shipping PDFs to a PO Set from its detail page. These are attached as-is, never sent to VLM (FR-12.2).</p>
-  <a href="/quarantine" class="btn btn-secondary">Go to Quarantine Review</a>
-  <a href="/audit" class="btn btn-secondary">View Audit Log (read-only)</a>
 </div>
 {% endblock %}
