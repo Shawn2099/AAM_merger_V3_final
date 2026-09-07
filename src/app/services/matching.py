@@ -132,8 +132,7 @@ def find_unmatched(
             if 1 <= d_num < 10:
                 expected_po_no = str(d_num * 10)
                 if any(
-                    str(p.get("line_item_no") or "").strip() == expected_po_no
-                    for p in po_lines
+                    str(p.get("line_item_no") or "").strip() == expected_po_no for p in po_lines
                 ):
                     matched = True
 
@@ -165,8 +164,7 @@ def find_unmatched(
             if 1 <= s_num < 10:
                 expected_po_no = str(s_num * 10)
                 if any(
-                    str(p.get("line_item_no") or "").strip() == expected_po_no
-                    for p in po_lines
+                    str(p.get("line_item_no") or "").strip() == expected_po_no for p in po_lines
                 ):
                     matched = True
 

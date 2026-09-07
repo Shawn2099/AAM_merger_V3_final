@@ -156,16 +156,12 @@ def merge_po_set(po_set_id: int, cfg) -> Path | None:
         # (force_merge bypasses by explicit operator intent.)
         total_lines = sum(len(list(d.line_items or [])) for d in ordered)
         if total_lines == 0:
-            logger.warning(
-                "Auto-merge refused for PO Set %s: zero line-item evidence", po_set_id
-            )
+            logger.warning("Auto-merge refused for PO Set %s: zero line-item evidence", po_set_id)
             return None
 
         invoice = _invoice_name(
             ps,
-            loose=any(
-                _doc_type_val(d) == DocType.COMBINED.value for d in (ps.documents or [])
-            ),
+            loose=any(_doc_type_val(d) == DocType.COMBINED.value for d in (ps.documents or [])),
         )
         if not invoice:
             # SPEC says SI presence guaranteed when reconciled; if missing, cannot name file -> None

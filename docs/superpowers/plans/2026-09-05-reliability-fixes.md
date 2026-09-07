@@ -62,17 +62,21 @@ Expected: `43386fe` (safe-hygiene commit).
 def test_sync_lock_shared_across_threads(tmp_db):
     import threading
     from app.api.routes.sync import get_sync_lock
+
     lock = get_sync_lock()
     lock.acquire(timeout=0)
     released = []
+
     def worker():
         try:
             lock.release()
             released.append(True)
         except Exception:
             released.append(False)
+
     t = threading.Thread(target=worker)
-    t.start(); t.join()
+    t.start()
+    t.join()
     assert released == [True]
     assert lock.is_locked is False
     lock.acquire(timeout=0)
@@ -110,10 +114,15 @@ def test_release_is_action_scoped(tmp_db):
     from app.models import POSet, POSetStatus
     from app.models.base import Base
     from app.services.locking import acquire_lock, release_lock
-    eng = get_engine(tmp_db); Base.metadata.create_all(eng)
+
+    eng = get_engine(tmp_db)
+    Base.metadata.create_all(eng)
     with Session(eng) as s:
         ps = POSet(po_no_normalized="STOMP", status=POSetStatus.pending)
-        s.add(ps); s.commit(); s.refresh(ps); pid = ps.id
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        pid = ps.id
     with Session(eng) as s:
         ps = s.get(POSet, pid)
         assert acquire_lock(ps, "action_a", s, tmp_db) is True
@@ -148,6 +157,7 @@ Run → FAIL on the `action_b` assertion (unconditional clear).
 ```python
 def test_missing_config_raises(tmp_path, monkeypatch):
     from app.core.config import load_config
+
     monkeypatch.setenv("AAM_CONFIG_PATH", str(tmp_path / "nope.yaml"))
     monkeypatch.chdir(tmp_path)  # no config.example.yaml here
     with pytest.raises(FileNotFoundError):

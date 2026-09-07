@@ -372,9 +372,7 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
                 ps.status = prior_status
                 s.commit()
                 s.refresh(ps)
-            logger.warning(
-                "Auto-merge refused for PO Set %s — kept %s", po_set_id, prior_status
-            )
+            logger.warning("Auto-merge refused for PO Set %s — kept %s", po_set_id, prior_status)
         return {
             "status": ps.status.value if hasattr(ps.status, "value") else str(ps.status),
             "po_set_id": po_set_id,

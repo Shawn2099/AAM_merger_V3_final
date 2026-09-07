@@ -4,14 +4,16 @@ Revision ID: 00628c4756fc
 Revises: c4d5e6f7a8b9
 Create Date: 2026-09-05 23:25:21.008341
 """
+
 from typing import Sequence, Union
 from alembic import op
 
 
-revision: str = '00628c4756fc'
-down_revision: Union[str, Sequence[str], None] = 'c4d5e6f7a8b9'
+revision: str = "00628c4756fc"
+down_revision: Union[str, Sequence[str], None] = "c4d5e6f7a8b9"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
+
 
 def upgrade() -> None:
     # SQLite cannot ALTER a FK constraint: rebuild audit_log with identical

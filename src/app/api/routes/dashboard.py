@@ -515,9 +515,7 @@ def upload_manual_doc(
                 except HTTPException:
                     raise
                 except Exception as e:
-                    raise HTTPException(
-                        status_code=422, detail=f"unreadable PDF: {e}"
-                    ) from e
+                    raise HTTPException(status_code=422, detail=f"unreadable PDF: {e}") from e
                 stored = Path(cfg.paths.stored_documents_folder) / f"{sha}.pdf"
                 stored.parent.mkdir(parents=True, exist_ok=True)
                 stored.write_bytes(data)
