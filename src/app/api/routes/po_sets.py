@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
@@ -151,14 +151,18 @@ def get_po_set_detail_html(po_set_id: int):
 
 
 @router.post("/{po_set_id}/force_merge")
-def force_merge(po_set_id: int):
-    """Force Merge - acquires per-PO lock, 409 if already locked (FR-CONC-1/2)."""
+def force_merge(po_set_id: int, justification: str = Form("")):
+    """Force Merge - acquires per-PO lock, 409 if already locked (FR-CONC-1/2).
+
+    `justification` is optional but, when given, must be a real note (>= 20
+    chars) and is stored on the audit_log row.
+    """
     cfg = load_config()
     _acquire_lock(po_set_id, "force_merge", cfg)
     try:
         from app.services.merge import force_merge as svc_force_merge
 
-        result = svc_force_merge(po_set_id, cfg)
+        result = svc_force_merge(po_set_id, cfg, justification=justification)
         detail = {"merged_path": str(result) if result else None}
         return {"status": "merged", "po_set_id": po_set_id, "detail": detail}
     except HTTPException:
@@ -260,14 +264,18 @@ def redo_match(po_set_id: int):
 
 
 @router.delete("/{po_set_id}/quarantine")
-def delete_quarantined(po_set_id: int):
-    """Delete quarantined PO Set - per-PO locked (FR-CONC-1)."""
+def delete_quarantined(po_set_id: int, justification: str = Form("")):
+    """Delete quarantined PO Set - per-PO locked (FR-CONC-1).
+
+    `justification` is optional; when given it must be >= 20 chars and is
+    stored on the audit_log row.
+    """
     cfg = load_config()
     _acquire_lock(po_set_id, "quarantine_delete", cfg)
     try:
         from app.services.quarantine import delete_quarantined as svc_delete
 
-        audit = svc_delete(po_set_id, cfg)
+        audit = svc_delete(po_set_id, cfg, justification=justification)
         return {"status": "deleted", "audit_id": audit.id}
     except HTTPException:
         raise

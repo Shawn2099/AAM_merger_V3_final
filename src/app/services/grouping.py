@@ -1,9 +1,90 @@
 import re
 
+# Words that label a PO reference rather than being part of the number itself.
+# Only ever dropped as whole tokens, so a segment like "PO186000" inside
+# D7264-PO186000-013-01 is never damaged.
+_LABEL_WORDS = {
+    "NO",
+    "NO.",
+    "NUM",
+    "NUMBER",
+    "NBR",
+    "REV",
+    "REVISION",
+    "REF",
+    "REFERENCE",
+    "PURCHASE",
+    "ORDER",
+    "ORD",
+    "BUYER",
+    "BUYERS",
+    "ORDERS",
+    "DOC",
+    "DOCUMENT",
+    "REFNO",
+    "PURCHASEORDER",
+    "PURCHASEORDERS",
+    "AND",
+    "THE",
+    "OF",
+}
+
+# "PO" is a label ONLY in leading position. Mid-string it is part of a
+# structured code: the PO prints D7264-PO-186000-013-01 while the DN and SI
+# print D7264-PO186000-013-01-, so dropping it anywhere but the front breaks
+# one spelling or the other.
+_LEADING_LABEL_WORDS = {"PO", "P.O.", "P/0"}
+
+# Longest first, so "PO161538" loses "PO" rather than just "P". Bare "P" is
+# deliberately absent: P106420232 is a real McDermott code, not a label.
+_LEADING_PREFIXES = ("PURCHASEORDER", "PURCHASEORDERS", "PONO", "PO.NO", "PO")
+
 
 def normalize_po_no(raw: str) -> str:
-    """Normalize PO number per SPEC §6.1: strip non-alphanumeric characters, uppercase."""
-    return re.sub(r"[^A-Za-z0-9]", "", raw).upper()
+    """Normalize a PO number to a stable grouping key.
+
+    Built from the real vendor sample inventory (NotebookLM Section 2): the same
+    PO is printed as "161538", "PO 161538" and "PO, Rev # 161538,0" on the PO
+    header, but as a bare "161538" on its delivery notes and invoices. Without
+    this, one real PO splits into several sets that can never reconcile.
+
+    Steps: drop a trailing ERP revision counter, drop label words, strip a
+    leading "PO"-style prefix, then flatten to alphanumerics and upper-case.
+
+    Two properties are load-bearing and covered by tests:
+      - different spellings of one PO collapse to one key
+      - genuinely different POs never collide
+    """
+    if raw is None:
+        return ""
+    if not isinstance(raw, str):
+        # A non-string (int, Decimal, object) is not a PO reference; refuse it
+        # rather than stringifying it into a plausible-looking but wrong key.
+        raise TypeError(f"PO number must be a string, got {type(raw).__name__}")
+    s = raw.strip()
+    if not s:
+        return ""
+    # SAP revision counter: "PO, Rev # 161538,0" -> "PO, Rev # 161538"
+    if "," in s:
+        s = s.rsplit(",", 1)[0]
+    toks = [t for t in re.split(r"[^A-Za-z0-9]+", s) if t]
+    kept: list[str] = []
+    for i, t in enumerate(toks):
+        up = t.upper()
+        if i == 0:
+            if up in _LEADING_LABEL_WORDS or up in _LABEL_WORDS:
+                continue
+            for p in _LEADING_PREFIXES:
+                if up.startswith(p) and len(up) > len(p):
+                    t = t[len(p) :]
+                    break
+            if t:
+                kept.append(t)
+            continue
+        if up in _LABEL_WORDS:
+            continue
+        kept.append(t)
+    return "".join(kept).upper()
 
 
 def get_or_create_po_set(po_no: str, cfg, create: bool = True):

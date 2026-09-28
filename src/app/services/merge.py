@@ -52,17 +52,20 @@ def _invoice_name(po_set: POSet, loose: bool = False) -> str | None:
     return None
 
 
-def _ordered_docs(po_set: POSet) -> list:
+# Default packet order (DECISIONS_LOG §8) — kept as code fallback so callers
+# without cfg behave exactly as before. config.yaml merge.legal_order wins.
+DEFAULT_LEGAL_ORDER = ["SI", "DN", "PO", "COMBINED", "SHIPPING", "CUSTOMS"]
+
+
+def _ordered_docs(po_set: POSet, cfg=None) -> list:
     docs = list(po_set.documents or [])
-    si = [d for d in docs if _doc_type_val(d) == DocType.SI.value]
-    dn = [d for d in docs if _doc_type_val(d) == DocType.DN.value]
-    po = [d for d in docs if _doc_type_val(d) == DocType.PO.value]
-    # COMBINED treated as self-contained bundle — append after PO (before customs) so
-    # if only COMBINED exists it still merges; if both COMBINED + separate exist,
-    # first-completed-wins is enforced by immutable status check above.
-    combined = [d for d in docs if _doc_type_val(d) == DocType.COMBINED.value]
-    shipping = [d for d in docs if _doc_type_val(d) == DocType.SHIPPING.value]
-    customs = [d for d in docs if _doc_type_val(d) == DocType.CUSTOMS.value]
+    groups: dict[str, list] = {}
+    for d in docs:
+        groups.setdefault(_doc_type_val(d), []).append(d)
+    si = groups.get(DocType.SI.value, [])
+    dn = groups.get(DocType.DN.value, [])
+    po = groups.get(DocType.PO.value, [])
+    combined = groups.get(DocType.COMBINED.value, [])
     if combined and (si or dn or po):
         # FR-14.7: the COMBINED bundle is the authoritative merge; separate
         # docs remain visible in the set but are excluded from this packet —
@@ -73,9 +76,33 @@ def _ordered_docs(po_set: POSet) -> list:
             getattr(po_set, "id", "?"),
             excluded,
         )
-        return combined + shipping + customs
-    # Order: SI→DN→PO→(SHIPPING→CUSTOMS); COMBINED after PO before shipping
-    return si + dn + po + combined + shipping + customs
+        docs = [
+            d
+            for d in docs
+            if _doc_type_val(d) not in {DocType.SI.value, DocType.DN.value, DocType.PO.value}
+        ]
+        groups = {}
+        for d in docs:
+            groups.setdefault(_doc_type_val(d), []).append(d)
+    # Order: config merge.legal_order (editable, DECISIONS_LOG §8);
+    # types absent from the order append in first-seen order so new manual
+    # types (e.g. AWB) never silently vanish from a packet.
+    order = list(DEFAULT_LEGAL_ORDER)
+    if cfg is not None:
+        with_ = getattr(cfg, "merge", None)
+        if with_ is not None and getattr(with_, "legal_order", None):
+            order = list(with_.legal_order)
+    ordered: list = []
+    for t in order:
+        ordered.extend(groups.pop(t, []))
+    seen: set[str] = set()
+    for d in docs:
+        t = _doc_type_val(d)
+        if t in groups and t not in seen:
+            seen.add(t)
+            ordered.extend(groups.pop(t, []))
+    ordered.extend([d for rest in groups.values() for d in rest])
+    return ordered
 
 
 def _is_blocked(po_set: POSet) -> bool:
@@ -147,7 +174,7 @@ def merge_po_set(po_set_id: int, cfg) -> Path | None:
         if _is_blocked(ps):
             return None
 
-        ordered = _ordered_docs(ps)
+        ordered = _ordered_docs(ps, cfg)
         if not ordered:
             return None
 
@@ -190,7 +217,7 @@ def merge_po_set(po_set_id: int, cfg) -> Path | None:
         return Path(ps.merged_output_path)
 
 
-def force_merge(po_set_id: int, cfg) -> Path:
+def force_merge(po_set_id: int, cfg, justification: str | None = None) -> Path:
     """Force merge unconditional — bypasses matching/customs gates (FR-14.8-14.10).
 
     Still immutable if already merged (FR-14.6): returns existing.
@@ -203,10 +230,14 @@ def force_merge(po_set_id: int, cfg) -> Path:
         if ps is None:
             raise ValueError(f"POSet {po_set_id} not found")
 
+        from app.services.quarantine import validate_justification
+
+        note = validate_justification(justification)
+
         if ps.status == POSetStatus.merged and ps.merged_output_path is not None:
             return Path(ps.merged_output_path)
 
-        ordered = _ordered_docs(ps)
+        ordered = _ordered_docs(ps, cfg)
         # also include COMMERCIAL_INVOICE optionally at end if no other docs provide content
         # but spec says merge with whatever CUSTOMS/SHIPPING exist (0,1,2) — so just use ordered
         # If ordered empty (no recognizable docs), try all docs as fallback
@@ -241,6 +272,7 @@ def force_merge(po_set_id: int, cfg) -> Path:
                     action=AuditAction.force_merge,
                     detail=detail,
                     source="system",
+                    justification=note,
                 )
             )
             s.commit()

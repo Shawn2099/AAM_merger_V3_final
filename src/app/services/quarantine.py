@@ -54,7 +54,29 @@ def quarantine_copy(po_set, cfg) -> Path:
     return q
 
 
-def delete_quarantined(po_set_id: int, cfg) -> AuditLog:
+MIN_JUSTIFICATION_CHARS = 20
+
+
+def validate_justification(text: str | None) -> str | None:
+    """Normalize an optional operator justification (v20.5 §audit).
+
+    None/absent stays None so existing callers and the UI keep working. When
+    supplied it must be a real sentence-ish note, not a one-word checkbox.
+    """
+    if text is None:
+        return None
+    cleaned = str(text).strip()
+    if not cleaned:
+        return None
+    if len(cleaned) < MIN_JUSTIFICATION_CHARS:
+        raise ValueError(
+            f"Justification must be at least {MIN_JUSTIFICATION_CHARS} characters "
+            f"(got {len(cleaned)})"
+        )
+    return cleaned
+
+
+def delete_quarantined(po_set_id: int, cfg, justification: str | None = None) -> AuditLog:
     """Delete quarantined POSet DB rows only, keep files, write audit_log (FR-13.6-13.7).
 
     Removes po_sets + documents + line_items rows scoped to po_set_id.
@@ -67,6 +89,7 @@ def delete_quarantined(po_set_id: int, cfg) -> AuditLog:
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise ValueError(f"POSet {po_set_id} not found")
+        note = validate_justification(justification)
         # verify quarantined status (handle both enum and string)
         status_val = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
         if status_val != POSetStatus.quarantined.value:
@@ -87,6 +110,7 @@ def delete_quarantined(po_set_id: int, cfg) -> AuditLog:
             action=AuditAction.quarantine_delete,
             detail=detail,
             source="system",
+            justification=note,
         )
         s.add(audit)
         s.flush()

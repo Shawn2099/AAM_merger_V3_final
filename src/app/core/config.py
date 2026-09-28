@@ -31,7 +31,7 @@ class ServerConfig(BaseModel):
 
 class VLMConfig(BaseModel):
     provider: str = "openrouter"
-    model: str = "openai/gpt-5.6-luna"
+    model: str = "openai/gpt-6-luna"
     request_timeout_seconds: int = 60
     api_key_env_var: str = "OPENROUTER_API_KEY"
 
@@ -43,6 +43,53 @@ class ExtractionConfig(BaseModel):
 
 class MatchingConfig(BaseModel):
     fuzzy_description_threshold: int = Field(ge=0, le=100, default=85)
+    # v20.5 3-step guards (DECISIONS_LOG §10). sanity: an exact line_no hit whose
+    # description scores below this is a wrong-index row, not a real match.
+    sanity_description_threshold: int = Field(ge=0, le=100, default=40)
+    # fuzzy winner must beat the runner-up by this margin, else ambiguous.
+    fuzzy_margin: int = Field(ge=0, le=100, default=5)
+    # v20.5 Step 3: unique normalized-SKU rescue for reworded descriptions.
+    enable_sku_rescue: bool = True
+    locale: str = "en_IN"
+
+    @field_validator("locale", mode="after")
+    @classmethod
+    def validate_locale(cls, v: str) -> str:
+        try:
+            from babel import Locale
+
+            Locale.parse(v)
+        except Exception as e:
+            raise ValueError(f"Unsupported babel locale: {v!r}") from e
+        return v
+
+
+class MergeConfig(BaseModel):
+    # Final packet order, editable via config (DECISIONS_LOG §8).
+    # Default keeps current behavior: SI→DN→PO→COMBINED→SHIPPING→CUSTOMS.
+    legal_order: list[str] = Field(default=["SI", "DN", "PO", "COMBINED", "SHIPPING", "CUSTOMS"])
+
+    @field_validator("legal_order", mode="after")
+    @classmethod
+    def validate_legal_order(cls, v: list[str]) -> list[str]:
+        known = {
+            "PO",
+            "DN",
+            "SI",
+            "COMBINED",
+            "CUSTOMS",
+            "SHIPPING",
+            "COMMERCIAL_INVOICE",
+            "UNKNOWN",
+        }
+        if not v:
+            raise ValueError("merge.legal_order must not be empty")
+        unknown = [t for t in v if t not in known]
+        if unknown:
+            raise ValueError(f"Unknown doc types in merge.legal_order: {unknown}")
+        if len(set(v)) != len(v):
+            raise ValueError(f"Duplicate doc types in merge.legal_order: {v}")
+        return v
 
 
 class IngestionConfig(BaseModel):
@@ -77,6 +124,7 @@ class AppConfig(BaseSettings):
     vlm: VLMConfig = VLMConfig()
     extraction: ExtractionConfig = ExtractionConfig()
     matching: MatchingConfig = MatchingConfig()
+    merge: MergeConfig = MergeConfig()
     ingestion: IngestionConfig = IngestionConfig()
     prefect: PrefectConfig = PrefectConfig()
     concurrency: ConcurrencyConfig = ConcurrencyConfig()

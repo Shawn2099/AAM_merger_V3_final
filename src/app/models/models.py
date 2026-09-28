@@ -90,6 +90,14 @@ class LineItem(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)  # scaled x1000
     unit_price: Mapped[int] = mapped_column(Integer, nullable=False)  # scaled x1000
+    # v20.5 Step 3: part number / SKU, used only as a unique-match rescue when
+    # line_item_no and description both fail. Nullable — vendors often omit it.
+    part_no: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
+    # Row kind. Only GOODS rows take part in quantity reconciliation; tax,
+    # freight, fee and discount rows are carried but never summed.
+    line_type: Mapped[str] = mapped_column(
+        String(16), default="GOODS", server_default="GOODS", nullable=False
+    )
 
     document: Mapped[Document] = relationship(back_populates="line_items")
 
@@ -103,6 +111,10 @@ class POSet(Base):
     has_customs_toggle: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     customs_doc_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     merged_output_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Why the set is in its current state, in plain language. Without this the
+    # reviewer must re-run reconciliation to find out why a set is stuck, and
+    # the reason is lost entirely on restart.
+    reconcile_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     locked_by_action: Mapped[str | None] = mapped_column(Text, nullable=True)  # FR-CONC-1, SPEC §9
     locked_at: Mapped[datetime | None] = mapped_column(
@@ -129,6 +141,10 @@ class AuditLog(Base):
     )
     action: Mapped[AuditAction] = mapped_column(Enum(AuditAction), nullable=False)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    # Operator's written reason for a destructive action (force merge,
+    # quarantine delete). Optional, but when present must be >= MIN chars —
+    # a durable "why", not a checkbox.
+    justification: Mapped[str | None] = mapped_column(Text, nullable=True)
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )

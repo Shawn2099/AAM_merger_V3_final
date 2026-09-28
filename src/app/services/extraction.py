@@ -50,7 +50,9 @@ _PAGE_PROMPT = (
     "  line_item_no: printed row number (Item No, Sl No, #) per page. item_code: SKU/part from column or embedded P/N: MFR:. "
     "description: COMPLETE, do not truncate. uom: EA/BOX/KG/SET/PCS or null.\n"
     "  For COMBINED: emit union of all sections but do NOT duplicate sections; backend will skip matching and send directly to output.\n"
-    "  EXCLUDE subtotal, VAT, tax, total, amount-in-words, payment terms, signatures.\n\n"
+    "  EXCLUDE subtotal, VAT, tax, total, amount-in-words, payment terms, signatures.\n"
+    "  line_type: GOODS for real purchasable items; FREIGHT/TAX/FEE/SERVICE/DISCOUNT for "
+    "non-item rows you deliberately keep (e.g. a freight line, a discount row). Omit for GOODS.\n\n"
     "STEP 4 — NUMBERS (copy verbatim, do NOT calculate, do NOT scale):\n"
     '  quantity: exact string as printed ("1", "50", "12.5")\n'
     '  unit_price: exact string as printed ("1620.00", "350.00")\n'
@@ -74,6 +76,13 @@ class _VLMLineItem(BaseModel):
     quantity: str | None = None  # raw as printed, e.g. "1", "12.5"
     unit_price: str | None = None  # raw as printed, e.g. "1620.00", "350.00"
     total_price: str | None = None  # raw as printed
+    line_type: str | None = Field(
+        None,
+        description=(
+            "Row kind: GOODS (real purchasable item) or one of "
+            "FREIGHT,TAX,FEE,SERVICE,DISCOUNT for non-item rows. Default GOODS."
+        ),
+    )
 
 
 class _VLMPageExtraction(BaseModel):
@@ -88,24 +97,40 @@ class _VLMPageExtraction(BaseModel):
     line_items: list[_VLMLineItem] = Field(default_factory=list)
 
 
+LINE_TYPES = ("GOODS", "FREIGHT", "TAX", "FEE", "SERVICE", "DISCOUNT")
+
+
+def _norm_line_type(value: str | None) -> str:
+    """Clamp the VLM's row-kind label to the known set; anything unknown is GOODS.
+
+    Fail-safe direction: a mislabelled item row stays GOODS (it is still
+    reconciled), and only an explicitly non-item row is excluded from quantity
+    math. A wrongly excluded row surfaces as an unmatched-line quarantine,
+    never as a silent bad merge.
+    """
+    v = (value or "").strip().upper()
+    return v if v in LINE_TYPES else "GOODS"
+
+
 def is_manual_only(doc_type: str) -> bool:
     return doc_type in ("CUSTOMS", "SHIPPING", "COMMERCIAL_INVOICE")
 
 
-def _parse_scaled_int(val: int | float | str | None) -> int:
+def _parse_scaled_int(val: int | float | str | None, locale: str = "en_IN") -> int:
     """Parse raw quantity/price string into exact integer scaled x1000 (SPEC §6.4).
 
-    Deterministic Decimal scaling — LLM copies verbatim, code scales.
-    Never uses float to avoid drift.
+    Delegates to sanitizer (babel strict locale, DECISIONS_LOG §4) — LLM copies
+    verbatim, code scales. Invalid (bad grouping, inner spaces, >3 decimals,
+    zero/negative) → 0, which routes the PO Set to quarantine downstream
+    (non_positive_quantity) instead of being silently mis-parsed.
     """
+    from app.services.sanitizer import parse_quantity_scaled
+
     if val is None or str(val).strip() == "":
         return 0
     try:
-        from decimal import Decimal, InvalidOperation
-
-        d = Decimal(str(val).strip().replace(",", "").replace(" ", ""))
-        return int((d * Decimal("1000")).to_integral_value())
-    except (InvalidOperation, ValueError, AttributeError):
+        return parse_quantity_scaled(str(val), locale=locale)
+    except ValueError:
         return 0
     except Exception:
         return 0
@@ -202,6 +227,7 @@ def _call_vlm(stored_path: str, doc_type: str, cfg) -> dict:
                 "quantity": li.quantity,
                 "unit_price": li.unit_price,
                 "total_price": li.total_price,
+                "line_type": li.line_type,
             }
             for li in resp.line_items
         ],
@@ -336,8 +362,9 @@ def extract_document(doc_id: int, cfg) -> Document:
                 price = li.get("unit_price")
                 if qty is None or li.get("description") is None:
                     continue
-                qty_i = _parse_scaled_int(qty)
-                price_i = _parse_scaled_int(price)
+                locale = getattr(getattr(cfg, "matching", None), "locale", "en_IN") or "en_IN"
+                qty_i = _parse_scaled_int(qty, locale=locale)
+                price_i = _parse_scaled_int(price, locale=locale)
                 s.add(
                     LineItem(
                         document_id=doc.id,
@@ -347,6 +374,8 @@ def extract_document(doc_id: int, cfg) -> Document:
                         description=str(li.get("description")),
                         quantity=qty_i,
                         unit_price=price_i,
+                        part_no=str(li.get("item_code")) if li.get("item_code") else None,
+                        line_type=_norm_line_type(li.get("line_type")),
                     )
                 )
             s.commit()

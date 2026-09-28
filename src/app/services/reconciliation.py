@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 
@@ -11,7 +12,7 @@ from app.core.config import AppConfig
 from app.core.database import get_engine
 from app.models import DocType, POSet, POSetStatus
 from app.models.base import Base
-from app.services.matching import find_unmatched, get_matching_candidates, match_line
+from app.services.matching import _desc_score, _norm, assign_lines_detailed
 from app.services.quarantine import quarantine_copy
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,101 @@ def check_price(po_price: int, agg_price: int) -> dict:
     return {"flag": po_price != agg_price}
 
 
+# Plain-language, reviewer-facing wording per internal reason code. The whole
+# point is that the dashboard can answer "why is this set stuck?" without the
+# reviewer re-running reconciliation or reading logs.
+def _identity_flag(label: str, reason: str, detail: dict | None) -> dict:
+    """Priority-1 flag: why a line could not be identified, in plain language."""
+    if reason == "LINE_REINDEXED" and detail:
+        msg = (
+            f"{label} line is printed as '{detail.get('printed_line_no')}' but describes "
+            f"'{detail.get('suggested_po_description', '')[:60]}', which is PO line "
+            f"{detail.get('suggested_po_line_no')}. Looks like the vendor renumbered the lines."
+        )
+        return {
+            "priority": 1,
+            "type": "identification",
+            "reason": reason,
+            "message": msg,
+            "suggestion": detail,
+        }
+    if reason == "INDEX_DESCRIPTION_MISMATCH":
+        msg = f"{label} line number matches the PO but the description does not"
+    else:
+        msg = f"A {label} line could not be matched to any PO line"
+    return {"priority": 1, "type": "identification", "reason": reason, "message": msg}
+
+
+REASON_TEXT: dict[str, str] = {
+    "non_positive_quantity": "A quantity is zero, negative, or unreadable",
+    "combined_unverified": "Combined document is missing a PO, DN, or SI section",
+    "partial_fulfillment": "Waiting on more deliveries or invoices",
+    "unmatched_lines": "A DN or SI line could not be matched to any PO line",
+    "ambiguous_line_match": "A DN or SI line could not be matched to any PO line",
+    "index_description_mismatch": "A line number matches but the description does not",
+    "line_reindexed": "A line looks renumbered by the vendor — needs confirmation",
+    "conflicting_descriptions": "Two lines for the same item describe different things",
+    "po_reference_mismatch": "A document references a different PO number",
+    "over_delivery": "Delivered or invoiced quantity exceeds the PO quantity",
+    "quantity_mismatch": "PO, delivery, and invoice quantities do not agree",
+}
+
+
+def explain(reason: str | None, flags: list[dict] | None = None) -> str:
+    """Build a short human sentence for the dashboard reason column."""
+    base = REASON_TEXT.get(reason or "", "Awaiting further processing")
+    if not flags:
+        return base
+    for f in flags:
+        sug = f.get("suggestion")
+        if sug:
+            return (
+                f"{base} — printed line {sug.get('printed_line_no')} looks like it should "
+                f"be PO line {sug.get('suggested_po_line_no')}"
+            )
+    qty = [f for f in flags if f.get("type") == "quantity"]
+    if not qty:
+        return base
+    f = qty[0]
+    parts = []
+    if f.get("agg_dn_quantity") is not None and f.get("agg_dn_quantity") != f.get("po_quantity"):
+        parts.append(f"delivered {f['agg_dn_quantity'] / 1000:g} of {f['po_quantity'] / 1000:g}")
+    if f.get("agg_si_quantity") is not None and f.get("agg_si_quantity") != f.get("po_quantity"):
+        parts.append(f"invoiced {f['agg_si_quantity'] / 1000:g} of {f['po_quantity'] / 1000:g}")
+    if parts:
+        return base + ": " + "; ".join(parts)
+    return base
+
+
 def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
+    """Public entry point: run reconciliation, then persist a plain-language
+    reason on the PO Set so the dashboard can explain the state without the
+    reviewer re-running anything (or reading logs after a restart).
+    """
+    result = _reconcile_po_set_inner(po_set_id, cfg)
+    _persist_reason(po_set_id, result, cfg)
+    return result
+
+
+def _persist_reason(po_set_id: int, result: dict, cfg: AppConfig) -> None:
+    status = result.get("status")
+    flags = result.get("flags") or []
+    if status == "merged":
+        note = "Fully reconciled — packet merged"
+    else:
+        note = explain(result.get("reason"), flags)
+    try:
+        eng = get_engine(cfg)
+        with Session(eng) as s:
+            ps = s.get(POSet, po_set_id)
+            if ps is not None:
+                ps.reconcile_reason = note
+                s.commit()
+    except Exception:  # never fail a reconcile because a note could not be saved
+        logger.warning("Could not persist reconcile_reason for PO Set %s", po_set_id)
+
+
+def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
     """Reconcile an entire PO Set (FR-9.1 - FR-14.7):
 
     - Loads POSet with documents and line items.
@@ -76,8 +171,12 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
         dn_docs = [d for d in docs if _get_type(d) == DocType.DN.value]
         si_docs = [d for d in docs if _get_type(d) == DocType.SI.value]
 
-        # 1. Handle COMBINED documents
-        if combined_docs:
+        # 1. COMBINED-only sets (no separate PO baseline to deduct against):
+        # verified 3-section evidence IS the reconciliation (DECISIONS_LOG §2).
+        # When a separate PO exists, COMBINED lines instead join BOTH pools in
+        # the standard flow below (Option A atomic: overflow in either pool
+        # blocks the merge, nothing half-commits).
+        if combined_docs and not po_docs:
             all_comb_items = [li for cd in combined_docs for li in cd.line_items]
             if any(li.quantity <= 0 for li in all_comb_items):
                 ps.status = POSetStatus.quarantined
@@ -156,8 +255,9 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
             }
 
         # 2. Standard multi-doc sets (PO + DN + SI)
-        # Needs at least PO and SI to evaluate reconciliation; otherwise pending
-        if not po_docs or not si_docs:
+        # Needs at least PO and SI to evaluate reconciliation; a COMBINED doc
+        # satisfies the SI requirement since its lines join both pools below.
+        if not po_docs or (not si_docs and not combined_docs):
             ps.status = POSetStatus.pending
             s.commit()
             return {"status": "pending", "po_set_id": po_set_id, "flags": []}
@@ -205,18 +305,33 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
                 "description": li.description,
                 "quantity": li.quantity,
                 "unit_price": li.unit_price,
+                "part_no": li.part_no,
+                "line_type": li.line_type or "GOODS",
             }
             for d in po_docs
             for li in d.line_items
         ]
+        # Option A (DECISIONS_LOG §2): a COMBINED doc supplies BOTH pools —
+        # deducted from dn_remaining and si_remaining simultaneously. Any
+        # overflow fails the whole set (mismatched/quarantine); the merge below
+        # fires only if every line passes in both pools (atomic).
+        #
+        # Exclusivity (FR-14.7, mirrors merge._ordered_docs): when a COMBINED
+        # doc is present it is the authoritative record, so separate DN/SI lines
+        # are EXCLUDED. Counting both would double every quantity and strand a
+        # perfectly consistent set at `mismatched` forever.
+        dn_source = combined_docs if combined_docs else dn_docs
+        si_source = combined_docs if combined_docs else si_docs
         dn_lines = [
             {
                 "line_item_no": li.line_item_no,
                 "description": li.description,
                 "quantity": li.quantity,
                 "unit_price": li.unit_price,
+                "part_no": li.part_no,
+                "line_type": li.line_type or "GOODS",
             }
-            for d in dn_docs
+            for d in dn_source
             for li in d.line_items
         ]
         si_lines = [
@@ -225,10 +340,19 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
                 "description": li.description,
                 "quantity": li.quantity,
                 "unit_price": li.unit_price,
+                "part_no": li.part_no,
+                "line_type": li.line_type or "GOODS",
             }
-            for d in si_docs
+            for d in si_source
             for li in d.line_items
         ]
+
+        # Non-item rows (tax, freight, fee, discount) are never quantity
+        # reconciled: they would inflate or defeat every aggregate. They stay
+        # stored and merged as-is, but stay out of the math entirely.
+        po_lines = [ln for ln in po_lines if (ln.get("line_type") or "GOODS") == "GOODS"]
+        dn_lines = [ln for ln in dn_lines if (ln.get("line_type") or "GOODS") == "GOODS"]
+        si_lines = [ln for ln in si_lines if (ln.get("line_type") or "GOODS") == "GOODS"]
 
         all_lines = po_lines + dn_lines + si_lines
         if any(line["quantity"] <= 0 for line in all_lines):
@@ -243,55 +367,78 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
             }
 
         thr = getattr(cfg.matching, "fuzzy_description_threshold", 85)
+        sanity = getattr(cfg.matching, "sanity_description_threshold", 40)
+        margin = getattr(cfg.matching, "fuzzy_margin", 5)
+        use_sku = getattr(cfg.matching, "enable_sku_rescue", True)
 
-        # Reverse unmatched line check (FR-8.5)
-        unmatched = find_unmatched(po_lines, dn_lines, si_lines, thr=thr)
-        if unmatched:
+        # Injective assignment: each vendor line resolves to exactly ONE PO line,
+        # so a line can never inflate two PO aggregates. Any unresolvable line
+        # quarantines the whole set (FR-8.5 — nothing is silently dropped).
+        dn_assign, dn_reason, dn_detail = assign_lines_detailed(
+            po_lines, dn_lines, thr=thr, sanity=sanity, margin=margin, use_sku=use_sku
+        )
+        if dn_reason:
             ps.status = POSetStatus.quarantined
             s.commit()
             quarantine_copy(ps.id, cfg)
             return {
                 "status": "quarantined",
-                "reason": "unmatched_lines",
-                "unmatched": unmatched,
+                "reason": dn_reason,
+                "detail": dn_detail,
                 "po_set_id": po_set_id,
-                "flags": [
-                    {
-                        "priority": 1,
-                        "type": "identification",
-                        "message": f"Unmatched line item: {unmatched}",
-                    }
-                ],
+                "flags": [_identity_flag("DN", dn_reason, dn_detail)],
             }
 
-        # Forward match & conflicting description check (FR-8.4)
-        flags = []
-        for p in po_lines:
-            m_res = match_line(p, dn_lines, si_lines, all_po_lines=po_lines, thr=thr)
-            if m_res.get("quarantine"):
-                ps.status = POSetStatus.quarantined
-                s.commit()
-                quarantine_copy(ps.id, cfg)
-                return {
-                    "status": "quarantined",
-                    "reason": "conflicting_descriptions",
-                    "po_set_id": po_set_id,
-                    "flags": [
-                        {
-                            "priority": 1,
-                            "type": "identification",
-                            "message": f"Conflicting line item: {p.get('line_item_no')}",
-                        }
-                    ],
-                }
+        si_assign, si_reason, si_detail = assign_lines_detailed(
+            po_lines, si_lines, thr=thr, sanity=sanity, margin=margin, use_sku=use_sku
+        )
+        if si_reason:
+            ps.status = POSetStatus.quarantined
+            s.commit()
+            quarantine_copy(ps.id, cfg)
+            return {
+                "status": "quarantined",
+                "reason": si_reason,
+                "detail": si_detail,
+                "po_set_id": po_set_id,
+                "flags": [_identity_flag("SI", si_reason, si_detail)],
+            }
 
-        # Independent quantity aggregation and price check per PO line (FR-9.1, FR-10.1, FR-11.1)
+        # Conflicting descriptions among lines assigned to the same PO line
+        # (FR-8.4) — the set can't confidently say they're the same item.
+        for label, assignment in (("DN", dn_assign), ("SI", si_assign)):
+            for idx, group in assignment.items():
+                descs = {_norm(g.get("description") or "") for g in group if g.get("description")}
+                if len(descs) > 1:
+                    for a, b in itertools.combinations(sorted(descs), 2):
+                        if _desc_score(a, b) < thr:
+                            ps.status = POSetStatus.quarantined
+                            s.commit()
+                            quarantine_copy(ps.id, cfg)
+                            return {
+                                "status": "quarantined",
+                                "reason": "conflicting_descriptions",
+                                "po_set_id": po_set_id,
+                                "flags": [
+                                    {
+                                        "priority": 1,
+                                        "type": "identification",
+                                        "message": (
+                                            f"Conflicting {label} descriptions for PO line "
+                                            f"{po_lines[idx].get('line_item_no')}"
+                                        ),
+                                    }
+                                ],
+                            }
+
+        # Independent quantity aggregation per PO line (FR-9.1, FR-10.1)
+        flags = []
         reconciled_all = True
-        for p in po_lines:
+        for idx, p in enumerate(po_lines):
             p_no = p.get("line_item_no")
 
-            matching_dn = get_matching_candidates(p, dn_lines, all_po_lines=po_lines, thr=thr)
-            matching_si = get_matching_candidates(p, si_lines, all_po_lines=po_lines, thr=thr)
+            matching_dn = dn_assign.get(idx, [])
+            matching_si = si_assign.get(idx, [])
 
             agg_dn = sum(d["quantity"] for d in matching_dn)
             agg_si = sum(s["quantity"] for s in matching_si)
@@ -310,18 +457,18 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
                     }
                 )
 
-            # Secondary price check (FR-11.1)
+            # Secondary price check (FR-11.1) — exact, per line.
             if matching_si:
-                si_price = matching_si[0].get("unit_price", 0)
-                p_check = check_price(p["unit_price"], si_price)
-                if p_check["flag"]:
+                po_price = p.get("unit_price", 0) or 0
+                agg_price = sum(s.get("unit_price", 0) or 0 for s in matching_si)
+                if check_price(po_price, agg_price)["flag"]:
                     flags.append(
                         {
                             "priority": 3,
                             "type": "price",
                             "line_item_no": p_no,
-                            "po_unit_price": p["unit_price"],
-                            "si_unit_price": si_price,
+                            "po_unit_price": po_price,
+                            "si_unit_price": agg_price,
                         }
                     )
 

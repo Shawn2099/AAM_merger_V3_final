@@ -18,7 +18,7 @@ server:
 
 vlm:
   provider: "openrouter"
-  model: "openai/gpt-5.6-luna"  # SPEC §16 — Luna via OpenRouter (prod main), never hardcoded, swap via config only
+  model: "openai/gpt-6-luna"  # team-confirmed VLM via OpenRouter, swap via config only
   request_timeout_seconds: 60
   api_key_env_var: "OPENROUTER_API_KEY"
 
@@ -28,6 +28,15 @@ extraction:
 
 matching:
   fuzzy_description_threshold: 85
+  sanity_description_threshold: 40   # exact line_no hit must still be this similar
+  fuzzy_margin: 5                    # winner must beat runner-up by this
+  enable_sku_rescue: true            # v20.5 Step 3: unique normalized-SKU rescue
+  locale: "en_IN"  # quantity parsing locale (babel), caller-passed
+
+merge:
+  # Final packet order, editable without code change. Current default:
+  # SI→DN→PO→COMBINED→SHIPPING→CUSTOMS. Unknown types fail fast at startup.
+  legal_order: ["SI", "DN", "PO", "COMBINED", "SHIPPING", "CUSTOMS"]
 
 ingestion:
   stability_poll_interval_seconds: 2
