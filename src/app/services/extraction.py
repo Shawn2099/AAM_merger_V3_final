@@ -28,61 +28,65 @@ _SYSTEM_PROMPT = (
     "document_type enum[PO,SI,DN,COMBINED,SKIP,UNKNOWN], "
     "has_po_section:bool, has_dn_section:bool, has_si_section:bool, "
     "document_number (own SI No/DN No/PO No or null for COMBINED), "
-    "po_reference (first PO No/P.O. Reference/Order No visible for SI/DN/COMBINED, null for PO), "
-    'vendor_name, line_items[] {line_item_no, item_code, description, uom, quantity:str raw as printed e.g. "1" "12.5", '
-    'unit_price:str raw as printed e.g. "1620.00" "350.00", total_price:str raw as printed, evidence:{source_text, page}, confidence}, '
+    "po_reference (the PO No visible for SI/DN/COMBINED, null for PO), "
+    'vendor_name, line_items[] {line_item_no, description, quantity:str raw as printed e.g. "1" "12.5", dn_no}, '
     "confidence high/medium/low. COMBINED = single PDF containing PO+DN+SI sections together (CA merged). Omit nulls, no markdown."
 )
 
 _PAGE_PROMPT = (
     "STEP 1 — HEADER SCAN (first page top 20% for po_reference/document_number; each page table for rows):\n"
     "  Locate strings 'PO No'/'P.O. No'/'Purchase Order No'/'Buyers Order No'/'Order No'/'PO Reference' → po_reference "
-    "(first visible if multiple DNs or COMBINED; strip non-alnum, upper; e.g. PO-210851 → 210851). Never use filename.\n"
+    "(strip non-alnum, upper; e.g. PO-210851 → 210851). Never use filename.\n"
+    "  If MORE THAN ONE distinct PO number is visible on a document, set po_reference to the first and set "
+    "po_reference_ambiguous true — the document will be quarantined rather than guessed at.\n"
     "  Locate 'DN No'/'Delivery Note No'/'GDN No'/'SI No'/'Invoice No'/'PO No' → document_number (its own number; for COMBINED use primary SI No or PO No).\n"
     "  vendor_name = supplier company header.\n\n"
     "STEP 2 — CLASSIFY document_type exactly one of PO, SI, DN, COMBINED, SKIP, UNKNOWN:\n"
     "  PO=Purchase Order, SI=Sales/Tax Invoice, DN=Delivery Note/Packing List, "
     "COMBINED=single PDF that visibly contains PO table + DN table + SI table together (often CA 'Combined' stamp, 3 sections, multi-page), "
     "SKIP=covers/T&C/blank pages, UNKNOWN=unreadable. DN bundles '(2 DNs)'/'(3 DNs)' are DN not COMBINED.\n"
-    "  For COMBINED: set has_po_section=true, has_dn_section=true, has_si_section=true if and only if each respective section is visibly present; "
-    "return document_type COMBINED (not PO) and fill po_reference with shared PO.\n\n"
+    "  For COMBINED: set has_po_section=true, has_dn_section=true, has_si_section=true if and only if each respective section is visibly present.\n\n"
     "STEP 3 — LINE ITEMS (only rows with product description AND quantity>0, scan ALL pages sequentially):\n"
-    "  line_item_no: printed row number (Item No, Sl No, #) per page. item_code: SKU/part from column or embedded P/N: MFR:. "
-    "description: COMPLETE, do not truncate. uom: EA/BOX/KG/SET/PCS or null.\n"
-    "  For COMBINED: emit union of all sections but do NOT duplicate sections; backend will skip matching and send directly to output.\n"
-    "  EXCLUDE subtotal, VAT, tax, total, amount-in-words, payment terms, signatures.\n"
-    "  line_type: GOODS for real purchasable items; FREIGHT/TAX/FEE/SERVICE/DISCOUNT for "
-    "non-item rows you deliberately keep (e.g. a freight line, a discount row). Omit for GOODS.\n\n"
-    "STEP 4 — NUMBERS (copy verbatim, do NOT calculate, do NOT scale):\n"
-    '  quantity: exact string as printed ("1", "50", "12.5")\n'
-    '  unit_price: exact string as printed ("1620.00", "350.00")\n'
-    '  total_price: exact string as printed ("1620.00", "17500.00") — copy verbatim, do NOT calculate.\n\n'
+    "  line_item_no — MOST IMPORTANT. The vendor's own side column (Sl No / Item No / #) is often just a running "
+    "docket counter and repeats '1' on every page or every docket. It is NOT the PO line. Resolution order:\n"
+    "    (a) if the description or a nearby note contains a marker like 'Line Item - 3' or 'Line No. 3', use THAT number;\n"
+    "    (b) otherwise use the printed side column number.\n"
+    "  Copy the number exactly as printed, including any hyphen: '1-1', '2-1', '10' stay verbatim. Do not renumber, pad or strip leading zeros.\n"
+    "  description: COMPLETE, do not truncate. Keep the 'Line Item - N' text inside it if it was printed there.\n"
+    "  dn_no: only if a delivery-note number is printed against THIS individual row; otherwise null. "
+    "Most vendors print the DN number once in the header, not per line.\n"
+    "  For COMBINED: emit union of all sections but do NOT duplicate sections.\n"
+    "  EXCLUDE subtotal, VAT, tax, total, amount-in-words, payment terms, signatures.\n\n"
+    "STEP 4 — QUANTITY (copy verbatim, do NOT calculate, do NOT scale):\n"
+    '  quantity: exact string as printed ("1", "50", "12.5")\n\n'
     "STEP 5 — MULTI-PAGE / MULTI-DN: if PDF contains 2-3 DNs or COMBINED multi-page, emit first po_reference, include ALL line_items across pages in order.\n\n"
-    "EVIDENCE + CONFIDENCE: per line_item provide evidence.source_text verbatim snippet and confidence high/medium/low.\n\n"
     "FEW-SHOTS (raw strings, copy verbatim):\n"
-    'SI: {"document_type":"SI","has_po_section":false,"has_dn_section":false,"has_si_section":true,"document_number":"SIV-ARS-26-4005","po_reference":"210851","vendor_name":"IBRAHIM ALI ALSHAB TRADING EST.","confidence":"high","line_items":[{"line_item_no":"12","item_code":"33818","description":"NUT, HEX 9/16 IN-12 UNC GRADE B YELLOW ZINC PLATED","quantity":"50","unit_price":"350.00","total_price":"17500.00","evidence":{"source_text":"12 33818 NUT... 50 350.00"},"confidence":"high"}]}\n'
-    'PO: {"document_type":"PO","has_po_section":true,"has_dn_section":false,"has_si_section":false,"document_number":"210851","po_reference":null,"line_items":[{"line_item_no":"1","item_code":"33630","description":"WASHER, FLAT SAE 1/4 IN YELLOW ZINC PLATED CS","quantity":"1","unit_price":"1620.00","total_price":"1620.00"}]}\n'
-    'DN bundle: {"document_type":"DN","has_po_section":false,"has_dn_section":true,"has_si_section":false,"document_number":"GDN-ARS-26-4619","po_reference":"210851","line_items":[{"line_item_no":"1","item_code":"184799","description":"WASHER, LOCK, 3/8\\" - MFG: FLY","quantity":"50","unit_price":"1000.00","total_price":"50000.00"}]}\n'
-    'COMBINED: {"document_type":"COMBINED","has_po_section":true,"has_dn_section":true,"has_si_section":true,"document_number":"SIV-RAK-25-3049","po_reference":"3049PO123","line_items":[{"line_item_no":"1","description":"WASHER, FLAT SAE 1/4 IN","quantity":"50","unit_price":"120.00"}],"confidence":"high"}\n'
-    'DN with price preserved: {"document_type":"DN","has_po_section":false,"has_dn_section":true,"has_si_section":false,"document_number":"SIV-ARS-25-7230-P2","po_reference":"4500043712","line_items":[{"line_item_no":"10","description":"CRC Lectra Cleaner: 400ML Aerosol Can","quantity":"3","unit_price":"26.00","evidence":{"source_text":"10 CRC Lectra Cleaner 3"},"confidence":"high"}]}\n'
+    'SI: {"document_type":"SI","document_number":"SIV-ARS-26-4005","po_reference":"210851","vendor_name":"IBRAHIM ALI ALSHAB TRADING EST.","confidence":"high","line_items":[{"line_item_no":"12","description":"NUT, HEX 9/16 IN-12 UNC GRADE B YELLOW ZINC PLATED","quantity":"50","unit_price":"350.00"}]}\n'
+    'PO: {"document_type":"PO","document_number":"210851","po_reference":null,"line_items":[{"line_item_no":"1","description":"WASHER, FLAT SAE 1/4 IN YELLOW ZINC PLATED CS","quantity":"1","unit_price":"1620.00"}]}\n'
+    'DN bundle: {"document_type":"DN","document_number":"GDN-ARS-26-4619","po_reference":"210851","line_items":[{"line_item_no":"1","description":"WASHER, LOCK, 3/8\\" - MFG: FLY","quantity":"50","unit_price":"1000.00"}]}\n'
+    'Re-indexed DN (side column lies, use the embedded marker): {"document_type":"DN","document_number":"GDN-RHO-25-513","po_reference":"8300023893","line_items":[{"line_item_no":"10","description":"GATE VALVE 2IN CL150 - Line Item - 10","quantity":"2","dn_no":"GDN-RHO-25-513"}]}\n'
+    'COMBINED: {"document_type":"COMBINED","document_number":"SIV-RAK-25-3049","po_reference":"3049PO123","line_items":[{"line_item_no":"1","description":"WASHER, FLAT SAE 1/4 IN","quantity":"50","unit_price":"120.00"}],"confidence":"high"}\n'
 )
 
 
 class _VLMLineItem(BaseModel):
-    line_item_no: str | None = Field(None, description="Printed row number")
-    item_code: str | None = None
-    description: str | None = None
-    uom: str | None = None
-    quantity: str | None = None  # raw as printed, e.g. "1", "12.5"
-    unit_price: str | None = None  # raw as printed, e.g. "1620.00", "350.00"
-    total_price: str | None = None  # raw as printed
-    line_type: str | None = Field(
+    line_item_no: str | None = Field(
         None,
         description=(
-            "Row kind: GOODS (real purchasable item) or one of "
-            "FREIGHT,TAX,FEE,SERVICE,DISCOUNT for non-item rows. Default GOODS."
+            "The PO line this row refers to. Take it from a 'Line Item - N' "
+            "marker in the description when present, otherwise the side column "
+            "(Sl No / Item No / #). See STEP 3."
         ),
     )
+    description: str | None = None
+    quantity: str | None = None  # raw as printed, e.g. "1", "12.5"
+    dn_no: str | None = Field(
+        None, description="Delivery-note number printed against THIS row, if any."
+    )
+    # Prices take no part in matching or merging. Kept only because the column is
+    # NOT NULL and the merged packet carries it; the quantity is the sole
+    # reconciliation signal.
+    unit_price: str | None = None  # raw as printed, e.g. "1620.00", "350.00"
 
 
 class _VLMPageExtraction(BaseModel):
@@ -92,6 +96,14 @@ class _VLMPageExtraction(BaseModel):
     has_si_section: bool = False
     document_number: str | None = None
     po_reference: str | None = None
+    po_reference_ambiguous: bool = Field(
+        False,
+        description=(
+            "True when more than one distinct PO number is visible on this "
+            "document. Such a document is quarantined rather than assigned to "
+            "a guessed PO."
+        ),
+    )
     vendor_name: str | None = None
     confidence: Literal["high", "medium", "low"] = "medium"
     line_items: list[_VLMLineItem] = Field(default_factory=list)
@@ -330,6 +342,8 @@ def extract_document(doc_id: int, cfg) -> Document:
                 from app.services.grouping import normalize_po_no
 
                 doc.po_no_normalized = normalize_po_no(result["po_no_raw"])
+            if result and result.get("po_reference_ambiguous"):
+                doc.po_reference_ambiguous = True
             # also store DN/SI numbers if present (outside po_no_raw guard)
             if result.get("document_type") == "SI" and result.get("document_number"):
                 doc.si_no = result["document_number"]
@@ -374,8 +388,7 @@ def extract_document(doc_id: int, cfg) -> Document:
                         description=str(li.get("description")),
                         quantity=qty_i,
                         unit_price=price_i,
-                        part_no=str(li.get("item_code")) if li.get("item_code") else None,
-                        line_type=_norm_line_type(li.get("line_type")),
+                        dn_no=str(li.get("dn_no")) if li.get("dn_no") else None,
                     )
                 )
             s.commit()

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import itertools
 import json
 import logging
 
@@ -12,7 +11,7 @@ from app.core.config import AppConfig
 from app.core.database import get_engine
 from app.models import DocType, POSet, POSetStatus
 from app.models.base import Base
-from app.services.matching import _desc_score, _norm, assign_lines_detailed
+from app.services.matching import compare_aggregates, group_by_line_no
 from app.services.quarantine import quarantine_copy
 
 logger = logging.getLogger(__name__)
@@ -181,7 +180,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             if any(li.quantity <= 0 for li in all_comb_items):
                 ps.status = POSetStatus.quarantined
                 s.commit()
-                quarantine_copy(ps.id, cfg)
+                quarantine_copy(ps.id, cfg, reason="non_positive_quantity")
                 return {
                     "status": "quarantined",
                     "reason": "non_positive_quantity",
@@ -281,11 +280,11 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 )
                 ps.status = POSetStatus.quarantined
                 s.commit()
-                quarantine_copy(ps.id, cfg)
                 msg = (
                     f"PO reference mismatch: doc {d.original_filename} "
                     f"({d.po_no_normalized}) != PO Set ({ps.po_no_normalized})"
                 )
+                quarantine_copy(ps.id, cfg, reason="po_reference_mismatch", detail=msg)
                 return {
                     "status": "quarantined",
                     "reason": "po_reference_mismatch",
@@ -358,7 +357,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
         if any(line["quantity"] <= 0 for line in all_lines):
             ps.status = POSetStatus.quarantined
             s.commit()
-            quarantine_copy(ps.id, cfg)
+            quarantine_copy(ps.id, cfg, reason="non_positive_quantity")
             return {
                 "status": "quarantined",
                 "reason": "non_positive_quantity",
@@ -367,123 +366,72 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             }
 
         thr = getattr(cfg.matching, "fuzzy_description_threshold", 85)
-        sanity = getattr(cfg.matching, "sanity_description_threshold", 40)
-        margin = getattr(cfg.matching, "fuzzy_margin", 5)
-        use_sku = getattr(cfg.matching, "enable_sku_rescue", True)
 
-        # Injective assignment: each vendor line resolves to exactly ONE PO line,
-        # so a line can never inflate two PO aggregates. Any unresolvable line
-        # quarantines the whole set (FR-8.5 — nothing is silently dropped).
-        dn_assign, dn_reason, dn_detail = assign_lines_detailed(
-            po_lines, dn_lines, thr=thr, sanity=sanity, margin=margin, use_sku=use_sku
-        )
-        if dn_reason:
+        # ------------------------------------------------------------------
+        # Simplified rule (dev-simplified).
+        #
+        # Quantities are the only signal. Both sides are grouped by
+        # line_item_no and summed, so one PO line delivered across several
+        # vendor rows reconciles. For every PO group we require
+        # PO == AggDN and PO == AggSI exactly, and no vendor group may lack a
+        # PO counterpart. Any failure quarantines the set: this engine either
+        # gives an absolute answer or it gives none.
+        # ------------------------------------------------------------------
+        po_totals, dn_totals, dn_orphans, po_fail = group_by_line_no(po_lines, dn_lines, thr)
+        _, si_totals, si_orphans, _ = group_by_line_no(po_lines, si_lines, thr)
+
+        if po_fail:
             ps.status = POSetStatus.quarantined
             s.commit()
-            quarantine_copy(ps.id, cfg)
+            quarantine_copy(ps.id, cfg, reason=po_fail)
             return {
                 "status": "quarantined",
-                "reason": dn_reason,
-                "detail": dn_detail,
+                "reason": po_fail,
                 "po_set_id": po_set_id,
-                "flags": [_identity_flag("DN", dn_reason, dn_detail)],
+                "flags": [_identity_flag("PO", po_fail, None)],
             }
 
-        si_assign, si_reason, si_detail = assign_lines_detailed(
-            po_lines, si_lines, thr=thr, sanity=sanity, margin=margin, use_sku=use_sku
-        )
-        if si_reason:
-            ps.status = POSetStatus.quarantined
-            s.commit()
-            quarantine_copy(ps.id, cfg)
-            return {
-                "status": "quarantined",
-                "reason": si_reason,
-                "detail": si_detail,
-                "po_set_id": po_set_id,
-                "flags": [_identity_flag("SI", si_reason, si_detail)],
-            }
-
-        # Conflicting descriptions among lines assigned to the same PO line
-        # (FR-8.4) — the set can't confidently say they're the same item.
-        for label, assignment in (("DN", dn_assign), ("SI", si_assign)):
-            for idx, group in assignment.items():
-                descs = {_norm(g.get("description") or "") for g in group if g.get("description")}
-                if len(descs) > 1:
-                    for a, b in itertools.combinations(sorted(descs), 2):
-                        if _desc_score(a, b) < thr:
-                            ps.status = POSetStatus.quarantined
-                            s.commit()
-                            quarantine_copy(ps.id, cfg)
-                            return {
-                                "status": "quarantined",
-                                "reason": "conflicting_descriptions",
-                                "po_set_id": po_set_id,
-                                "flags": [
-                                    {
-                                        "priority": 1,
-                                        "type": "identification",
-                                        "message": (
-                                            f"Conflicting {label} descriptions for PO line "
-                                            f"{po_lines[idx].get('line_item_no')}"
-                                        ),
-                                    }
-                                ],
-                            }
-
-        # Independent quantity aggregation per PO line (FR-9.1, FR-10.1)
-        flags = []
-        reconciled_all = True
-        for idx, p in enumerate(po_lines):
-            p_no = p.get("line_item_no")
-
-            matching_dn = dn_assign.get(idx, [])
-            matching_si = si_assign.get(idx, [])
-
-            agg_dn = sum(d["quantity"] for d in matching_dn)
-            agg_si = sum(s["quantity"] for s in matching_si)
-
-            rec = reconcile(p["quantity"], agg_dn, agg_si)
-            if not rec["ok"]:
-                reconciled_all = False
+        flags: list[dict] = []
+        pools = (("DN", dn_orphans, dn_totals), ("SI", si_orphans, si_totals))
+        for label, orphans, totals in pools:
+            for d in compare_aggregates(po_totals, totals, orphans):
                 flags.append(
                     {
-                        "priority": 2,
-                        "type": "quantity",
-                        "line_item_no": p_no,
-                        "po_quantity": p["quantity"],
-                        "agg_dn_quantity": agg_dn,
-                        "agg_si_quantity": agg_si,
+                        "priority": 1 if d["po_qty"] is None else 2,
+                        "type": "identification" if d["po_qty"] is None else "quantity",
+                        "pool": label,
+                        "line_item_no": d["line"],
+                        "po_quantity": d["po_qty"],
+                        "vendor_quantity": d["vendor_qty"],
+                        "reason": d["reason"],
                     }
                 )
-
-            # Secondary price check (FR-11.1) — exact, per line.
-            if matching_si:
-                po_price = p.get("unit_price", 0) or 0
-                agg_price = sum(s.get("unit_price", 0) or 0 for s in matching_si)
-                if check_price(po_price, agg_price)["flag"]:
-                    flags.append(
-                        {
-                            "priority": 3,
-                            "type": "price",
-                            "line_item_no": p_no,
-                            "po_unit_price": po_price,
-                            "si_unit_price": agg_price,
-                        }
-                    )
-
-        # Sort flags by priority: (1) identification -> (2) quantity -> (3) price (FR-11.2)
         flags.sort(key=lambda f: f.get("priority", 99))
 
-        if not reconciled_all:
-            # Partial fulfillment check: if unfulfilled lines exist (agg_dn == 0 or agg_si == 0),
-            # PO set is waiting for future deliveries/invoices -> stays pending
-            has_unfulfilled = any(
-                (flag.get("agg_dn_quantity") == 0 or flag.get("agg_si_quantity") == 0)
-                for flag in flags
-                if flag.get("type") == "quantity"
+        if flags:
+            # A vendor line with no PO counterpart is unresolvable identity, not a
+            # shortfall: quarantine rather than guess which PO line it belongs to.
+            if any(f.get("type") == "identification" for f in flags):
+                ps.status = POSetStatus.quarantined
+                s.commit()
+                quarantine_copy(
+                    ps.id, cfg, reason="unmatched_vendor_line", flags=flags
+                )
+                return {
+                    "status": "quarantined",
+                    "reason": "unmatched_vendor_line",
+                    "po_set_id": po_set_id,
+                    "flags": flags,
+                }
+
+            # Partial delivery is only genuine when the vendor reported NOTHING
+            # for those lines. A line both sides reported with different
+            # quantities is a real disagreement, not an outstanding delivery.
+            qty_flags = [f for f in flags if f.get("type") == "quantity"]
+            has_real_disagreement = any(
+                (f.get("vendor_quantity") or 0) > 0 for f in qty_flags
             )
-            if has_unfulfilled:
+            if not has_real_disagreement:
                 ps.status = POSetStatus.pending
                 s.commit()
                 return {
@@ -505,14 +453,36 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             return {"status": "blocked_customs", "po_set_id": po_set_id, "flags": flags}
 
         # Auto-merge (FR-14.1)
-        from app.services.merge import merge_po_set
+        from app.services.merge import MergeNamingError, merge_po_set
 
         # Forward progress only: reconciled just now → clear to pending for
         # the merge; restore prior status if merge refuses (W-8).
         prior_status = ps.status
         ps.status = POSetStatus.pending
         s.commit()
-        merged_path = merge_po_set(po_set_id, cfg)
+        try:
+            merged_path = merge_po_set(po_set_id, cfg)
+        except MergeNamingError as e:
+            # The packet cannot be named unambiguously. Quarantine rather than
+            # write a clobbered or ambiguous file into the output folder.
+            ps.status = POSetStatus.quarantined
+            s.commit()
+            quarantine_copy(
+                ps.id, cfg, reason="packet_naming_failed", detail=str(e)
+            )
+            return {
+                "status": "quarantined",
+                "reason": "packet_naming_failed",
+                "detail": str(e),
+                "po_set_id": po_set_id,
+                "flags": [
+                    {
+                        "priority": 1,
+                        "type": "identification",
+                        "message": f"Cannot name the merged packet: {e}",
+                    }
+                ],
+            }
         s.refresh(ps)
         if merged_path is None:
             if ps.status != prior_status:

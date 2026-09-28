@@ -58,6 +58,11 @@ class Document(Base):
     raw_extraction_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     po_no_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     po_no_normalized: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # True when the VLM saw more than one distinct PO number on this document.
+    # The set is quarantined instead of being attached to a guessed PO.
+    po_reference_ambiguous: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
     dn_no: Mapped[str | None] = mapped_column(Text, nullable=True)
     si_no: Mapped[str | None] = mapped_column(Text, nullable=True)
     invoice_no: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -98,6 +103,11 @@ class LineItem(Base):
     line_type: Mapped[str] = mapped_column(
         String(16), default="GOODS", server_default="GOODS", nullable=False
     )
+    # Delivery-note reference printed against this individual line. Some vendors
+    # print it per line, others only once in the header, so this is nullable and
+    # overrides documents.dn_no for this row when present. Used for attachment
+    # reverification only, never as a matching key.
+    dn_no: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     document: Mapped[Document] = relationship(back_populates="line_items")
 

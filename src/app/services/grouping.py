@@ -87,6 +87,16 @@ def normalize_po_no(raw: str) -> str:
     return "".join(kept).upper()
 
 
+def effective_dn_no(line, document) -> str | None:
+    """The delivery-note number that applies to one line.
+
+    Vendors either print the DN number once in the header or against every
+    individual row. A line-wise value overrides the document-level one for
+    that row; both raw values are kept so the evidence is never lost.
+    """
+    return (getattr(line, "dn_no", None) or getattr(document, "dn_no", None) or None) or None
+
+
 def get_or_create_po_set(po_no: str, cfg, create: bool = True):
     from sqlalchemy.orm import Session
 
@@ -122,7 +132,11 @@ def get_or_create_po_set(po_no: str, cfg, create: bool = True):
 def attach_unattached_to_open_sets(cfg) -> set[int]:
     """Attach unattached valid docs to open same-key PO Sets. Never mints:
     keys without an open set wait indefinitely for more files (human
-    decision 2026-09-05). Returns touched PO Set ids."""
+    decision 2026-09-05). Returns touched PO Set ids.
+
+    A document flagged `po_reference_ambiguous` (more than one PO number
+    printed) is never attached: guessing would strand the other POs' invoices.
+    """
     from sqlalchemy.orm import Session
 
     from app.core.database import get_engine
@@ -141,6 +155,11 @@ def attach_unattached_to_open_sets(cfg) -> set[int]:
             .all()
         )
         for doc in unattached:
+            if doc.po_reference_ambiguous:
+                # More than one PO number is printed on this document. Attaching
+                # it to any one PO would silently strand the others, so it stays
+                # unattached and the set is surfaced for a human.
+                continue
             ps = (
                 s.query(POSet)
                 .filter(

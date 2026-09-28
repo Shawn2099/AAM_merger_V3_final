@@ -112,14 +112,53 @@ def _is_blocked(po_set: POSet) -> bool:
     return not (DocType.CUSTOMS.value in vals and DocType.SHIPPING.value in vals)
 
 
+class MergeNamingError(RuntimeError):
+    """The merged packet cannot be named unambiguously.
+
+    Raised instead of guessing, so the caller quarantines the set. Writing a
+    clobbered or ambiguous filename would deliver the wrong document to the
+    customer, which is the one failure this system must never make.
+    """
+
+
+def _safe_stem(value: str) -> str:
+    return "".join(c for c in str(value) if c.isalnum() or c in ("-", "_", "."))
+
+
+def _packet_name(po_set: POSet, loose: bool = False) -> str | None:
+    """Filename stem: `<invoice_no>_<po_no>`.
+
+    Both parts are required. One commercial invoice can cover several POs, so
+    invoice_no on its own would collide and silently overwrite the sibling
+    packets in the output folder.
+    """
+    invoice = _invoice_name(po_set, loose=loose)
+    if not invoice:
+        return None
+    po = (po_set.po_no_normalized or "").strip()
+    if not po:
+        return None
+    stem = f"{_safe_stem(invoice)}_{_safe_stem(po)}".strip("_")
+    return stem or None
+
+
 def _resolve_output_path(
     safe: str, po_set_id: int, output_folder: Path, current_path: str | None = None
 ) -> Path:
+    """Resolve the output path, refusing to overwrite an existing packet.
+
+    Re-merging this same set onto its own existing file is fine. Any other
+    collision means two different sets would share a filename, so we raise
+    rather than disambiguate silently.
+    """
     out = output_folder / f"{safe}.pdf"
     if current_path and Path(current_path).resolve() == out.resolve():
         return out
     if out.exists():
-        out = output_folder / f"{safe}-{po_set_id}.pdf"
+        raise MergeNamingError(
+            f"output filename '{out.name}' already exists and belongs to another PO Set; "
+            f"refusing to overwrite (PO Set {po_set_id})"
+        )
     return out
 
 
@@ -186,16 +225,15 @@ def merge_po_set(po_set_id: int, cfg) -> Path | None:
             logger.warning("Auto-merge refused for PO Set %s: zero line-item evidence", po_set_id)
             return None
 
-        invoice = _invoice_name(
+        stem = _packet_name(
             ps,
             loose=any(_doc_type_val(d) == DocType.COMBINED.value for d in (ps.documents or [])),
         )
-        if not invoice:
-            # SPEC says SI presence guaranteed when reconciled; if missing, cannot name file -> None
-            return None
-        safe = "".join(c for c in str(invoice) if c.isalnum() or c in ("-", "_", "."))
-        if not safe:
-            safe = str(invoice)
+        if not stem:
+            raise MergeNamingError(
+                f"PO Set {po_set_id} cannot be named: need both an invoice number and a PO number"
+            )
+        safe = _safe_stem(stem) or stem
         out = _resolve_output_path(
             safe, ps.id, Path(cfg.paths.output_folder), ps.merged_output_path
         )

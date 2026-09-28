@@ -431,3 +431,110 @@ def find_unmatched(
             unmatched.append(s)
 
     return unmatched
+
+
+# ---------------------------------------------------------------------------
+# Simplified reconciliation core (dev-simplified)
+#
+# The rule, in full:
+#   1. Group BOTH sides by line_item_no and sum each group.
+#   2. For every PO group, PO qty must equal the vendor group in BOTH the DN
+#      and the SI pool.
+#   3. No vendor group may lack a PO counterpart, or a delivered line would be
+#      silently dropped.
+#   4. Anything that fails quarantines the whole set.
+#
+# Quantities are the only signal. No price, no UOM, no SKU, no ERP step rules.
+# The description is a fallback for rows that carry no usable line number, and
+# only then.
+# ---------------------------------------------------------------------------
+
+
+def group_by_line_no(
+    po_lines: list[dict],
+    vendor_lines: list[dict],
+    desc_threshold: int = 85,
+) -> tuple[dict[str, int], dict[str, int], list[dict], str | None]:
+    """Sum PO and vendor quantities into per-line groups.
+
+    Returns (po_totals, vendor_totals, orphans, failure_reason).
+    A non-None failure_reason means the set must quarantine.
+
+    Rows are summed rather than matched one-to-one, so a single PO line
+    delivered across several vendor rows reconciles correctly.
+    """
+    po_totals: dict[str, int] = {}
+    po_desc: dict[str, str] = {}
+
+    for ln in po_lines:
+        key = normalize_line_no(ln.get("line_item_no"))
+        if not key:
+            # A PO line we cannot address is unresolvable by definition.
+            return {}, {}, [], "po_line_missing_line_item_no"
+        qty = int(ln.get("quantity") or 0)
+        po_totals[key] = po_totals.get(key, 0) + qty
+        po_desc.setdefault(key, _norm(ln.get("description") or ""))
+
+    vendor_totals: dict[str, int] = {}
+    orphans: list[dict] = []
+
+    for ln in vendor_lines:
+        key = normalize_line_no(ln.get("line_item_no"))
+        if not key and desc_threshold:
+            # Fallback only: this row has no usable number, so try the
+            # description. Never used to override a real line number.
+            key = _best_desc_key(ln, po_desc, desc_threshold)
+        if not key:
+            orphans.append({**ln, "why": "no_line_number_and_no_description_match"})
+        elif key not in po_totals:
+            orphans.append({**ln, "why": "no_po_line_with_this_number"})
+        else:
+            vendor_totals[key] = vendor_totals.get(key, 0) + int(ln.get("quantity") or 0)
+
+    return po_totals, vendor_totals, orphans, None
+
+
+def _best_desc_key(vendor_line: dict, po_desc: dict[str, str], threshold: int) -> str:
+    """Return the PO line key whose description is closest to this row's.
+
+    Used only for rows with no usable line number. Returns "" when nothing
+    clears the threshold — the caller then quarantines rather than guessing.
+    """
+    v_desc = _norm(vendor_line.get("description") or "")
+    if not v_desc:
+        return ""
+    best_key, best_score = "", 0.0
+    for key, p_desc in po_desc.items():
+        if not p_desc:
+            continue
+        score = fuzz.token_sort_ratio(v_desc, p_desc)
+        if score > best_score:
+            best_key, best_score = key, score
+    return best_key if best_score >= threshold else ""
+
+
+def compare_aggregates(
+    po_totals: dict[str, int],
+    vendor_totals: dict[str, int],
+    orphans: list[dict],
+) -> list[dict]:
+    """Compare per-line sums. Returns one discrepancy per offending PO line."""
+    if orphans:
+        return [
+            {
+                "line": o.get("line_item_no") or o.get("description", "")[:40],
+                "po_qty": None,
+                "vendor_qty": o.get("quantity"),
+                "reason": o.get("why", "orphan"),
+            }
+            for o in orphans
+        ]
+
+    diffs: list[dict] = []
+    for key, po_qty in po_totals.items():
+        v_qty = vendor_totals.get(key, 0)
+        if v_qty != po_qty:
+            diffs.append(
+                {"line": key, "po_qty": po_qty, "vendor_qty": v_qty, "reason": "quantity_mismatch"}
+            )
+    return diffs
