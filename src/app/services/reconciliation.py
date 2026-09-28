@@ -116,6 +116,9 @@ def _persist_reason(po_set_id: int, result: dict, cfg: AppConfig) -> None:
     flags = result.get("flags") or []
     if status == "merged":
         note = "Fully reconciled — packet merged"
+        naming = [f for f in flags if f.get("type") == "naming"]
+        if naming:
+            note = f"Fully reconciled — packet merged. {naming[0].get('message', '')}"
     else:
         note = explain(result.get("reason"), flags)
     try:
@@ -460,8 +463,9 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
         prior_status = ps.status
         ps.status = POSetStatus.pending
         s.commit()
+        merge_info: dict = {}
         try:
-            merged_path = merge_po_set(po_set_id, cfg)
+            merged_path = merge_po_set(po_set_id, cfg, info=merge_info)
         except MergeNamingError as e:
             # The packet cannot be named unambiguously. Quarantine rather than
             # write a clobbered or ambiguous file into the output folder.
@@ -490,6 +494,22 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 s.commit()
                 s.refresh(ps)
             logger.warning("Auto-merge refused for PO Set %s — kept %s", po_set_id, prior_status)
+
+        # The quantities proved this set, so a missing invoice number must not
+        # block it. It is named from the PO number instead, and said out loud
+        # so a reviewer can see the customer may be expecting an invoice-named
+        # file.
+        if merged_path is not None and merge_info.get("invoice_no_missing"):
+            flags.append(
+                {
+                    "priority": 3,
+                    "type": "naming",
+                    "message": (
+                        "No invoice number was extracted; packet named "
+                        f"'{merge_info.get('output_name')}' from the PO number"
+                    ),
+                }
+            )
         return {
             "status": ps.status.value if hasattr(ps.status, "value") else str(ps.status),
             "po_set_id": po_set_id,

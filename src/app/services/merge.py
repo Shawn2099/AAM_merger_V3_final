@@ -125,21 +125,29 @@ def _safe_stem(value: str) -> str:
     return "".join(c for c in str(value) if c.isalnum() or c in ("-", "_", "."))
 
 
-def _packet_name(po_set: POSet, loose: bool = False) -> str | None:
-    """Filename stem: `<invoice_no>_<po_no>`.
+def _packet_name(po_set: POSet, loose: bool = False) -> tuple[str | None, bool]:
+    """Filename stem and whether the invoice number was missing.
 
-    Both parts are required. One commercial invoice can cover several POs, so
-    invoice_no on its own would collide and silently overwrite the sibling
-    packets in the output folder.
+    Prefers `<invoice_no>_<po_no>`: one commercial invoice can cover several
+    POs, so invoice_no alone collides and overwrites sibling packets.
+
+    When no invoice number was extracted we fall back to `<po_no>` rather than
+    refusing to deliver. The quantities are what reconciliation proves, so a
+    missing label must not veto an otherwise correct packet — but the caller is
+    told, via the flag, so the gap stays visible instead of passing silently.
+    A PO number alone is safe as a filename: one open set exists per PO key at
+    a time, and a genuine duplicate still raises in _resolve_output_path.
     """
+    po = (po_set.po_no_normalized or "").strip()
+    po_stem = _safe_stem(po) if po else ""
     invoice = _invoice_name(po_set, loose=loose)
     if not invoice:
-        return None
-    po = (po_set.po_no_normalized or "").strip()
-    if not po:
-        return None
-    stem = f"{_safe_stem(invoice)}_{_safe_stem(po)}".strip("_")
-    return stem or None
+        if not po_stem:
+            return None, True
+        return po_stem, True
+    if not po_stem:
+        return _safe_stem(invoice), True
+    return f"{_safe_stem(invoice)}_{po_stem}", False
 
 
 def _resolve_output_path(
@@ -185,11 +193,15 @@ def _write_merged(ordered: list, out: Path, allow_missing: bool = False) -> Path
     return out
 
 
-def merge_po_set(po_set_id: int, cfg) -> Path | None:
+def merge_po_set(po_set_id: int, cfg, info: dict | None = None) -> Path | None:
     """Auto-merge only when reconciled (FR-14.1). Returns None if not eligible.
 
-    Order: SI→DN→PO→(SHIPPING→CUSTOMS) (FR-14.3). Filename = invoice_no (FR-14.5).
+    Order: SI→DN→PO→(SHIPPING→CUSTOMS) (FR-14.3). Filename = <invoice_no>_<po_no>,
+    falling back to <po_no> when no invoice number was extracted.
     Immutable once merged (FR-14.6/14.7): first-completed wins.
+
+    `info`, when given, is populated with naming details for the caller to
+    surface (e.g. invoice_no_missing).
     """
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
@@ -225,18 +237,21 @@ def merge_po_set(po_set_id: int, cfg) -> Path | None:
             logger.warning("Auto-merge refused for PO Set %s: zero line-item evidence", po_set_id)
             return None
 
-        stem = _packet_name(
+        stem, invoice_missing = _packet_name(
             ps,
             loose=any(_doc_type_val(d) == DocType.COMBINED.value for d in (ps.documents or [])),
         )
         if not stem:
             raise MergeNamingError(
-                f"PO Set {po_set_id} cannot be named: need both an invoice number and a PO number"
+                f"PO Set {po_set_id} cannot be named: no invoice number and no PO number"
             )
         safe = _safe_stem(stem) or stem
         out = _resolve_output_path(
             safe, ps.id, Path(cfg.paths.output_folder), ps.merged_output_path
         )
+        if info is not None:
+            info["output_name"] = out.name
+            info["invoice_no_missing"] = invoice_missing
 
         # Merge
         try:
