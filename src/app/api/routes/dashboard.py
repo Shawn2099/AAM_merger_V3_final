@@ -66,12 +66,21 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
                 "doc_count": doc_counts.get(ps.id, 0),
                 "has_merged_file": has_merged_file,
                 "updated_at": ps.updated_at,
+                "reconcile_reason": ps.reconcile_reason,
                 "locked_by_action": ps.locked_by_action,
                 "is_locked": is_locked(ps, cfg),
             }
         )
     out.sort(key=lambda x: x["updated_at"] or x["id"], reverse=True)  # type: ignore[no-matching-overload]
     return out
+
+
+def _now_ts() -> float:
+    """Current epoch seconds, passed to templates so relative ages render
+    server-side (no client clock, no layout shift on refresh)."""
+    import time
+
+    return time.time()
 
 
 def _sync_running_state() -> bool:
@@ -146,6 +155,7 @@ def dashboard(request: Request, status: str | None = None):
                     "request": request,
                     "po_sets": po_sets,
                     "current_status": status if status in _ALLOWED_STATUSES else None,
+                    "now_ts": _now_ts(),
                 },
             )
         return _templates.TemplateResponse(
@@ -158,6 +168,7 @@ def dashboard(request: Request, status: str | None = None):
                 "sync_running": sync_running,
                 "stats": stats,
                 "unclassified_count": stats["unclassified"],
+                "now_ts": _now_ts(),
             },
         )
 
@@ -176,6 +187,7 @@ def dashboard_table(request: Request, status: str | None = None):
                 "request": request,
                 "po_sets": po_sets,
                 "current_status": status if status in _ALLOWED_STATUSES else None,
+                "now_ts": _now_ts(),
             },
         )
 

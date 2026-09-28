@@ -1,13 +1,18 @@
-<div id="po-table" hx-get="/dashboard/table{% if current_status %}?status={{ current_status }}{% endif %}" hx-trigger="every 2s" hx-swap="outerHTML">
+<div id="po-table" hx-get="/dashboard/table{% if current_status %}?status={{ current_status }}{% endif %}" hx-trigger="every 5s" hx-sync="this:replace" hx-swap="outerHTML">
 
   <table class="data-table">
+    <caption class="sr-only">
+      PO Sets with reconciliation status, the reason each one is in that state,
+      document count, age, and available actions.
+    </caption>
     <thead>
       <tr>
-        <th>PO Number</th>
-        <th>Reconciliation Status</th>
-        <th>Documents</th>
-        <th>Last Updated</th>
-        <th style="text-align:right;">Actions</th>
+        <th scope="col">PO Number</th>
+        <th scope="col">Reconciliation Status</th>
+        <th scope="col">Why</th>
+        <th scope="col">Documents</th>
+        <th scope="col">Age</th>
+        <th scope="col" style="text-align:right;">Actions</th>
       </tr>
     </thead>
     <tbody id="po-table-body">
@@ -46,13 +51,34 @@
           {% endif %}
         </td>
 
+        <td class="reason-cell">
+          {% if ps.reconcile_reason %}
+            {{ ps.reconcile_reason }}
+          {% else %}
+            <span class="muted">Not evaluated yet</span>
+          {% endif %}
+        </td>
+
         <td>
           <span style="font-weight:600; color:var(--text-main);">{{ ps.doc_count }}</span>
           <span class="muted" style="font-size:0.82rem;">doc{{ 's' if ps.doc_count != 1 else '' }}</span>
         </td>
 
-        <td class="muted" style="font-size:0.85rem;">
-          {{ ps.updated_at.strftime('%b %d, %H:%M') if ps.updated_at else '—' }}
+        <td class="muted" style="font-size:0.85rem; white-space:nowrap;">
+          {% if ps.updated_at and now_ts %}
+            {% set age = now_ts - ps.updated_at.timestamp() %}
+            {% if age < 90 %}
+              just now
+            {% elif age < 3600 %}
+              {{ (age / 60) | round | int }}m ago
+            {% elif age < 86400 %}
+              {{ (age / 3600) | round | int }}h ago
+            {% else %}
+              {{ (age / 86400) | round | int }}d ago
+            {% endif %}
+          {% else %}
+            —
+          {% endif %}
         </td>
 
         <td style="text-align:right;">
@@ -81,7 +107,7 @@
       </tr>
       {% else %}
       <tr>
-        <td colspan="5" style="text-align:center; padding:36px; color:var(--text-muted);">
+        <td colspan="6" style="text-align:center; padding:36px; color:var(--text-muted);">
           <div style="font-size:2rem; margin-bottom:8px;">📭</div>
           <div style="font-weight:600; font-size:1rem; color:var(--text-main);">No PO Sets found</div>
           <div style="font-size:0.85rem; margin-top:4px;">
