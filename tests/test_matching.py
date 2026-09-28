@@ -182,3 +182,36 @@ def test_conflict_third_description_quarantine_si():
         {"line_item_no": "5", "description": "Totally different gadget", "qty": 10},
     ]
     assert match_line(po, [], si, thr=85)["quarantine"] is True
+
+
+def test_normalize_line_no():
+    """DECISIONS_LOG 5: strip whitespace + leading zeros, keep alphanumerics."""
+    from app.services.matching import normalize_line_no
+
+    assert normalize_line_no("01") == "1"
+    assert normalize_line_no(" 001 ") == "1"
+    assert normalize_line_no("1") == "1"
+    assert normalize_line_no("1a") == "1a"
+    assert normalize_line_no("01a") == "1a"
+    assert normalize_line_no("0") == "0"
+    assert normalize_line_no("") == ""
+    assert normalize_line_no(None) == ""
+
+
+def test_match_leading_zero_line_no():
+    """PO 1 matches DN 01 and SI 001."""
+    from app.services.matching import find_unmatched, match_line
+
+    po = {"line_item_no": "1", "description": "Widget A"}
+    dn = [{"line_item_no": "01", "description": "Widget A", "qty": 10}]
+    si = [{"line_item_no": "001", "description": "Widget A", "qty": 10}]
+    assert match_line(po, dn, si, thr=85)["matched"] is True
+    assert find_unmatched([po], dn, si, thr=85) == []
+
+
+def test_match_alphanumeric_line_no():
+    from app.services.matching import match_line
+
+    po = {"line_item_no": "1a", "description": "Widget A"}
+    dn = [{"line_item_no": "1a", "description": "Widget A", "qty": 10}]
+    assert match_line(po, dn, [], thr=85)["matched"] is True

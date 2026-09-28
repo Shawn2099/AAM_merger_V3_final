@@ -1,11 +1,23 @@
 def test_normalize():
+    """F1: label words and ERP revision counters are stripped from the key.
+
+    These expectations CHANGED in v20.5 compliance. The old rule produced
+    "PO1234" for "PO-1234", which meant a real PO printed as "PO 161538" on the
+    header and "161538" on its delivery notes landed in two different PO Sets
+    and could never reconcile. See FINDINGS_AND_FIXES_R1.md F1.
+    """
     from app.services.grouping import normalize_po_no
 
-    assert normalize_po_no("PO-1234") == "PO1234"
-    assert normalize_po_no("po 1234") == "PO1234"
-    assert normalize_po_no("PO/1234") == "PO1234"
-    assert normalize_po_no("22398, 0") == "223980"
+    assert normalize_po_no("PO-1234") == "1234"
+    assert normalize_po_no("po 1234") == "1234"
+    assert normalize_po_no("PO/1234") == "1234"
+    assert normalize_po_no("PO1234") == "1234"
+    # trailing ", 0" is an ERP revision counter, not part of the number
+    assert normalize_po_no("22398, 0") == "22398"
     assert normalize_po_no("100-060-0000") == "1000600000"
+    # structured codes keep every real segment
+    assert normalize_po_no("D7264-PO-186000-013-01") == "D7264PO18600001301"
+    assert normalize_po_no("P106420232") == "P106420232"
 
 
 def test_grouping_same_set():
@@ -196,7 +208,9 @@ def test_dn_never_mints_orphan_set(tmp_path):
                 doc_type=DocType.DN,
                 extraction_status=ExtractionStatus.valid,
                 po_set_id=None,
-                po_no_normalized="PODECOY",
+                # F1: the "PO" label is stripped from the grouping key, so the
+                # stored key for "PO_DECOY" is "DECOY" (see test_normalize).
+                po_no_normalized="DECOY",
                 dn_no="DN-X",
             )
         )

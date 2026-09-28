@@ -1076,3 +1076,201 @@ def test_combined_full_sections_merges(tmp_path):
         ps_after = s.get(POSet, ps_id)
         assert ps_after.status == POSetStatus.merged
         assert ps_after.merged_output_path is not None
+
+
+def _make_po_combined_set(tmp_path, po_qty, comb_qty, suffix):
+    """Fixture helper: PO doc + COMBINED doc (verified sections) in one set."""
+    import json
+    from pathlib import Path
+
+    from sqlalchemy.orm import Session
+
+    from app.core.config import load_config
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus, LineItem, POSet, POSetStatus
+    from app.models.base import Base
+
+    cfg = load_config("config.example.yaml")
+    cfg.paths.database_path = str(tmp_path / f"pocomb_{suffix}.db")
+    cfg.paths.stored_documents_folder = str(tmp_path / f"stored_pocomb_{suffix}")
+    cfg.paths.output_folder = str(tmp_path / f"out_pocomb_{suffix}")
+    Path(cfg.paths.stored_documents_folder).mkdir(parents=True, exist_ok=True)
+    Path(cfg.paths.output_folder).mkdir(parents=True, exist_ok=True)
+
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO_COMB", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+
+        po_pdf = tmp_path / f"stored_pocomb_{suffix}" / "po.pdf"
+        _create_dummy_pdf(po_pdf)
+        po_doc = Document(
+            sha256_hash=f"h_pocomb_po_{suffix}",
+            original_filename="po.pdf",
+            stored_path=str(po_pdf),
+            doc_type=DocType.PO,
+            extraction_status=ExtractionStatus.valid,
+            po_set_id=ps_id,
+            po_no_normalized="PO_COMB",
+        )
+        s.add(po_doc)
+        s.commit()
+        s.add(
+            LineItem(
+                document_id=po_doc.id,
+                line_item_no="1",
+                description="Combo Widget",
+                quantity=po_qty,
+                unit_price=100000,
+            )
+        )
+
+        comb_pdf = tmp_path / f"stored_pocomb_{suffix}" / "combined.pdf"
+        _create_dummy_pdf(comb_pdf)
+        comb_doc = Document(
+            sha256_hash=f"h_pocomb_comb_{suffix}",
+            original_filename="combined.pdf",
+            stored_path=str(comb_pdf),
+            doc_type=DocType.COMBINED,
+            extraction_status=ExtractionStatus.valid,
+            po_set_id=ps_id,
+            po_no_normalized="PO_COMB",
+            invoice_no="INV-POCOMB-1",
+            si_no="INV-POCOMB-1",
+            raw_extraction_json=json.dumps(
+                {"has_po_section": True, "has_dn_section": True, "has_si_section": True}
+            ),
+        )
+        s.add(comb_doc)
+        s.commit()
+        s.add(
+            LineItem(
+                document_id=comb_doc.id,
+                line_item_no="1",
+                description="Combo Widget",
+                quantity=comb_qty,
+                unit_price=100000,
+            )
+        )
+        s.commit()
+    return ps_id, cfg, eng
+
+
+def test_combined_with_po_exact_merges_both_pools(tmp_path):
+    """Option A: COMBINED qty == PO qty deducts cleanly from both pools - merged."""
+    from sqlalchemy.orm import Session
+
+    from app.models import POSet, POSetStatus
+    from app.services.reconciliation import reconcile_po_set
+
+    ps_id, cfg, eng = _make_po_combined_set(tmp_path, 5000, 5000, "exact")
+    res = reconcile_po_set(ps_id, cfg)
+    assert res["status"] == "merged"
+    with Session(eng) as s:
+        ps_after = s.get(POSet, ps_id)
+        assert ps_after.status == POSetStatus.merged
+        assert ps_after.merged_output_path is not None
+
+
+def test_combined_with_po_overflow_merges_neither_pool(tmp_path):
+    """Option A atomic: COMBINED over-supply fails both pools, nothing merges."""
+    from sqlalchemy.orm import Session
+
+    from app.models import POSet, POSetStatus
+    from app.services.reconciliation import reconcile_po_set
+
+    ps_id, cfg, eng = _make_po_combined_set(tmp_path, 5000, 6000, "over")
+    res = reconcile_po_set(ps_id, cfg)
+    assert res["status"] == "mismatched"
+    with Session(eng) as s:
+        ps_after = s.get(POSet, ps_id)
+        assert ps_after.status == POSetStatus.mismatched
+        assert ps_after.merged_output_path is None
+
+
+def test_combined_excludes_separate_dn_si_lines(tmp_path):
+    """FR-14.7 in reconciliation: COMBINED is authoritative - separate DN/SI
+    lines must NOT also count, or quantities double and the set strands at
+    mismatched forever (caught by probe, fixed by pool exclusivity)."""
+    import json
+
+    from sqlalchemy.orm import Session
+
+    from app.core.config import load_config
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus, LineItem, POSet, POSetStatus
+    from app.models.base import Base
+    from app.services.reconciliation import reconcile_po_set
+
+    cfg = load_config("config.example.yaml")
+    cfg.paths.database_path = str(tmp_path / "comb_excl.db")
+    cfg.paths.stored_documents_folder = str(tmp_path / "stored_comb_excl")
+    cfg.paths.output_folder = str(tmp_path / "out_comb_excl")
+    cfg.paths.quarantine_folder = str(tmp_path / "quar_comb_excl")
+    for d in ("stored_comb_excl", "out_comb_excl", "quar_comb_excl"):
+        (tmp_path / d).mkdir(parents=True, exist_ok=True)
+
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO_EXCL", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        pid = ps.id
+
+        specs = [
+            ("po", DocType.PO, 5000, {}, "PO_EXCL"),
+            ("dn", DocType.DN, 5000, {}, "PO_EXCL"),
+            ("si", DocType.SI, 5000, {"si_no": "INV-1", "invoice_no": "INV-1"}, "PO_EXCL"),
+            (
+                "comb",
+                DocType.COMBINED,
+                5000,
+                {
+                    "si_no": "INV-C",
+                    "invoice_no": "INV-C",
+                    "raw_extraction_json": json.dumps(
+                        {"has_po_section": True, "has_dn_section": True, "has_si_section": True}
+                    ),
+                },
+                "PO_EXCL",
+            ),
+        ]
+        for name, dtype, qty, extra, po_no in specs:
+            pdf = tmp_path / "stored_comb_excl" / f"{name}.pdf"
+            _create_dummy_pdf(pdf)
+            d = Document(
+                sha256_hash=f"h_excl_{name}",
+                original_filename=f"{name}.pdf",
+                stored_path=str(pdf),
+                doc_type=dtype,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=pid,
+                po_no_normalized=po_no,
+                **extra,
+            )
+            s.add(d)
+            s.commit()
+            s.add(
+                LineItem(
+                    document_id=d.id,
+                    line_item_no="1",
+                    description="Widget",
+                    quantity=qty,
+                    unit_price=100000,
+                )
+            )
+            s.commit()
+
+    res = reconcile_po_set(pid, cfg)
+    assert res["status"] == "merged"
+    assert not res.get("flags")
+    with Session(eng) as s:
+        assert s.get(POSet, pid).status == POSetStatus.merged
