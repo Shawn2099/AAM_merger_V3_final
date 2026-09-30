@@ -221,6 +221,178 @@ def test_sterile_parent_never_attaches_and_sweep_ignores_it(tmp_path, monkeypatc
         assert s.query(POSet).count() == 0
 
 
+def test_children_reextract_attach_and_merge_end_to_end(tmp_path, monkeypatch):
+    """The whole PLAN promise in one test: combined PDF -> sterile parent +
+    child files -> next run ingests children (linkage) -> each re-extracts
+    fresh as a single-section doc -> attach -> reconcile -> merged packet.
+    The old same-run children design is gone; this is the two-run loop."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import POSet
+    from app.services.extraction import extract_document
+    from app.services.grouping import (
+        attach_unattached_to_open_sets,
+        get_or_create_po_set,
+    )
+    from app.services.ingestion import ingest_file
+    from app.services.reconciliation import reconcile_po_set
+
+    cfg = _cfg(tmp_path, "w7.db")
+    # Distinct page widths so each cut child has distinct bytes (blank
+    # same-size pages would hash identically and dedup to one row).
+    from pypdf import PdfWriter
+
+    from app.services.ingestion import ingest_file as _ingest
+
+    src = Path(cfg.paths.input_folder) / "combined.pdf"
+    w = PdfWriter()
+    for width in (100, 200, 300):
+        w.add_blank_page(width=width, height=200)
+    src.parent.mkdir(parents=True, exist_ok=True)
+    with open(src, "wb") as f:
+        w.write(f)
+    doc = _ingest(src, cfg)
+    resp = _resp(_comp("PO", 1, 1), _comp("DN", 2, 2), _comp("SI", 3, 3))
+    monkeypatch.setattr("app.services.extraction._call_vlm", lambda *a, **kw: resp)
+    extract_document(doc.id, cfg)
+
+    # ---- next run: child files are discovered and ingested (with linkage)
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        parent = s.get(Document, doc.id)
+        sha16 = parent.sha256_hash[:16]
+    kids = []
+    for i in (1, 2, 3):
+        kids.append(ingest_file(Path(cfg.paths.input_folder) / f"{sha16}_p{i}.pdf", cfg))
+    assert all(k.parent_document_id == doc.id for k in kids)
+
+    # ---- each child re-extracts fresh as an ordinary single-section doc
+    def single(dtype, number, po_ref, line_no="1", qty="100"):
+        d = {
+            "PO": ("PO-100", None),
+            "DN": ("GDN-1", "PO-100"),
+            "SI": ("INV-E2E", "PO-100"),
+        }[dtype]
+        return {
+            "document_type": dtype,
+            "document_number": d[0],
+            "po_no_raw": d[1] or d[0],
+            "po_reference": d[1],
+            "po_reference_ambiguous": False,
+            "vendor_name": "ACME",
+            "line_items": [
+                {
+                    "line_item_no": line_no,
+                    "description": "Widget",
+                    "quantity": qty,
+                    "unit_price": "10.00",
+                    "dn_no": None,
+                }
+            ],
+        }
+
+    order = ["PO", "DN", "SI"]
+    for kid, dtype in zip(kids, order, strict=True):
+        monkeypatch.setattr(
+            "app.services.extraction._call_vlm", lambda *a, _d=dtype, **kw: single(_d, None, None)
+        )
+        extract_document(kid.id, cfg)
+
+    with Session(eng) as s:
+        kinds = {
+            s.get(Document, k.id).doc_type.value: s.get(Document, k.id).extraction_status.value
+            for k in kids
+        }
+    assert kinds == {"PO": "valid", "DN": "valid", "SI": "valid"}
+
+    # ---- attach (PO mints, DN/SI join) and reconcile to a merged packet
+    get_or_create_po_set("PO-100", cfg)
+    attach_unattached_to_open_sets(cfg)
+    with Session(eng) as s:
+        sets = {s.get(Document, k.id).po_set_id for k in kids}
+        assert len(sets) == 1 and None not in sets
+        ps_id = sets.pop()
+        assert s.get(Document, doc.id).po_set_id is None  # parent stays out
+    res = reconcile_po_set(ps_id, cfg)
+    assert res["status"] == "merged", res
+    assert [p.name for p in Path(cfg.paths.output_folder).glob("*.pdf")] == ["INV-E2E.pdf"]
+    with Session(eng) as s:
+        assert s.get(POSet, ps_id).status.value == "merged"
+
+
+def test_crash_before_stamp_rederives_children(tmp_path, monkeypatch):
+    """`split_completed_at` is the authority: a parent stamped sterile but
+    never stamped (crash between cut and commit) re-derives its children
+    from the parent SHA instead of trusting them to exist."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.services.extraction import extract_document
+
+    cfg = _cfg(tmp_path, "w8.db")
+    doc = _ingest_parent(tmp_path, cfg)
+    resp = _resp(_comp("PO", 1, 1), _comp("DN", 2, 2), _comp("SI", 3, 3))
+    monkeypatch.setattr("app.services.extraction._call_vlm", lambda *a, **kw: resp)
+    extract_document(doc.id, cfg)
+
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        parent = s.get(Document, doc.id)
+        sha16 = parent.sha256_hash[:16]
+        parent.split_completed_at = None  # the crash: cut happened, stamp lost
+        s.commit()
+    orphan = next(Path(cfg.paths.input_folder).glob(f"{sha16}_p*.pdf"))
+    orphan.unlink()  # and a child file went missing too
+
+    extract_document(doc.id, cfg)  # recovery re-runs the split
+
+    with Session(eng) as s:
+        assert s.get(Document, doc.id).split_completed_at is not None
+    assert len(list(Path(cfg.paths.input_folder).glob(f"{sha16}_p*.pdf"))) == 3
+
+
+def test_reupload_of_combined_dedups_to_parent(tmp_path, monkeypatch):
+    """Re-uploading the same combined bytes hits the parent SHA
+    (`is_split_parent=True`) → same row, no duplicate children."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.services.extraction import extract_document
+    from app.services.ingestion import ingest_file
+
+    cfg = _cfg(tmp_path, "w9.db")
+    doc = _ingest_parent(tmp_path, cfg)
+    resp = _resp(_comp("PO", 1, 1), _comp("DN", 2, 2), _comp("SI", 3, 3))
+    monkeypatch.setattr("app.services.extraction._call_vlm", lambda *a, **kw: resp)
+    extract_document(doc.id, cfg)
+
+    # The operator drops the same file into input/ again.
+    again = Path(cfg.paths.input_folder) / "combined.pdf"
+    again.write_bytes(Path(doc.stored_path).read_bytes())
+    dup = ingest_file(again, cfg)
+    assert dup.id == doc.id
+    assert dup.is_split_parent is True
+    extract_document(dup.id, cfg)
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        parent = s.get(Document, doc.id)
+        sha16 = parent.sha256_hash[:16]
+    assert len(list(Path(cfg.paths.input_folder).glob(f"{sha16}_p*.pdf"))) == 3
+
+
+def test_unknown_child_prefix_never_links(tmp_path):
+    """A `<sha>_p<i>.pdf` name with no matching split parent stays a normal
+    document — linkage must never guess."""
+    from app.services.ingestion import ingest_file
+
+    cfg = _cfg(tmp_path, "w10.db")
+    stray = Path(cfg.paths.input_folder) / "deadbeefcafe1234_p1.pdf"
+    stray.write_bytes(b"%PDF-1.4 stray")
+    doc = ingest_file(stray, cfg)
+    assert doc.parent_document_id is None
+
+
 def test_resplit_is_idempotent_no_duplicate_children(tmp_path, monkeypatch):
     from app.services.extraction import extract_document
 

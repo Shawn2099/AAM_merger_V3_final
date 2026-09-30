@@ -196,6 +196,34 @@ def test_unknown_line_type_falls_back_to_goods(harness):
     limitations â€” a tax row the VLM fails to exclude will be summed."""
 
 
+def test_unexcluded_tax_row_summed_and_mismatches(harness):
+    """PRODUCT §8 M-limitation, behavioural pin: a tax row the VLM failed to
+    exclude is summed like any other line. DN total 110 vs PO 100 mismatches
+    (safe direction — false quarantine, never a wrong merge). SI pool agrees,
+    proving the verdict comes from the DN pool alone."""
+    build, eng, cfg = harness
+    pid = build(
+        [
+            ("PO", [{"no": "1", "qty": 100}], {}),
+            (
+                "DN",
+                [
+                    {"no": "1", "qty": 100},
+                    {"no": "1", "qty": 10, "desc": "VAT 10%"},
+                ],
+                {},
+            ),
+            ("SI", [{"no": "1", "qty": 100}], {"si_no": "I1", "invoice_no": "I1"}),
+        ]
+    )
+    res = reconcile_po_set(pid, cfg)
+    assert res["status"] == "mismatched"
+    assert _status(eng, pid)[1] is None, "must not merge with a tax-inflated total"
+    dn_flags = [f for f in res["flags"] if f.get("pool") == "DN" and f.get("type") == "quantity"]
+    assert dn_flags and all(f["vendor_quantity"] == 110 for f in dn_flags)
+    assert not [f for f in res["flags"] if f.get("pool") == "SI"], "SI pool agreed"
+
+
 def test_zero_quantity_line_quarantines_whole_set(harness):
     build, eng, cfg = harness
     pid = build(
@@ -212,6 +240,41 @@ def test_zero_quantity_line_quarantines_whole_set(harness):
     res = reconcile_po_set(pid, cfg)
     assert res["status"] == "quarantined"
     assert _status(eng, pid)[1] is None
+
+
+def test_second_set_with_taken_invoice_name_quarantines(harness):
+    """One invoice number covering two PO Sets: the first merges, the second
+    quarantines with packet_naming_failed instead of clobbering the delivered
+    packet. Fail closed, never overwrite."""
+    from pathlib import Path
+
+    build, eng, cfg = harness
+    first = build(
+        [
+            ("PO", [{"no": "1", "qty": 100}], {}),
+            ("DN", [{"no": "1", "qty": 100}], {}),
+            ("SI", [{"no": "1", "qty": 100}], {"si_no": "DUP-INV", "invoice_no": "DUP-INV"}),
+        ],
+        po_no="PO-FIRST",
+    )
+    assert reconcile_po_set(first, cfg)["status"] == "merged"
+    packet = Path(cfg.paths.output_folder) / "DUP-INV.pdf"
+    assert packet.exists()
+    before = packet.read_bytes()
+
+    second = build(
+        [
+            ("PO", [{"no": "1", "qty": 50}], {}),
+            ("DN", [{"no": "1", "qty": 50}], {}),
+            ("SI", [{"no": "1", "qty": 50}], {"si_no": "DUP-INV", "invoice_no": "DUP-INV"}),
+        ],
+        po_no="PO-SECOND",
+    )
+    res = reconcile_po_set(second, cfg)
+    assert res["status"] == "quarantined"
+    assert res["reason"] == "packet_naming_failed"
+    assert packet.read_bytes() == before, "delivered packet must not be clobbered"
+    assert _status(eng, second)[1] is None
 
 
 def test_reason_is_persisted_for_dashboard(harness):

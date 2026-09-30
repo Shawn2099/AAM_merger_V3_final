@@ -310,6 +310,46 @@ def test_force_merge_bypasses_and_writes_audit(tmp_path):
         assert ps.merged_output_path == str(out)
 
 
+def test_force_merge_audit_carries_evidence(tmp_path):
+    """Every Force Merge writes one audit row carrying the customs document
+    count, the output filename, and the operator justification — the
+    accountability record for a no-auth LAN tool."""
+    import json
+
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import AuditAction, AuditLog, POSetStatus
+    from app.services.merge import force_merge
+
+    cfg = _cfg_with_tmp(tmp_path)
+    po_set_id = _create_poset_with_docs(
+        tmp_path,
+        cfg,
+        status=POSetStatus.mismatched,
+        docs_info=[
+            {"doc_type": "SI", "si_no": "INV-AUDIT", "width": 400},
+            {"doc_type": "PO", "width": 200},
+        ],
+    )
+    note = "CA phoned vendor; short delivery arrives next week, ship now."
+    force_merge(po_set_id, cfg, justification=note)
+
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        rows = (
+            s.query(AuditLog)
+            .filter(AuditLog.action == AuditAction.force_merge, AuditLog.po_set_id == po_set_id)
+            .all()
+        )
+        assert len(rows) == 1
+        detail = json.loads(rows[0].detail)
+        assert detail["output_name"] == "INV-AUDIT.pdf"
+        assert "customs_doc_count" in detail
+        assert rows[0].justification == note
+        assert rows[0].source == "system"
+
+
 def test_zero_evidence_auto_merge_refused(tmp_path):
     """W-22: auto-merge with zero line items refuses, status untouched."""
     from sqlalchemy.orm import Session

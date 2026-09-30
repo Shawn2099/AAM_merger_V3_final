@@ -277,7 +277,33 @@ def force_merge(po_set_id: int, cfg, justification: str | None = None) -> Path:
         note = validate_justification(justification)
 
         if ps.status == POSetStatus.merged and ps.merged_output_path is not None:
-            return Path(ps.merged_output_path)
+            # Idempotent no-op returning the existing packet — but the press
+            # itself is still audited (PRODUCT §6: every Force Merge writes a
+            # row). Intent is what the log records, not just effects.
+            out = Path(ps.merged_output_path)
+            customs_count = sum(
+                1
+                for d in (ps.documents or [])
+                if _doc_type_val(d) in (DocType.CUSTOMS.value, DocType.SHIPPING.value)
+            )
+            detail = json.dumps(
+                {
+                    "customs_doc_count": customs_count,
+                    "output_name": out.name,
+                    "already_merged": True,
+                }
+            )
+            s.add(
+                AuditLog(
+                    po_set_id=ps.id,
+                    action=AuditAction.force_merge,
+                    detail=detail,
+                    source="system",
+                    justification=note,
+                )
+            )
+            s.commit()
+            return out
 
         ordered = _ordered_docs(ps, cfg)
         if not ordered:

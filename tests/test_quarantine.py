@@ -250,6 +250,85 @@ def test_manual_merge_isolated(tmp_path):
         assert s.query(POSet).count() == 0
 
 
+def test_justification_boundary(tmp_path):
+    """None/blank stays None (existing callers keep working); under 20 chars
+    raises; 20+ is kept stripped. A checkbox-length note is not a 'why'."""
+    import pytest
+
+    from app.services.quarantine import MIN_JUSTIFICATION_CHARS, validate_justification
+
+    assert MIN_JUSTIFICATION_CHARS == 20
+    assert validate_justification(None) is None
+    assert validate_justification("") is None
+    assert validate_justification("   ") is None
+    with pytest.raises(ValueError, match="at least 20"):
+        validate_justification("x" * 19)
+    assert validate_justification("  " + "y" * 20 + "  ") == "y" * 20
+
+
+def test_delete_audit_carries_evidence_and_survives_its_set(tmp_path):
+    """quarantine_delete audit: real detail (po_no + doc count), justification
+    kept, row survives the set's deletion via SET NULL, files stay on disk."""
+    import json
+
+    from sqlalchemy.orm import Session
+
+    from app.core.config import load_config
+    from app.core.database import get_engine
+    from app.models import (
+        AuditAction,
+        AuditLog,
+        DocType,
+        Document,
+        ExtractionStatus,
+        POSet,
+        POSetStatus,
+    )
+    from app.models.base import Base
+    from app.services.quarantine import delete_quarantined
+
+    cfg = load_config("config.example.yaml")
+    cfg.paths.database_path = str(tmp_path / "del_audit.db")
+    cfg.paths.stored_documents_folder = str(tmp_path / "stored")
+    (tmp_path / "stored").mkdir(parents=True, exist_ok=True)
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    pdf = tmp_path / "stored" / "q.pdf"
+    pdf.write_bytes(b"%PDF-1.4 quaran")
+
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO-DEL", status=POSetStatus.quarantined)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+        s.add(
+            Document(
+                sha256_hash="h_del",
+                original_filename="q.pdf",
+                stored_path=str(pdf),
+                doc_type=DocType.DN,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=ps_id,
+            )
+        )
+        s.commit()
+
+    audit = delete_quarantined(
+        ps_id, cfg, justification="Operator reviewed, wrong vendor file." * 2
+    )
+    assert audit.action == AuditAction.quarantine_delete
+    detail = json.loads(audit.detail)
+    assert detail == {"po_no_normalized": "PO-DEL", "document_count": 1}
+    assert len(audit.justification) >= 20
+    with Session(eng) as s:
+        assert s.get(POSet, ps_id) is None
+        kept = s.query(AuditLog).filter(AuditLog.action == AuditAction.quarantine_delete).one()
+        assert kept.po_set_id is None  # SET NULL fired, row survived
+        assert json.loads(kept.detail)["po_no_normalized"] == "PO-DEL"
+    assert pdf.exists(), "stored copy is the audit trail, never deleted"
+
+
 def test_manual_merge_output_user_selectable(tmp_path):
     """FR-14.12: manual_merge output can be written to user-chosen location (not forced to output_folder)."""
     from app.services.quarantine import manual_merge

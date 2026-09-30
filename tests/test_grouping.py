@@ -174,6 +174,67 @@ def test_resolve_ambiguous_dn_stays_unattached(tmp_path):
         assert orphan.po_set_id is None
 
 
+def test_sibling_prefix_across_two_sets_refuses(tmp_path):
+    """Same 4-part filename prefix claimed by two different open sets → no
+    first-wins guess. The filename heuristic is the weakest strategy (runs
+    last, after dn_no and PO-line anchors); on ambiguity the doc waits."""
+    from sqlalchemy.orm import Session
+
+    from app.core.config import load_config
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus
+    from app.models.base import Base
+    from app.services.grouping import resolve_unattached_documents
+
+    cfg = load_config("config.example.yaml")
+    cfg.paths.database_path = tmp_path / "test_prefix_ambig.db"
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+
+    with Session(eng) as s:
+        ps_a = POSet(po_no_normalized="PO_AAAA", status=POSetStatus.pending)
+        ps_b = POSet(po_no_normalized="PO_BBBB", status=POSetStatus.pending)
+        s.add_all([ps_a, ps_b])
+        s.commit()
+        s.refresh(ps_a)
+        s.refresh(ps_b)
+        # Same first-4-part prefix, different sets. dn_no left null on all
+        # three so only the filename strategy can fire.
+        for tag, ps_id, name in (
+            ("a", ps_a.id, "SIV-DTS-25-477-A.pdf"),
+            ("b", ps_b.id, "SIV-DTS-25-477-B.pdf"),
+        ):
+            s.add(
+                Document(
+                    sha256_hash=f"h_pref_{tag}",
+                    original_filename=name,
+                    stored_path="dummy.pdf",
+                    doc_type=DocType.SI,
+                    extraction_status=ExtractionStatus.valid,
+                    po_set_id=ps_id,
+                    po_no_normalized="PO_AAAA" if tag == "a" else "PO_BBBB",
+                )
+            )
+        s.add(
+            Document(
+                sha256_hash="h_pref_orphan",
+                original_filename="SIV-DTS-25-477-C.pdf",
+                stored_path="dummy2.pdf",
+                doc_type=DocType.DN,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=None,
+                po_no_normalized=None,
+            )
+        )
+        s.commit()
+
+    resolve_unattached_documents(cfg)
+
+    with Session(eng) as s:
+        orphan = s.query(Document).filter(Document.sha256_hash == "h_pref_orphan").first()
+        assert orphan.po_set_id is None
+
+
 def test_dn_never_mints_orphan_set(tmp_path):
     """BLOCKER-5: DN/SI must not mint sets from decoy codes — they wait
     unattached until a PO anchors the key (wait indefinitely)."""
