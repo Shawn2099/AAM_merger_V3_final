@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,39 +23,40 @@ def _doc_type_val(doc) -> str:
         return str(dt)
 
 
-def _invoice_name(po_set: POSet, loose: bool = False) -> str | None:
-    """FR-14.5: filename is Invoice/SI number.
+def _si_number(po_set: POSet) -> str | None:
+    """The packet's invoice number, read from the SI document.
 
-    Standard sets name strictly from the SI doc (W-2). COMBINED-only sets
-    and force-merge use the loose fallback (any doc's si_no/invoice_no),
-    since no SI doc may exist there.
+    Strictly the SI document — a number printed on a DN or a PO is never used
+    to name the packet, because a packet named from the wrong document is
+    worse than an unnamed one.
     """
-    docs = po_set.documents or []
-    # prefer SI's si_no/invoice_no
+    docs = list(po_set.documents or [])
     for d in docs:
-        if _doc_type_val(d) == DocType.SI.value:
-            si_no = getattr(d, "si_no", None)
-            if si_no:
-                return si_no  # type: ignore[return-value]
-            inv = getattr(d, "invoice_no", None)
-            if inv:
-                return inv  # type: ignore[return-value]
-    if not loose:
-        return None
-    # for COMBINED or fallback, try any doc with si_no/invoice_no
-    for d in docs:
-        si_no = getattr(d, "si_no", None)
-        if si_no:
-            return si_no  # type: ignore[return-value]
-        inv = getattr(d, "invoice_no", None)
-        if inv:
-            return inv  # type: ignore[return-value]
+        if _doc_type_val(d) != DocType.SI.value:
+            continue
+        n = getattr(d, "si_no", None) or getattr(d, "invoice_no", None)
+        if n:
+            return n
     return None
 
 
-# Default packet order (DECISIONS_LOG §8) — kept as code fallback so callers
-# without cfg behave exactly as before. config.yaml merge.legal_order wins.
-DEFAULT_LEGAL_ORDER = ["SI", "DN", "PO", "COMBINED", "SHIPPING", "CUSTOMS"]
+def _any_invoice_number(po_set: POSet) -> str | None:
+    """Any document's invoice/SI number. Force Merge only.
+
+    Force Merge is the operator's explicit override; it must still produce a
+    file when the SI number is missing, so it may look wider than the auto
+    path does. The auto path uses `_si_number` and nothing else.
+    """
+    for d in po_set.documents or []:
+        n = getattr(d, "si_no", None) or getattr(d, "invoice_no", None)
+        if n:
+            return n
+    return None
+
+
+# Default packet order — kept as code fallback so callers without cfg behave
+# exactly as configured. config.yaml merge.legal_order wins.
+DEFAULT_LEGAL_ORDER = ["SI", "DN", "PO", "SHIPPING", "CUSTOMS"]
 
 
 def _ordered_docs(po_set: POSet, cfg=None) -> list:
@@ -62,28 +64,6 @@ def _ordered_docs(po_set: POSet, cfg=None) -> list:
     groups: dict[str, list] = {}
     for d in docs:
         groups.setdefault(_doc_type_val(d), []).append(d)
-    si = groups.get(DocType.SI.value, [])
-    dn = groups.get(DocType.DN.value, [])
-    po = groups.get(DocType.PO.value, [])
-    combined = groups.get(DocType.COMBINED.value, [])
-    if combined and (si or dn or po):
-        # FR-14.7: the COMBINED bundle is the authoritative merge; separate
-        # docs remain visible in the set but are excluded from this packet —
-        # merging both would double the content in one delivery.
-        excluded = [getattr(d, "original_filename", "?") for d in si + dn + po]
-        logger.warning(
-            "PO Set %s: COMBINED authoritative, excluding separate docs %s",
-            getattr(po_set, "id", "?"),
-            excluded,
-        )
-        docs = [
-            d
-            for d in docs
-            if _doc_type_val(d) not in {DocType.SI.value, DocType.DN.value, DocType.PO.value}
-        ]
-        groups = {}
-        for d in docs:
-            groups.setdefault(_doc_type_val(d), []).append(d)
     # Order: config merge.legal_order (editable, DECISIONS_LOG §8);
     # types absent from the order append in first-seen order so new manual
     # types (e.g. AWB) never silently vanish from a packet.
@@ -105,13 +85,6 @@ def _ordered_docs(po_set: POSet, cfg=None) -> list:
     return ordered
 
 
-def _is_blocked(po_set: POSet) -> bool:
-    if not po_set.has_customs_toggle:
-        return False
-    vals = {_doc_type_val(d) for d in (po_set.documents or [])}
-    return not (DocType.CUSTOMS.value in vals and DocType.SHIPPING.value in vals)
-
-
 class MergeNamingError(RuntimeError):
     """The merged packet cannot be named unambiguously.
 
@@ -125,29 +98,31 @@ def _safe_stem(value: str) -> str:
     return "".join(c for c in str(value) if c.isalnum() or c in ("-", "_", "."))
 
 
-def _packet_name(po_set: POSet, loose: bool = False) -> tuple[str | None, bool]:
-    """Filename stem and whether the invoice number was missing.
+def _packet_name(po_set: POSet) -> tuple[str | None, bool]:
+    """Filename stem, and whether the invoice number was missing.
 
-    Prefers `<invoice_no>_<po_no>`: one commercial invoice can cover several
-    POs, so invoice_no alone collides and overwrites sibling packets.
+    Preferred: the SI document's own number, and only that. A number printed on
+    a DN or a PO is never used, because a packet named from the wrong document
+    is worse than an unnamed one.
 
-    When no invoice number was extracted we fall back to `<po_no>` rather than
-    refusing to deliver. The quantities are what reconciliation proves, so a
-    missing label must not veto an otherwise correct packet — but the caller is
-    told, via the flag, so the gap stays visible instead of passing silently.
-    A PO number alone is safe as a filename: one open set exists per PO key at
-    a time, and a genuine duplicate still raises in _resolve_output_path.
+    Fallback: the PO number, when no invoice number was extracted at all. The
+    quantities are what reconciliation proves, so a missing label must not veto
+    an otherwise correct packet. The caller is told via the second element so
+    the gap stays visible on the dashboard instead of passing silently.
+
+    A PO number alone is safe as a filename: only one open set exists per PO key
+    at a time, and a genuine duplicate still raises in `_resolve_output_path`.
     """
-    po = (po_set.po_no_normalized or "").strip()
-    po_stem = _safe_stem(po) if po else ""
-    invoice = _invoice_name(po_set, loose=loose)
-    if not invoice:
-        if not po_stem:
-            return None, True
-        return po_stem, True
-    if not po_stem:
-        return _safe_stem(invoice), True
-    return f"{_safe_stem(invoice)}_{po_stem}", False
+    si_no = _si_number(po_set)
+    if si_no:
+        stem = _safe_stem(si_no)
+        if stem:
+            return stem, False
+    po_no = (po_set.po_no_normalized or "").strip()
+    stem = _safe_stem(po_no) if po_no else ""
+    if stem:
+        return stem, True
+    return None, True
 
 
 def _resolve_output_path(
@@ -157,7 +132,7 @@ def _resolve_output_path(
 
     Re-merging this same set onto its own existing file is fine. Any other
     collision means two different sets would share a filename, so we raise
-    rather than disambiguate silently.
+    rather than disambiguate silently. The caller quarantines the set.
     """
     out = output_folder / f"{safe}.pdf"
     if current_path and Path(current_path).resolve() == out.resolve():
@@ -196,8 +171,15 @@ def _write_merged(ordered: list, out: Path, allow_missing: bool = False) -> Path
 def merge_po_set(po_set_id: int, cfg, info: dict | None = None) -> Path | None:
     """Auto-merge only when reconciled (FR-14.1). Returns None if not eligible.
 
-    Order: SI→DN→PO→(SHIPPING→CUSTOMS) (FR-14.3). Filename = <invoice_no>_<po_no>,
-    falling back to <po_no> when no invoice number was extracted.
+    Order comes from `cfg.merge.legal_order` (default SI→DN→PO→
+    SHIPPING→CUSTOMS); types absent from that list append in first-seen order.
+
+    Filename is the SI's own number, falling back to the PO number when no
+    invoice number was extracted. It is NOT `<invoice_no>_<po_no>` — an
+    earlier version of this docstring claimed a two-part name, which the code
+    has never produced. See `_packet_name`, which is the single place the
+    naming rule lives.
+
     Immutable once merged (FR-14.6/14.7): first-completed wins.
 
     `info`, when given, is populated with naming details for the caller to
@@ -222,7 +204,13 @@ def merge_po_set(po_set_id: int, cfg, info: dict | None = None) -> Path | None:
         )
         if ps.status in blocked:
             return None
-        if _is_blocked(ps):
+        # Single source of truth for the customs gate. This used to be a
+        # byte-for-byte private copy living in this module, which meant the
+        # merge path could silently drift from the reconciliation path's
+        # version of the same rule.
+        from app.services.customs import is_blocked
+
+        if is_blocked(ps):
             return None
 
         ordered = _ordered_docs(ps, cfg)
@@ -237,17 +225,16 @@ def merge_po_set(po_set_id: int, cfg, info: dict | None = None) -> Path | None:
             logger.warning("Auto-merge refused for PO Set %s: zero line-item evidence", po_set_id)
             return None
 
-        stem, invoice_missing = _packet_name(
-            ps,
-            loose=any(_doc_type_val(d) == DocType.COMBINED.value for d in (ps.documents or [])),
-        )
+        # Named from the SI document's own number, falling back to the PO
+        # number when no invoice number was extracted at all. The fallback is
+        # reported through `info` so the reviewer sees the gap.
+        stem, invoice_missing = _packet_name(ps)
         if not stem:
             raise MergeNamingError(
                 f"PO Set {po_set_id} cannot be named: no invoice number and no PO number"
             )
-        safe = _safe_stem(stem) or stem
         out = _resolve_output_path(
-            safe, ps.id, Path(cfg.paths.output_folder), ps.merged_output_path
+            stem, ps.id, Path(cfg.paths.output_folder), ps.merged_output_path
         )
         if info is not None:
             info["output_name"] = out.name
@@ -271,10 +258,12 @@ def merge_po_set(po_set_id: int, cfg, info: dict | None = None) -> Path | None:
 
 
 def force_merge(po_set_id: int, cfg, justification: str | None = None) -> Path:
-    """Force merge unconditional — bypasses matching/customs gates (FR-14.8-14.10).
+    """Force merge unconditional — bypasses the reconciliation and customs gates.
 
-    Still immutable if already merged (FR-14.6): returns existing.
-    Writes AuditLog force_merge with customs count.
+    The operator's explicit override. Still immutable once merged: returns the
+    existing packet rather than rewriting it. Every path writes a force_merge
+    audit row carrying the customs document count AND the operator's written
+    justification.
     """
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
@@ -291,74 +280,44 @@ def force_merge(po_set_id: int, cfg, justification: str | None = None) -> Path:
             return Path(ps.merged_output_path)
 
         ordered = _ordered_docs(ps, cfg)
-        # also include COMMERCIAL_INVOICE optionally at end if no other docs provide content
-        # but spec says merge with whatever CUSTOMS/SHIPPING exist (0,1,2) — so just use ordered
-        # If ordered empty (no recognizable docs), try all docs as fallback
         if not ordered:
             ordered = list(ps.documents or [])
 
+        # Force Merge may look wider than the auto path for a name (any
+        # document's invoice number, then the PO number) because the operator
+        # asked for a file regardless. It still refuses a 0-page packet.
         if not ordered:
-            # still create empty? better raise — but spec says merge with whatever exists
-            # create empty placeholder out
-            invoice = _invoice_name(ps, loose=True) or ps.po_no_normalized
-            safe = "".join(c for c in str(invoice) if c.isalnum() or c in ("-", "_", "."))
-            if not safe:
-                safe = ps.po_no_normalized
-            out = _resolve_output_path(
-                safe, ps.id, Path(cfg.paths.output_folder), ps.merged_output_path
+            raise MergeNamingError(
+                f"PO Set {po_set_id} has no documents to merge — nothing to write"
             )
-            out.parent.mkdir(parents=True, exist_ok=True)
-            PdfWriter().write(str(out))
-            ps.merged_output_path = str(out)
-            ps.merged_at = datetime.now(UTC)
-            ps.status = POSetStatus.merged
-            # audit even for empty
-            customs_count = sum(
-                1
-                for d in (ps.documents or [])
-                if _doc_type_val(d) in (DocType.CUSTOMS.value, DocType.SHIPPING.value)
-            )
-            detail = f'{{"customs_doc_count": {customs_count}}}'
-            s.add(
-                AuditLog(
-                    po_set_id=ps.id,
-                    action=AuditAction.force_merge,
-                    detail=detail,
-                    source="system",
-                    justification=note,
-                )
-            )
-            s.commit()
-            s.refresh(ps)
-            assert ps.merged_output_path is not None
-            return Path(ps.merged_output_path)
-
-        invoice = _invoice_name(ps, loose=True) or ps.po_no_normalized
-        safe = "".join(c for c in str(invoice) if c.isalnum() or c in ("-", "_", "."))
+        name_source = _any_invoice_number(ps) or ps.po_no_normalized
+        safe = _safe_stem(name_source)
         if not safe:
-            safe = str(invoice)
+            raise MergeNamingError(
+                f"PO Set {po_set_id} cannot be named: no invoice number and no PO number"
+            )
         out = _resolve_output_path(
             safe, ps.id, Path(cfg.paths.output_folder), ps.merged_output_path
         )
-        _write_merged(ordered, out, allow_missing=True)
+        _write_merged(ordered, out, allow_missing=False)
 
         ps.merged_output_path = str(out)
         ps.merged_at = datetime.now(UTC)
         ps.status = POSetStatus.merged
 
-        # FR-14.10 audit log with customs count
         customs_count = sum(
             1
             for d in (ps.documents or [])
             if _doc_type_val(d) in (DocType.CUSTOMS.value, DocType.SHIPPING.value)
         )
-        detail = f'{{"customs_doc_count": {customs_count}}}'
+        detail = json.dumps({"customs_doc_count": customs_count, "output_name": out.name})
         s.add(
             AuditLog(
                 po_set_id=ps.id,
                 action=AuditAction.force_merge,
                 detail=detail,
                 source="system",
+                justification=note,
             )
         )
         s.commit()

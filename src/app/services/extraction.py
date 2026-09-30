@@ -1,12 +1,18 @@
-"""VLM extraction — Luna native PDF via instructor+OpenRouter, no mocks in prod (FR-6.1-6.8).
+"""VLM extraction — one native-PDF call per document via instructor+OpenRouter.
 
 Secrets: OPENROUTER_API_KEY only via env/.env (fail-closed, never logged).
-Model: cfg.vlm.model (openai/gpt-5.6-luna) from config.yaml, never hardcoded.
+Model: read from cfg.vlm.model, never hardcoded here.
+
+The VLM's entire job is PDF -> structured extraction. Every decision after this
+point is deterministic code (AAM_merger_V3_PRODUCT.md). The schema below is the
+whole contract with the model: if a value is not a field here, it is not
+extracted, stored, or matched on.
 """
 
 from __future__ import annotations
 
 import base64
+import logging
 import os
 from pathlib import Path
 from typing import Literal
@@ -20,6 +26,8 @@ from app.core.database import get_engine
 from app.models import Document, ExtractionStatus
 from app.models.base import Base
 
+logger = logging.getLogger(__name__)
+
 # --- Ultimate Luna prompt — strict JSON Schema via instructor response_model, OpenAI vision guide ---
 # System role enforces parser identity; user role carries PDF + schema. No pypdf, no filename heuristic.
 # Multi-page: first page header for PO/DN/SI numbers, each page table row for line_items.
@@ -29,8 +37,10 @@ _SYSTEM_PROMPT = (
     "has_po_section:bool, has_dn_section:bool, has_si_section:bool, "
     "document_number (own SI No/DN No/PO No or null for COMBINED), "
     "po_reference (the PO No visible for SI/DN/COMBINED, null for PO), "
-    'vendor_name, line_items[] {line_item_no, description, quantity:str raw as printed e.g. "1" "12.5", dn_no}, '
-    "confidence high/medium/low. COMBINED = single PDF containing PO+DN+SI sections together (CA merged). Omit nulls, no markdown."
+    "po_reference_ambiguous:bool, "
+    "vendor_name, line_items[] {line_item_no, description, quantity: NUMBER-ONLY as printed "
+    "(no unit/UOM/currency), dn_no}. "
+    "COMBINED = single PDF containing PO+DN+SI sections together (CA merged). Omit nulls, no markdown."
 )
 
 _PAGE_PROMPT = (
@@ -57,15 +67,24 @@ _PAGE_PROMPT = (
     "Most vendors print the DN number once in the header, not per line.\n"
     "  For COMBINED: emit union of all sections but do NOT duplicate sections.\n"
     "  EXCLUDE subtotal, VAT, tax, total, amount-in-words, payment terms, signatures.\n\n"
-    "STEP 4 — QUANTITY (copy verbatim, do NOT calculate, do NOT scale):\n"
-    '  quantity: exact string as printed ("1", "50", "12.5")\n\n'
-    "STEP 5 — MULTI-PAGE / MULTI-DN: if PDF contains 2-3 DNs or COMBINED multi-page, emit first po_reference, include ALL line_items across pages in order.\n\n"
+    "STEP 4 — QUANTITY (the NUMBER ONLY; do NOT calculate, do NOT scale):\n"
+    '  quantity = the digits as printed, and nothing else. "1", "50", "12.5", "12.45000000".\n'
+    "  Strip anything that is not part of the number: unit / UOM (EA, PCS, BOX, KG, M, M3, "
+    "MT, BAGS), currency symbols, and words like EACH or SET. If the cell reads "
+    "'12.5 EA' return \"12.5\"; if it reads '1,200.00 M3' return \"1200.00\".\n"
+    "  UOM itself is NOT extracted anywhere in this system. Never return it.\n\n"
+    "STEP 5 — MULTI-PAGE / MULTI-DN: if PDF contains 2-3 DNs or COMBINED multi-page, emit first po_reference, include ALL line_items across pages in order.\n"
+    "STEP 6 — MULTI-DOC SPLIT (COMBINED branch only): enumerate each contiguous same-type run as a component "
+    "with its REAL PDF page indices (1-based position in this file as pypdf sees it, never numbers printed on the page). "
+    "A page that continues the current PO/DN/SI extends the run; a page that changes type ends the run and starts a new component. "
+    "A page that is none of PO/DN/SI (cover, T&C, blank) is a SKIP component so every page 1..N is claimed exactly once. "
+    "Also return page_count = the total number of pages in this file.\n\n"
     "FEW-SHOTS (raw strings, copy verbatim):\n"
-    'SI: {"document_type":"SI","document_number":"SIV-ARS-26-4005","po_reference":"210851","vendor_name":"IBRAHIM ALI ALSHAB TRADING EST.","confidence":"high","line_items":[{"line_item_no":"12","description":"NUT, HEX 9/16 IN-12 UNC GRADE B YELLOW ZINC PLATED","quantity":"50","unit_price":"350.00"}]}\n'
+    'SI: {"document_type":"SI","document_number":"SIV-ARS-26-4005","po_reference":"210851","vendor_name":"IBRAHIM ALI ALSHAB TRADING EST.","line_items":[{"line_item_no":"12","description":"NUT, HEX 9/16 IN-12 UNC GRADE B YELLOW ZINC PLATED","quantity":"50","unit_price":"350.00"}]}\n'
     'PO: {"document_type":"PO","document_number":"210851","po_reference":null,"line_items":[{"line_item_no":"1","description":"WASHER, FLAT SAE 1/4 IN YELLOW ZINC PLATED CS","quantity":"1","unit_price":"1620.00"}]}\n'
     'DN bundle: {"document_type":"DN","document_number":"GDN-ARS-26-4619","po_reference":"210851","line_items":[{"line_item_no":"1","description":"WASHER, LOCK, 3/8\\" - MFG: FLY","quantity":"50","unit_price":"1000.00"}]}\n'
     'Re-indexed DN (side column lies, use the embedded marker): {"document_type":"DN","document_number":"GDN-RHO-25-513","po_reference":"8300023893","line_items":[{"line_item_no":"10","description":"GATE VALVE 2IN CL150 - Line Item - 10","quantity":"2","dn_no":"GDN-RHO-25-513"}]}\n'
-    'COMBINED: {"document_type":"COMBINED","document_number":"SIV-RAK-25-3049","po_reference":"3049PO123","line_items":[{"line_item_no":"1","description":"WASHER, FLAT SAE 1/4 IN","quantity":"50","unit_price":"120.00"}],"confidence":"high"}\n'
+    'COMBINED: {"document_type":"COMBINED","document_number":"SIV-RAK-25-3049","po_reference":"3049PO123","line_items":[{"line_item_no":"1","description":"WASHER, FLAT SAE 1/4 IN","quantity":"50","unit_price":"120.00"}]}\n'
 )
 
 
@@ -79,7 +98,17 @@ class _VLMLineItem(BaseModel):
         ),
     )
     description: str | None = None
-    quantity: str | None = None  # raw as printed, e.g. "1", "12.5"
+    # The NUMBER ONLY. UOM, unit symbols and currency are stripped: this system
+    # does not extract, store or reconcile units, so a unit in this field would
+    # only make the strict parser reject an otherwise legible row.
+    quantity: str | None = Field(
+        None,
+        description=(
+            'The numeric quantity as printed, digits only: "1", "50", "12.5", '
+            '"12.45000000". No unit, no UOM, no currency, no surrounding text. '
+            'A cell reading "12.5 EA" is returned as "12.5".'
+        ),
+    )
     dn_no: str | None = Field(
         None, description="Delivery-note number printed against THIS row, if any."
     )
@@ -89,11 +118,33 @@ class _VLMLineItem(BaseModel):
     unit_price: str | None = None  # raw as printed, e.g. "1620.00", "350.00"
 
 
+class _VLMComponent(BaseModel):
+    """One contiguous same-type run for the Layer-1 split (PLAN Rev 2 §0.6).
+
+    `page_start`/`page_end` are 1-based indices into the real PDF file
+    (pypdf ground truth), never numbers printed on the page. A page that is
+    not a continuation of PO/DN/SI is `SKIP` so coverage stays complete.
+    """
+
+    doc_type: Literal["PO", "DN", "SI", "SKIP"] = Field(
+        ..., alias="document_type", description="Type of this page run."
+    )
+    page_start: int = Field(..., ge=1, description="1-based first PDF page index.")
+    page_end: int = Field(..., ge=1, description="1-based last PDF page index.")
+
+    model_config = {"populate_by_name": True}
+
+
 class _VLMPageExtraction(BaseModel):
     document_type: Literal["PO", "SI", "DN", "COMBINED", "SKIP", "UNKNOWN"] = Field(...)
     has_po_section: bool = False
     has_dn_section: bool = False
     has_si_section: bool = False
+    # Multi-doc split (PLAN Step 4): total PDF pages (cross-checked against
+    # pypdf) plus one entry per contiguous same-type run. Single-section
+    # documents leave both at their defaults; no extra VLM call.
+    page_count: int = Field(default=0, ge=0)
+    components: list[_VLMComponent] = Field(default_factory=list)
     document_number: str | None = None
     po_reference: str | None = None
     po_reference_ambiguous: bool = Field(
@@ -105,36 +156,22 @@ class _VLMPageExtraction(BaseModel):
         ),
     )
     vendor_name: str | None = None
-    confidence: Literal["high", "medium", "low"] = "medium"
     line_items: list[_VLMLineItem] = Field(default_factory=list)
 
 
-LINE_TYPES = ("GOODS", "FREIGHT", "TAX", "FEE", "SERVICE", "DISCOUNT")
-
-
-def _norm_line_type(value: str | None) -> str:
-    """Clamp the VLM's row-kind label to the known set; anything unknown is GOODS.
-
-    Fail-safe direction: a mislabelled item row stays GOODS (it is still
-    reconciled), and only an explicitly non-item row is excluded from quantity
-    math. A wrongly excluded row surfaces as an unmatched-line quarantine,
-    never as a silent bad merge.
-    """
-    v = (value or "").strip().upper()
-    return v if v in LINE_TYPES else "GOODS"
-
-
 def is_manual_only(doc_type: str) -> bool:
-    return doc_type in ("CUSTOMS", "SHIPPING", "COMMERCIAL_INVOICE")
+    return doc_type in ("CUSTOMS", "SHIPPING")
 
 
 def _parse_scaled_int(val: int | float | str | None, locale: str = "en_IN") -> int:
-    """Parse raw quantity/price string into exact integer scaled x1000 (SPEC §6.4).
+    """Parse a raw quantity/price string into an exact integer scaled x1000.
 
-    Delegates to sanitizer (babel strict locale, DECISIONS_LOG §4) — LLM copies
-    verbatim, code scales. Invalid (bad grouping, inner spaces, >3 decimals,
-    zero/negative) → 0, which routes the PO Set to quarantine downstream
-    (non_positive_quantity) instead of being silently mis-parsed.
+    The model copies the printed string verbatim; this scales it. Anything the
+    sanitizer refuses (bad grouping, inner spaces, more than 2 significant
+    decimals, zero, negative) becomes 0, which routes the PO Set to quarantine
+    as `non_positive_quantity` rather than being silently mis-parsed.
+
+    See AAM_merger_V3_PRODUCT.md section 5 for the parsing contract.
     """
     from app.services.sanitizer import parse_quantity_scaled
 
@@ -219,31 +256,162 @@ def _call_vlm(stored_path: str, doc_type: str, cfg) -> dict:
         ],
         max_retries=0,  # retries owned by the Prefect task envelope (flows/sync.py), driven by config
     )
-    # Normalize to dict expected by caller — return raw strings (scaling done in extract_document)
+    # Normalize to dict expected by caller — return raw strings (scaling done
+    # in extract_document). Only fields the schema above actually declares may
+    # be read here; anything else raises AttributeError and fails the whole
+    # extraction.
     return {
         "document_type": resp.document_type,
         "has_po_section": resp.has_po_section,
         "has_dn_section": resp.has_dn_section,
         "has_si_section": resp.has_si_section,
+        "page_count": resp.page_count,
+        "components": [
+            {
+                "doc_type": c.doc_type,
+                "document_type": c.doc_type,
+                "page_start": c.page_start,
+                "page_end": c.page_end,
+            }
+            for c in (resp.components or [])
+        ],
         "document_number": resp.document_number,
         "po_no_raw": resp.po_reference or resp.document_number,
         "po_reference": resp.po_reference,
+        "po_reference_ambiguous": resp.po_reference_ambiguous,
         "vendor_name": resp.vendor_name,
-        "confidence": resp.confidence,
         "line_items": [
             {
                 "line_item_no": li.line_item_no,
-                "item_code": li.item_code,
                 "description": li.description,
-                "uom": li.uom,
                 "quantity": li.quantity,
                 "unit_price": li.unit_price,
-                "total_price": li.total_price,
-                "line_type": li.line_type,
+                "dn_no": li.dn_no,
             }
             for li in resp.line_items
         ],
     }
+
+
+def _handle_combined(doc, s, result: dict, cfg) -> Document:
+    """Persist a sterile split parent and cut child files (PLAN Rev 2+3 §6).
+
+    - Child re-reading as COMBINED (`parent_document_id` non-null): never
+      re-split. The child fails and the *parent* quarantines as
+      `child_recombined` — a COMBINED child is otherwise invisible because
+      Layer 2 names no types.
+    - Already-split parent (`is_split_parent` with `split_completed_at` set):
+      idempotent return, no duplicate children.
+    - Normal parent: sterile row (COMBINED/valid, no numbers/set/lines, full
+      raw JSON kept), `split_combined` cuts files into `input/`, parent input
+      copy moves to `combined/`, `split_completed_at` set.
+    - SplitError (any range gate): quarantine the whole parent, mark failed,
+      return normally — validation failures must NOT raise into the Prefect
+      retry envelope and burn VLM calls on a deterministic verdict.
+    """
+    from datetime import UTC, datetime
+
+    from app.models import DocType
+
+    # Loop guard 1: a child never re-enters the splitter.
+    if getattr(doc, "parent_document_id", None) is not None:
+        doc.extraction_status = ExtractionStatus.failed
+        s.commit()
+        s.refresh(doc)
+        try:
+            from app.services.quarantine import quarantine_document
+
+            quarantine_document(
+                doc.parent_document_id,
+                cfg,
+                reason=(
+                    "child_recombined: child "
+                    f"{doc.original_filename} re-read as COMBINED; "
+                    "split parent quarantined for operator review"
+                ),
+            )
+        except Exception:
+            logger.warning(
+                "Could not quarantine split parent %s for recombined child %s",
+                doc.parent_document_id,
+                doc.id,
+                exc_info=True,
+            )
+        logger.error(
+            "Child %s (%s) re-read as COMBINED; parent %s quarantined, child failed",
+            doc.id,
+            doc.original_filename,
+            doc.parent_document_id,
+        )
+        return doc
+
+    # Loop guard 2: already split — idempotent, never duplicate children.
+    if getattr(doc, "is_split_parent", False) and getattr(doc, "split_completed_at", None):
+        doc.doc_type = DocType.COMBINED
+        doc.extraction_status = ExtractionStatus.valid
+        s.commit()
+        s.refresh(doc)
+        return doc
+
+    # Sterile parent: the trigger row carries no data — children own it, so
+    # anything scanning the parent would double-count.
+    doc.doc_type = DocType.COMBINED
+    doc.extraction_status = ExtractionStatus.valid
+    doc.is_split_parent = True
+    doc.po_no_raw = None
+    doc.po_no_normalized = None
+    doc.po_reference_ambiguous = False
+    doc.dn_no = None
+    doc.si_no = None
+    doc.invoice_no = None
+    doc.po_set_id = None
+    for li in list(doc.line_items):
+        s.delete(li)
+    s.flush()
+
+    from app.services.splitting import SplitError, split_combined
+
+    try:
+        split_combined(doc.stored_path, result, cfg)
+    except SplitError as e:
+        doc.extraction_status = ExtractionStatus.failed
+        doc.split_completed_at = None
+        s.commit()
+        s.refresh(doc)
+        try:
+            from app.services.quarantine import quarantine_document
+
+            quarantine_document(doc.id, cfg, reason=f"split_failed:{e.reason}: {e}")
+        except Exception:
+            logger.warning("Could not quarantine failed split parent %s", doc.id, exc_info=True)
+        logger.error(
+            "Split failed for parent %s (%s): %s — quarantined",
+            doc.id,
+            doc.original_filename,
+            e.reason,
+        )
+        return doc
+
+    # Success: parent input copy moves to combined/ (never re-scanned — only
+    # input/ is scanned), children wait in input/ for the next run.
+    try:
+        import shutil
+
+        input_copy = Path(cfg.paths.input_folder) / (doc.original_filename or "")
+        combined_dir = Path(cfg.paths.combined_folder)
+        combined_dir.mkdir(parents=True, exist_ok=True)
+        if input_copy.exists():
+            dest = combined_dir / (doc.original_filename or Path(doc.stored_path).name)
+            if dest.exists():
+                input_copy.unlink(missing_ok=True)
+            else:
+                shutil.move(str(input_copy), str(dest))
+    except Exception:
+        logger.warning("Could not park split parent %s in combined/", doc.id, exc_info=True)
+    doc.split_completed_at = datetime.now(UTC)
+    s.commit()
+    s.refresh(doc)
+    return doc
 
 
 def extract_document(doc_id: int, cfg) -> Document:
@@ -259,9 +427,24 @@ def extract_document(doc_id: int, cfg) -> Document:
             return doc
 
         if (doc.extraction_attempt_count or 0) >= 3:
+            # Attempt cap reached. This is a terminal state, not a no-op: the
+            # document will never be read again until an operator resets the
+            # count (POST /po_sets/{id}/redo_extract). It returns normally
+            # rather than raising so Prefect does not burn its remaining
+            # retries re-raising an already-decided verdict, which means the
+            # CALLER must not treat a clean task return as success — the
+            # persisted status is the source of truth (see
+            # app/flows/sync.py::_persisted_extraction_status).
             doc.extraction_status = ExtractionStatus.failed
             s.commit()
             s.refresh(doc)
+            logger.error(
+                "Extraction permanently failed for doc %s (%s): attempt cap %d reached, "
+                "no further attempts will be made without an operator reset",
+                doc_id,
+                doc.original_filename,
+                doc.extraction_attempt_count,
+            )
             return doc
 
         doc.extraction_attempt_count = (doc.extraction_attempt_count or 0) + 1
@@ -310,18 +493,13 @@ def extract_document(doc_id: int, cfg) -> Document:
             except Exception:
                 pass
 
-            # COMBINED Document Gate (SPEC §7.3 FR-6.7):
-            # A COMBINED document must have all 3 sub-sections (PO, DN, SI) visibly identified.
+            # Multi-doc split (PLAN Rev 2 Step 4): COMBINED is the trigger for a
+            # filesystem split, not a 3-section union. The parent row stays
+            # sterile (no numbers, no set, no lines); children are cut as files
+            # into input/ and re-extracted fresh on the next run. The old
+            # 3-section gate (FR-6.7) and union persistence are deleted.
             if result.get("document_type") == "COMBINED":
-                has_3_sections = (
-                    result.get("has_po_section", False)
-                    and result.get("has_dn_section", False)
-                    and result.get("has_si_section", False)
-                )
-                if not has_3_sections:
-                    raise ValueError(
-                        "COMBINED document missing required PO, DN, or SI sub-sections (FR-6.7)"
-                    )
+                return _handle_combined(doc, s, result, cfg)
 
             doc.extraction_status = ExtractionStatus.valid
             # update doc_type if VLM classified differently (e.g. UNKNOWN -> DN, or SKIP -> UNKNOWN)
@@ -359,11 +537,6 @@ def extract_document(doc_id: int, cfg) -> Document:
                 from app.services.grouping import normalize_po_no
 
                 doc.po_no_normalized = normalize_po_no(result["document_number"])
-            if result.get("document_type") == "COMBINED" and result.get("document_number"):
-                # for COMBINED, treat document_number as invoice_no fallback, keep po_no_raw as po_reference
-                doc.invoice_no = result["document_number"]
-                doc.si_no = result["document_number"]
-
             # persist line items (replace existing for this doc)
             from app.models import LineItem
 
@@ -398,9 +571,7 @@ def extract_document(doc_id: int, cfg) -> Document:
             doc.extraction_status = ExtractionStatus.failed
             s.commit()
             s.refresh(doc)
-            import logging
-
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "VLM extraction failed for doc %s (attempt %s): %s",
                 doc_id,
                 doc.extraction_attempt_count,

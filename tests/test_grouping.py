@@ -176,7 +176,7 @@ def test_resolve_ambiguous_dn_stays_unattached(tmp_path):
 
 def test_dn_never_mints_orphan_set(tmp_path):
     """BLOCKER-5: DN/SI must not mint sets from decoy codes — they wait
-    unattached until a PO/COMBINED anchors the key (wait indefinitely)."""
+    unattached until a PO anchors the key (wait indefinitely)."""
     from sqlalchemy.orm import Session
 
     from app.core.config import load_config

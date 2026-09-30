@@ -22,13 +22,11 @@ def tmp_db(tmp_path):
     cfg.paths.output_folder = tmp_path / "output"
     cfg.paths.quarantine_folder = tmp_path / "quarantine"
     cfg.paths.stored_documents_folder = tmp_path / "stored"
-    cfg.paths.unclassified_folder = tmp_path / "unclassified"
     for p in [
         cfg.paths.input_folder,
         cfg.paths.output_folder,
         cfg.paths.quarantine_folder,
         cfg.paths.stored_documents_folder,
-        cfg.paths.unclassified_folder,
     ]:
         Path(p).mkdir(parents=True, exist_ok=True)
     eng = get_engine(cfg)
@@ -52,15 +50,43 @@ def client(tmp_db, monkeypatch):
 
 
 def _create_po_set(cfg, po_no="PO9999", status=POSetStatus.pending):
+    """Create a PO Set carrying one real stored PDF.
+
+    Force Merge refuses a set with no documents (writing a 0-page packet and
+    marking it merged is exactly the failure this product must not have), so a
+    bare PO Set row is not enough to exercise the lock paths.
+    """
+    from pypdf import PdfWriter
+    from sqlalchemy.orm import Session
+
+    from app.models import DocType, Document, ExtractionStatus
+
+    stored = Path(cfg.paths.stored_documents_folder)
+    stored.mkdir(parents=True, exist_ok=True)
+    pdf = stored / f"{po_no}.pdf"
+    PdfWriter().write(str(pdf))
+
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
-    from sqlalchemy.orm import Session
 
     with Session(eng) as s:
         ps = POSet(po_no_normalized=po_no, status=status)
         s.add(ps)
         s.commit()
         s.refresh(ps)
+        s.add(
+            Document(
+                sha256_hash=f"conc_{po_no}",
+                original_filename=f"{po_no}.pdf",
+                stored_path=str(pdf),
+                doc_type=DocType.SI,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=ps.id,
+                si_no=f"INV-{po_no}",
+                invoice_no=f"INV-{po_no}",
+            )
+        )
+        s.commit()
         return ps.id
 
 
@@ -79,6 +105,58 @@ def test_concurrent_sync_409(client, tmp_db):
         sl.release_sync_lock(holder)
     r_free = client.post("/sync")
     assert r_free.status_code == 200, r_free.text
+
+
+def test_sync_endpoints_ignore_a_caller_supplied_config_path(tmp_db, client, tmp_path):
+    """No endpoint may take a config path from the request.
+
+    `cfg_path` used to be a query parameter on POST /sync and GET /sync/status.
+    Any LAN host could point the pipeline at a YAML file it controlled, which
+    made the app create directories (output_folder, log_folder, ...) as the
+    service account wherever the attacker chose. The parameter is gone; the
+    app resolves its own config. Pinned here so it cannot come back quietly.
+    """
+    attacker_cfg = tmp_path / "attacker.yaml"
+    attacker_cfg.write_text(
+        "paths:\n"
+        "  input_folder: ./data/input\n"
+        f"  output_folder: {tmp_path.as_posix()}/pwned\n"
+        "  quarantine_folder: ./data/quarantine\n"
+        "  stored_documents_folder: ./data/stored\n"
+        "  database_path: ./data/aam_merger.db\n"
+        "  log_folder: ./data/logs\n",
+        encoding="utf-8",
+    )
+
+    before = {p.name for p in tmp_path.iterdir()}
+
+    r_status = client.get("/sync/status", params={"cfg_path": str(attacker_cfg)})
+    assert r_status.status_code == 200
+    assert "running" in r_status.json()
+
+    r_sync = client.post("/sync", params={"cfg_path": str(attacker_cfg)})
+    assert r_sync.status_code == 200
+
+    # The attacker's output_folder was never created. Everything else that
+    # appeared belongs to the app's own config (the sync lock lives next to the
+    # real database), which is exactly the point: the request had no effect.
+    assert not (tmp_path / "pwned").exists()
+    new = {p.name for p in tmp_path.iterdir()} - before
+    assert new <= {".sync.lock", ".sync.started"}, f"unexpected filesystem writes: {new}"
+
+
+def test_no_route_exposes_a_path_or_file_parameter():
+    """Guard: no endpoint may accept a filesystem path from the caller."""
+    from app.main import app
+
+    for path, ops in app.openapi()["paths"].items():
+        for method, op in ops.items():
+            for param in op.get("parameters", []):
+                name = param.get("name", "")
+                assert "path" not in name.lower() or param.get("in") == "path", (
+                    f"{method.upper()} {path} exposes a caller-supplied "
+                    f"{param.get('in')} parameter named {name!r}"
+                )
 
 
 def test_po_lock_409(client, tmp_db):

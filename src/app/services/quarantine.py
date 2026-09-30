@@ -35,9 +35,7 @@ def _set_fingerprint(po_set) -> str:
     """
     import hashlib
 
-    hashes = sorted(
-        (getattr(d, "sha256_hash", "") or "") for d in (po_set.documents or [])
-    )
+    hashes = sorted((getattr(d, "sha256_hash", "") or "") for d in (po_set.documents or []))
     joined = "|".join(hashes)
     return hashlib.sha1(joined.encode("utf-8", "replace")).hexdigest()[:8]
 
@@ -156,9 +154,8 @@ def _po_line_quantities(po_set) -> dict[str, int]:
 
     out: dict[str, int] = {}
     for doc in po_set.documents or []:
-        if (doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)) not in (
-            "PO",
-            "COMBINED",
+        if (doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)) != (
+            "PO"
         ):
             continue
         for li in doc.line_items or []:
@@ -202,9 +199,8 @@ def quarantine_copy(
             po_no = ps.po_no_normalized
             po_line_qty = _po_line_quantities(ps)
     else:
-        folder = (
-            Path(cfg.paths.quarantine_folder)
-            / _safe_po_folder(po_set.po_no_normalized, po_set.id, _set_fingerprint(po_set))
+        folder = Path(cfg.paths.quarantine_folder) / _safe_po_folder(
+            po_set.po_no_normalized, po_set.id, _set_fingerprint(po_set)
         )
         folder.mkdir(parents=True, exist_ok=True)
         for doc in po_set.documents or []:
@@ -213,15 +209,66 @@ def quarantine_copy(
                 continue
             dst = folder / src.name
             shutil.copy(str(src), str(dst))
-        status = (
-            po_set.status.value
-            if hasattr(po_set.status, "value")
-            else str(po_set.status)
-        )
+        status = po_set.status.value if hasattr(po_set.status, "value") else str(po_set.status)
         po_no = po_set.po_no_normalized
         po_line_qty = _po_line_quantities(po_set)
 
     _write_quarantine_report(folder, po_no, status, reason, detail, flags, po_line_qty)
+    return folder
+
+
+def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
+    """Quarantine a single document that could not be processed.
+
+    A document whose extraction permanently failed is broken, and nothing about
+    it can be confirmed, so it is taken out of the running rather than left
+    where the next sync will pick it up again. `ingest_file` copies into
+    `stored/` and leaves the original in the input folder, and input is only
+    cleared when a PO Set merges — so without this, a dead PDF is re-hashed,
+    de-duplicated to the same failed row and re-counted as an error on every
+    single run, forever.
+
+    The stored copy is kept (never moved) so the document row stays valid and
+    an operator can still attach and retry it. Only the input-folder copy is
+    removed, which is what stops the loop.
+
+    Returns the quarantine folder for the document.
+    """
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        doc = s.get(Document, doc_id)
+        if doc is None:
+            raise ValueError(f"Document {doc_id} not found")
+        stored = Path(doc.stored_path)
+        name = stored.name
+        original = doc.original_filename
+        doc_id_out = doc.id
+        attempts = doc.extraction_attempt_count or 0
+        s.expunge(doc)
+
+    folder = Path(cfg.paths.quarantine_folder) / "_documents" / name.replace(".pdf", "")
+    folder.mkdir(parents=True, exist_ok=True)
+    if stored.exists():
+        shutil.copy(str(stored), str(folder / name))
+    (folder / "QUARANTINE.txt").write_text(
+        "\n".join(
+            [
+                "QUARANTINED DOCUMENT",
+                "",
+                f"File        : {original}",
+                f"Document id : {doc_id_out}",
+                f"Attempts    : {attempts}/3 (cap reached, no further automatic attempts)",
+                f"Reason      : {reason}",
+                "",
+                "This file could not be read, so nothing about it could be verified.",
+                "It has been removed from the input folder so it is not retried nightly.",
+                "To retry: enter its PO number on the Unclassified page to attach it to a",
+                "PO Set, then press Redo/Re-extract on that set.",
+            ]
+        ),
+        encoding="utf-8",
+    )
     return folder
 
 

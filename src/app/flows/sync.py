@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import load_config
 from app.core.database import get_engine
+from app.models import ExtractionStatus
 from app.models.base import Base
 
 logger = logging.getLogger(__name__)
@@ -17,12 +18,112 @@ logger = logging.getLogger(__name__)
 #: Doc types allowed to mint a new PO Set (BLOCKER-5). DN/SI/UNKNOWN docs
 #: attach to an already-open set or wait visibly unattached — they must
 #: never mint orphan sets from decoy/secondary PO codes.
-_ANCHOR_TYPES = ("PO", "COMBINED")
+_ANCHOR_TYPES = ("PO",)
 
 
 def _doc_type_val(doc) -> str:
     dt = doc.doc_type
     return dt.value if hasattr(dt, "value") else str(dt)
+
+
+def _persisted_extraction_status(eng, doc_id) -> ExtractionStatus | None:
+    """Re-read a document's stored extraction status.
+
+    The Prefect task's own outcome is NOT a reliable success signal. Prefect
+    places a task in a COMPLETED state whenever it returns any Python object
+    (Prefect v3 docs, "Task return values"), and `extract_document` returns
+    normally on the attempt-cap path — a terminal failure, not a success.
+    Trusting the task return is how a permanently lost document came to be
+    reported as `errors: 0`.
+
+    The document row is the single source of truth for what happened to a
+    file, in the same spirit as batch-recovery guidance to treat the updated
+    tables as the final point of truth regardless of what the log says.
+    """
+    from app.models import Document as _Doc
+
+    with Session(eng) as s:
+        doc = s.get(_Doc, doc_id)
+        if doc is None:
+            return None
+        return doc.extraction_status
+
+
+def _quarantine_broken_document(
+    doc_id: int, cfg, eng, input_file: Path | None, touched_po_set_ids: set[int]
+) -> None:
+    """Take a document that failed permanently out of the running.
+
+    The product rule is that anything broken, or that cannot be confirmed, is
+    quarantined rather than left looking like normal work. That is applied at
+    both levels it can apply to:
+
+    * the document — its input-folder copy is removed and the file is copied
+      into `quarantine/_documents/` with a reason, so the next sync does not
+      re-hash a dead file and re-report it as an error every night;
+    * the PO Set, if the document belongs to one — an unconfirmable set must
+      not sit in an apparently-normal `pending` state waiting on a document
+      that is never going to arrive.
+
+    Never raises: a failure to tidy up must not abort the sync run. The
+    document is already recorded as `failed` and counted in the summary, so a
+    problem here is cosmetic, not a silent loss.
+    """
+    from app.models import Document as _Doc
+    from app.models import POSet, POSetStatus
+    from app.services.quarantine import quarantine_copy, quarantine_document
+
+    try:
+        quarantine_document(
+            doc_id,
+            cfg,
+            reason="Extraction failed permanently (attempt cap reached); "
+            "document content could not be read.",
+        )
+    except Exception:
+        logger.warning("Could not quarantine broken document %s", doc_id, exc_info=True)
+
+    # The input copy is what makes the next run re-encounter this file.
+    if input_file is not None:
+        try:
+            Path(input_file).unlink(missing_ok=True)
+        except Exception:
+            logger.warning(
+                "Could not remove quarantined file from input: %s", input_file, exc_info=True
+            )
+
+    # Quarantine the set too, when there is one. A set containing a document
+    # that cannot be read cannot be confirmed, so it must not look like it is
+    # merely waiting.
+    try:
+        with Session(eng) as s:
+            doc = s.get(_Doc, doc_id)
+            po_set_id = doc.po_set_id if doc else None
+        if po_set_id is not None:
+            with Session(eng) as s:
+                ps = s.get(POSet, po_set_id)
+                if ps is not None and ps.status not in (
+                    POSetStatus.merged,
+                    POSetStatus.quarantined,
+                ):
+                    ps.status = POSetStatus.quarantined
+                    ps.reconcile_reason = (
+                        "Quarantined: a document in this set failed to read, "
+                        "so the set could not be verified."
+                    )
+                    s.commit()
+                    touched_po_set_ids.add(po_set_id)
+                    quarantine_copy(
+                        po_set_id,
+                        cfg,
+                        reason=ps.reconcile_reason,
+                        detail="A member document failed extraction permanently.",
+                    )
+                    logger.error(
+                        "PO Set %s quarantined: a member document failed permanently", po_set_id
+                    )
+    except Exception:
+        logger.warning("Could not quarantine PO Set for document %s", doc_id, exc_info=True)
 
 
 @task(name="extract_task", retries=3, retry_delay_seconds=[2, 5, 15])
@@ -107,7 +208,12 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     from app.models import POSet as _POSet
     from app.models import POSetStatus
     from app.services.grouping import get_or_create_po_set
-    from app.services.ingestion import delete_input_files, ingest_file, is_file_stable
+    from app.services.ingestion import (
+        delete_input_files,
+        find_input_pdfs,
+        ingest_file,
+        is_file_stable,
+    )
     from app.services.reconciliation import reconcile_po_set
 
     input_folder = Path(cfg.paths.input_folder)
@@ -117,8 +223,10 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     errors = 0
     touched_po_set_ids: set[int] = set()
 
-    # Discover PDFs in input folder
-    files = list(input_folder.glob("*.pdf")) + list(input_folder.glob("*.PDF"))
+    # Discover PDFs in input folder. find_input_pdfs matches the suffix
+    # case-insensitively in ONE pass — globbing "*.pdf" and "*.PDF" separately
+    # would double the list on Windows and send every document to the VLM twice.
+    files = find_input_pdfs(input_folder)
     for f in files:
         try:
             # Stability poll (FR-4.5)
@@ -139,8 +247,19 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
             except Exception:
                 logger.warning("Extract task failed for doc %s", doc.id, exc_info=True)
                 errors += 1
+            else:
+                # A clean task return is NOT proof of success — see
+                # _persisted_extraction_status. Count the document from the
+                # row it left behind, and quarantine it if it is broken.
+                if _persisted_extraction_status(eng, doc.id) == ExtractionStatus.failed:
+                    logger.error(
+                        "Extraction did not succeed for doc %s; counted as an error",
+                        doc.id,
+                    )
+                    errors += 1
+                    _quarantine_broken_document(doc.id, cfg, eng, f, touched_po_set_ids)
 
-            # Group into PO Set (FR-7.1-7.2). Only PO/COMBINED mint;
+            # Group into PO Set (FR-7.1-7.2). Only PO mints;
             # DN/SI/UNKNOWN attach to an open set or wait unattached.
             try:
                 with Session(eng) as s2:
@@ -167,8 +286,6 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
             continue
 
     # Also handle pending docs already in DB (e.g. from prior runs)
-    from app.models import ExtractionStatus
-
     with Session(eng) as s:
         pending = s.query(_Doc).filter(_Doc.extraction_status == ExtractionStatus.pending).all()
         for doc in pending:
@@ -177,6 +294,14 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
             except Exception:
                 logger.warning("Extract task failed for pending doc %s", doc.id, exc_info=True)
                 errors += 1
+            else:
+                if _persisted_extraction_status(eng, doc.id) == ExtractionStatus.failed:
+                    logger.error(
+                        "Extraction did not succeed for pending doc %s; counted as an error",
+                        doc.id,
+                    )
+                    errors += 1
+                    _quarantine_broken_document(doc.id, cfg, eng, None, touched_po_set_ids)
             try:
                 d = s.get(_Doc, doc.id)
                 if d and d.po_no_normalized:
@@ -247,7 +372,12 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
 
     return {
         "processed": processed,
-        "extracted": processed - errors,
+        # `processed` counts files that were successfully ingested, while
+        # `errors` counts failures at ANY stage including ingestion itself.
+        # The two are therefore not a partition of the same set, so the
+        # subtraction is clamped — an operator must never be shown a negative
+        # number of extractions.
+        "extracted": max(0, processed - errors),
         "errors": errors,
         "touched_po_sets": len(touched_po_set_ids),
         "reconciled_count": reconciled_count,

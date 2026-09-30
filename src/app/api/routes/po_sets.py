@@ -13,6 +13,7 @@ and ``locked_by_action``; dashboard templates should render buttons with
 
 from __future__ import annotations
 
+import html as _html
 import logging
 
 from fastapi import APIRouter, Form, HTTPException
@@ -21,12 +22,31 @@ from sqlalchemy.orm import Session
 
 from app.core.config import load_config
 from app.core.database import get_engine
-from app.models import POSet
+from app.models import ExtractionStatus, POSet
 from app.models.base import Base
 from app.services.locking import acquire_lock, is_locked, release_lock
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/po_sets", tags=["po_sets"])
+
+
+def _doc_status_badge(status) -> str:
+    """Render a document's extraction state as a labelled badge.
+
+    A reviewer opening a PO Set has to be able to tell at a glance which of
+    its files were actually read and which were not — otherwise a set stuck
+    on `pending` gives no clue why.
+    """
+    val = status.value if hasattr(status, "value") else str(status)
+    if val == ExtractionStatus.valid.value:
+        label, css = "Read", "badge-merged"
+    elif val == ExtractionStatus.failed.value:
+        label, css = "Failed", "badge-failed"
+    elif val == ExtractionStatus.processing.value:
+        label, css = "Reading…", "badge-pending"
+    else:
+        label, css = "Not read", "badge-pending"
+    return f'<span class="badge {css}" style="font-size:0.75rem;">{_html.escape(label)}</span>'
 
 
 def _auto_release_if_stale(ps: POSet, cfg, session: Session) -> bool:
@@ -135,11 +155,55 @@ def get_po_set_detail_html(po_set_id: int):
             if d["is_locked"]
             else ""
         )
+
+        # Related files. The set's status alone does not explain WHY it is
+        # stuck: a set sitting on `pending` because its SI never parsed looks
+        # identical to one waiting for the vendor to send a third document.
+        # Listing the files, with their extraction state, is what makes
+        # Redo/Re-extract an informed action rather than a guess.
+        doc_rows = []
+        for doc in sorted(ps.documents, key=lambda x: (str(x.doc_type), x.original_filename)):
+            dtype = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
+            n_items = len(doc.line_items)
+            failed = doc.extraction_status == ExtractionStatus.failed
+            doc_rows.append(
+                f"<tr>"
+                f'<td><a href="/documents/{doc.id}/preview" target="_blank">'
+                f"{_html.escape(doc.original_filename)}</a></td>"
+                f"<td>{_html.escape(dtype)}</td>"
+                f"<td>{_doc_status_badge(doc.extraction_status)}</td>"
+                f'<td style="text-align:right;">{n_items}</td>'
+                f'<td style="font-size:0.75rem;">'
+                + (
+                    f"{doc.extraction_attempt_count or 0}/3 attempts used — "
+                    f"Redo/Re-extract will retry this file"
+                    if failed
+                    else ""
+                )
+                + "</td></tr>"
+            )
+        if doc_rows:
+            files_html = f"""
+        <h4 style="margin:12px 0 6px;">Related files ({len(doc_rows)})</h4>
+        <table class="data-table" style="margin-bottom:8px;">
+          <thead><tr>
+            <th>File</th><th>Type</th><th>Extraction</th>
+            <th style="text-align:right;">Lines</th><th>Notes</th>
+          </tr></thead>
+          <tbody>{"".join(doc_rows)}</tbody>
+        </table>"""
+        else:
+            files_html = (
+                '<p class="muted" style="margin:12px 0;">No documents are attached to '
+                "this PO Set yet.</p>"
+            )
+
         # minimal HTMX fragment - real dashboard will use richer template
         html = f"""
         <div id=\"po-{po_set_id}\" hx-get=\"/po_sets/{po_set_id}/detail\" hx-trigger=\"every 2s\" hx-swap=\"outerHTML\">
           <h3>PO Set {d["po_no_normalized"]} - {d["status"]}</h3>
           {locked_msg}
+          {files_html}
           <button hx-post=\"/po_sets/{po_set_id}/force_merge\" {disabled}>Force Merge</button>
           <button hx-post=\"/po_sets/{po_set_id}/toggle_customs\" {disabled}>Toggle Customs</button>
           <button hx-delete=\"/po_sets/{po_set_id}/quarantine\" {disabled}>Delete Quarantined</button>
@@ -243,6 +307,42 @@ def redo_extract(po_set_id: int):
         }
     finally:
         _release_lock(po_set_id, cfg, "redo_extract")
+
+
+@router.post("/{po_set_id}/merge")
+def merge_now(po_set_id: int):
+    """Re-evaluate and merge if the set is now eligible (per-PO locked).
+
+    NOT Force Merge. Every gate still applies: quantities must reconcile, the
+    customs toggle must be satisfied, and the packet must be nameable. This is
+    the button an operator presses after finishing manual steps — most often
+    uploading the two customs documents — so they do not have to wait for the
+    midnight sync to notice.
+
+    Safe to press at any time. If the set is not eligible it simply comes back
+    with the status and reason explaining why, and nothing is written.
+    """
+    cfg = load_config()
+    _acquire_lock(po_set_id, "merge", cfg)
+    try:
+        from app.services.reconciliation import reconcile_po_set
+
+        res = reconcile_po_set(po_set_id, cfg)
+        return {
+            "status": res.get("status"),
+            "po_set_id": po_set_id,
+            "merged_output_path": res.get("merged_output_path"),
+            "reason": res.get("reason"),
+            "detail": res.get("detail"),
+            "flags": res.get("flags", []),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Merge failed for PO Set %s: %s", po_set_id, e)
+        raise HTTPException(status_code=422, detail=f"Merge failed: {e}") from e
+    finally:
+        _release_lock(po_set_id, cfg, "merge")
 
 
 @router.post("/{po_set_id}/redo_match")

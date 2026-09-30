@@ -5,20 +5,43 @@ Cross-platform via pathlib. No hardcoded paths. Sync def handlers."""
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import load_config
 from app.core.database import get_engine
-from app.models import AuditLog, DocType, Document, LineItem, POSet, POSetStatus
+from app.models import (
+    AuditLog,
+    DocType,
+    Document,
+    ExtractionStatus,
+    LineItem,
+    POSet,
+    POSetStatus,
+)
 from app.models.base import Base
 from app.services.locking import acquire_lock, is_locked, release_lock
 
 router = APIRouter()
+
+#: Document types an operator may assign by hand on the unclassified page.
+#: Mirrors the `<select>` in `templates/unclassified.html`. The multi-document
+#: packaging type is intentionally absent: Layer 1's split decides it, and it is
+#: not something a human can assert about a single document.
+_HAND_ASSIGNABLE_DOC_TYPES = frozenset(
+    {
+        DocType.PO,
+        DocType.DN,
+        DocType.SI,
+        DocType.CUSTOMS,
+        DocType.SHIPPING,
+    }
+)
 
 # Jinja templates — directory = "templates" (cross-platform, not hardcoded absolute)
 _templates = Jinja2Templates(directory="templates")
@@ -198,7 +221,7 @@ def dashboard_table(request: Request, status: str | None = None):
 
 
 @router.get("/po_sets/{po_set_id}/view", response_class=HTMLResponse)
-def po_set_detail_view(po_set_id: int, request: Request):
+def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = None):
     cfg = load_config()
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
@@ -213,195 +236,104 @@ def po_set_detail_view(po_set_id: int, request: Request):
         docs = s.query(Document).filter_by(po_set_id=po_set_id).all()
         doc_ids = [d.id for d in docs]
         flags = []
+        enriched = []
+        matrix_rows = []
         if doc_ids:
             items = s.query(LineItem).filter(LineItem.document_id.in_(doc_ids)).all()
             doc_type_map = {
                 d.id: (d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type))
                 for d in docs
             }
-            enriched = []
-            for li in items:
-                enriched.append(
-                    {
-                        "line_item_no": li.line_item_no,
-                        "description": li.description,
-                        "quantity": li.quantity,
-                        "unit_price": li.unit_price,
-                        "doc_type": doc_type_map.get(li.document_id, ""),
-                    }
-                )
+            enriched = [
+                {
+                    "line_item_no": li.line_item_no,
+                    "description": li.description,
+                    "quantity": li.quantity,
+                    "unit_price": li.unit_price,
+                    "doc_type": doc_type_map.get(li.document_id, ""),
+                }
+                for li in items
+            ]
 
-            # compute reconciliation flags in priority order (FR-11.2)
-            from app.services.matching import _norm, find_unmatched, match_line
-            from app.services.reconciliation import check_price, reconcile
+            # The detail view runs the SAME comparison the engine runs, so the
+            # verdict on screen is the verdict that set the status. It is a
+            # preview only: nothing here writes state.
+            from app.services.reconciliation import REASON_TEXT, compare_po_set_lines
 
             po_lines = [li for li in enriched if li["doc_type"] == "PO"]
             dn_lines = [li for li in enriched if li["doc_type"] == "DN"]
             si_lines = [li for li in enriched if li["doc_type"] == "SI"]
             thr = getattr(cfg.matching, "fuzzy_description_threshold", 85)
 
-            # (1) Identification flags
-            unmatched = find_unmatched(po_lines, dn_lines, si_lines, thr=thr)
-            for u in unmatched:
-                u_item = u.get("line_item_no") or "—"
+            comparison = compare_po_set_lines(po_lines, dn_lines, si_lines, thr)
+
+            if comparison["po_fail"]:
                 flags.append(
                     {
                         "priority": 1,
                         "badge": "badge-quarantined",
                         "type": "Identification Mismatch",
-                        "message": f"Unmatched line item #{u_item}: {u.get('description')}",
+                        "message": REASON_TEXT[comparison["po_fail"]],
                     }
                 )
-            for p in po_lines:
-                m_res = match_line(p, dn_lines, si_lines, thr=thr)
-                if m_res.get("quarantine"):
-                    p_item = p.get("line_item_no") or "—"
+
+            for f in comparison["flags"]:
+                if f["type"] == "identification":
                     flags.append(
                         {
                             "priority": 1,
                             "badge": "badge-quarantined",
-                            "type": "Identification Conflict",
-                            "message": f"Conflicting line item #{p_item}: {p.get('description')}",
+                            "type": "Identification Mismatch",
+                            "message": f"{f['pool']} line has no matching PO line",
                         }
                     )
-
-            # (2) Quantity flags & (3) Price flags
-            for p in po_lines:
-                p_no = p.get("line_item_no")
-                p_desc = p.get("description") or ""
-                if p_no:
-                    matching_dn = [d for d in dn_lines if d.get("line_item_no") == p_no]
-                    matching_si = [s for s in si_lines if s.get("line_item_no") == p_no]
                 else:
-                    from rapidfuzz import fuzz
-
-                    matching_dn = [
-                        d
-                        for d in dn_lines
-                        if not d.get("line_item_no")
-                        and fuzz.token_sort_ratio(_norm(p_desc), _norm(d.get("description") or ""))
-                        >= thr
-                    ]
-                    matching_si = [
-                        s
-                        for s in si_lines
-                        if not s.get("line_item_no")
-                        and fuzz.token_sort_ratio(_norm(p_desc), _norm(s.get("description") or ""))
-                        >= thr
-                    ]
-
-                agg_dn = sum(d["quantity"] for d in matching_dn)
-                agg_si = sum(s["quantity"] for s in matching_si)
-                rec = reconcile(p["quantity"], agg_dn, agg_si)
-                if not rec["ok"]:
-                    po_q = p["quantity"] / 1000
-                    dn_q = agg_dn / 1000
-                    si_q = agg_si / 1000
+                    po_q = (f["po_quantity"] or 0) / 1000
+                    v_q = (f["vendor_quantity"] or 0) / 1000
+                    verb = "delivered" if f["pool"] == "DN" else "invoiced"
                     flags.append(
                         {
                             "priority": 2,
                             "badge": "badge-mismatched",
                             "type": "Quantity Mismatch",
-                            "message": (
-                                f"Line #{p_no or '—'}: PO ({po_q:g}) != "
-                                f"DN ({dn_q:g}) or SI ({si_q:g})"
-                            ),
+                            "message": f"Line #{f['line_item_no']}: {verb} {v_q:g} of {po_q:g}",
                         }
                     )
-                if matching_si:
-                    p_check = check_price(p["unit_price"], matching_si[0]["unit_price"])
-                    if p_check["flag"]:
-                        po_pr = p["unit_price"] / 1000
-                        si_pr = matching_si[0]["unit_price"] / 1000
-                        flags.append(
-                            {
-                                "priority": 3,
-                                "badge": "badge-pending",
-                                "type": "Price Flag",
-                                "message": (
-                                    f"Line #{p_no or '—'}: PO price ({po_pr:g}) != "
-                                    f"SI price ({si_pr:g})"
-                                ),
-                            }
-                        )
 
-            # Compute 3-Way Reconciliation Comparison Matrix rows
-            matrix_rows = []
-            combined_lines = [li for li in enriched if li["doc_type"] == "COMBINED"]
-            base_lines = po_lines if po_lines else combined_lines
+            # Per-PO-line 3-way matrix, built from the same totals the
+            # comparison just used. Keys are normalised so a PO printing "01"
+            # lines up with a DN printing "1".
+            from app.services.matching import normalize_line_no
 
-            for p in base_lines:
-                p_no = p.get("line_item_no")
-                p_desc = p.get("description") or ""
-                if p_no:
-                    matching_dn = [d for d in dn_lines if d.get("line_item_no") == p_no]
-                    matching_si = [s for s in si_lines if s.get("line_item_no") == p_no]
+            for p in po_lines:
+                key = normalize_line_no(p.get("line_item_no"))
+                agg_dn = comparison["dn_totals"].get(key, 0) / 1000
+                agg_si = comparison["si_totals"].get(key, 0) / 1000
+                po_q = p["quantity"] / 1000
+                reconciled = (dn_lines and agg_dn * 1000 == p["quantity"]) and (
+                    si_lines and agg_si * 1000 == p["quantity"]
+                )
+                if reconciled:
+                    row_class, badge, verdict = "row-match", "badge-merged", "✅ Match"
                 else:
-                    from rapidfuzz import fuzz
-
-                    matching_dn = [
-                        d
-                        for d in dn_lines
-                        if not d.get("line_item_no")
-                        and fuzz.token_sort_ratio(_norm(p_desc), _norm(d.get("description") or ""))
-                        >= thr
-                    ]
-                    matching_si = [
-                        s
-                        for s in si_lines
-                        if not s.get("line_item_no")
-                        and fuzz.token_sort_ratio(_norm(p_desc), _norm(s.get("description") or ""))
-                        >= thr
-                    ]
-
-                agg_dn = sum(d["quantity"] for d in matching_dn)
-                agg_si = sum(s["quantity"] for s in matching_si)
-                rec = reconcile(p["quantity"], agg_dn, agg_si) if po_lines else {"ok": True}
-                price_flag = False
-                si_pr = None
-                if matching_si:
-                    p_check = check_price(p["unit_price"], matching_si[0]["unit_price"])
-                    price_flag = p_check["flag"]
-                    si_pr = matching_si[0]["unit_price"] / 1000
-
-                if not rec["ok"]:
-                    row_class = "row-mismatch"
-                    v_badge = "badge-mismatched"
-                    po_g = p["quantity"] / 1000
-                    dn_g = agg_dn / 1000
-                    si_g = agg_si / 1000
-                    v_text = f"❌ Mismatch (PO: {po_g:g}, DN: {dn_g:g}, SI: {si_g:g})"
-                elif price_flag:
-                    row_class = "row-match"
-                    v_badge = "badge-pending"
-                    v_text = "⚠️ Price Difference"
-                else:
-                    row_class = "row-match"
-                    v_badge = "badge-merged"
-                    v_text = "✅ Match"
-
+                    row_class, badge = "row-mismatch", "badge-mismatched"
+                    verdict = f"❌ Mismatch (PO: {po_q:g}, DN: {agg_dn:g}, SI: {agg_si:g})"
                 matrix_rows.append(
                     {
-                        "line_item_no": p_no or "—",
-                        "description": p_desc,
-                        "po_qty": p["quantity"] / 1000,
-                        "dn_agg_qty": (agg_dn / 1000) if dn_lines else (p["quantity"] / 1000),
-                        "si_agg_qty": (agg_si / 1000) if si_lines else (p["quantity"] / 1000),
-                        "dn_count": len(matching_dn),
-                        "si_count": len(matching_si),
+                        "line_item_no": key or "—",
+                        "description": p.get("description") or "",
+                        "po_qty": po_q,
+                        "dn_agg_qty": agg_dn,
+                        "si_agg_qty": agg_si,
                         "po_price": p["unit_price"] / 1000,
-                        "si_price": si_pr,
+                        "si_price": None,
                         "row_class": row_class,
-                        "badge": v_badge,
-                        "verdict": v_text,
+                        "badge": badge,
+                        "verdict": verdict,
                     }
                 )
 
             flags.sort(key=lambda f: f["priority"])
-
-        else:
-            enriched = []
-            matrix_rows = []
 
         has_merged_file = bool(ps.merged_output_path and Path(ps.merged_output_path).exists())
         unclassified_count = s.query(Document).filter(Document.doc_type == DocType.UNKNOWN).count()
@@ -419,6 +351,7 @@ def po_set_detail_view(po_set_id: int, request: Request):
                 "is_locked": locked,
                 "has_merged_file": has_merged_file,
                 "unclassified_count": unclassified_count,
+                "notice": notice,
             },
         )
 
@@ -458,7 +391,7 @@ def download_merged_pdf(po_set_id: int):
 
 
 # ---------------------------------------------------------------------------
-# Manual document upload (CUSTOMS/SHIPPING/COMMERCIAL_INVOICE) — cross-platform
+# Manual document upload (CUSTOMS/SHIPPING) — cross-platform
 # ---------------------------------------------------------------------------
 
 
@@ -476,11 +409,10 @@ def upload_manual_doc(
     if doc_type not in (
         DocType.CUSTOMS.value,
         DocType.SHIPPING.value,
-        DocType.COMMERCIAL_INVOICE.value,
     ):
         raise HTTPException(
             status_code=422,
-            detail=f"doc_type must be CUSTOMS/SHIPPING/COMMERCIAL_INVOICE, got {doc_type}",
+            detail=f"doc_type must be CUSTOMS or SHIPPING, got {doc_type}",
         )
     # lock check (per-PO)
     with Session(eng) as s:
@@ -511,8 +443,39 @@ def upload_manual_doc(
             safe_name = Path(file.filename or "upload.pdf").name
             if Path(safe_name).suffix.lower() != ".pdf":
                 raise HTTPException(status_code=422, detail="only .pdf uploads accepted")
-            # dedup by hash BEFORE writing (W-12): duplicates are idempotent
+            # Dedup by hash BEFORE writing (W-12). Identical bytes are ONE
+            # document: `documents.sha256_hash` is unique, so a second upload
+            # of the same file cannot create a second row, and re-uploading to
+            # the same set is idempotent.
+            #
+            # The case that used to be a silent no-op: the same PDF already
+            # exists as a document belonging to a DIFFERENT PO Set. The row was
+            # left exactly as it was, not attached here, no error, HTTP 302 to
+            # a page that still showed the gate as unsatisfied. The operator had
+            # no way to tell a working upload from a discarded one, and the
+            # customs gate could never clear. It is now a 409 that names the
+            # owning PO Set.
             existing = s.query(Document).filter_by(sha256_hash=sha).first()
+            if existing is not None and existing.po_set_id == po_set_id:
+                already_attached = True
+            else:
+                already_attached = False
+            if existing is not None and existing.po_set_id not in (None, po_set_id):
+                owner = existing.po_set_id
+                owner_po = None
+                if owner is not None:
+                    owner_ps = s.get(POSet, owner)
+                    owner_po = owner_ps.po_no_normalized if owner_ps else None
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "This exact file is already attached to another PO Set"
+                        + (f" ({owner_po})" if owner_po else f" (id {owner})")
+                        + ". Documents are deduplicated by content, so the same"
+                        " file cannot be attached twice. Remove it from that set"
+                        " first, or upload the correct document."
+                    ),
+                )
             if existing is None:
                 # PDF content sniff (W-12): magic header + readable pages
                 if not data.startswith(b"%PDF"):
@@ -553,6 +516,21 @@ def upload_manual_doc(
             )
             ps.customs_doc_count = cnt
             s.commit()
+            if already_attached:
+                # Same file, same set: nothing changed. Say so rather than
+                # redirecting as if a document had been added. No session
+                # middleware exists, so this rides the query string the way
+                # the other POST routes report outcomes.
+                return RedirectResponse(
+                    url=(
+                        f"/po_sets/{po_set_id}/view?notice="
+                        + quote(
+                            f"That file is already attached to this PO Set "
+                            f"({safe_name}); nothing was changed."
+                        )
+                    ),
+                    status_code=302,
+                )
         except HTTPException:
             raise
         except Exception as e:
@@ -673,7 +651,25 @@ def unclassified_view(request: Request):
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     with Session(eng) as s:
-        docs = s.query(Document).filter(Document.doc_type == DocType.UNKNOWN).all()
+        # The holding area shows untyped documents AND permanently failed ones
+        # of any type: a failure is a loss the operator must see, wherever it
+        # happened. Failed rows never attach (sweeps only take `valid`).
+        docs = (
+            s.query(Document)
+            .filter(
+                or_(
+                    Document.doc_type == DocType.UNKNOWN,
+                    Document.extraction_status == ExtractionStatus.failed,
+                )
+            )
+            .all()
+        )
+        # A document whose extraction has permanently failed is NOT waiting for
+        # a human to classify it — it is a loss. It stays in this view (its
+        # doc_type was never advanced off UNKNOWN) and must be countable
+        # separately, or the holding area reports a clean sheet while holding
+        # files that will never be read.
+        failed_count = sum(1 for d in docs if d.extraction_status == ExtractionStatus.failed)
         return _templates.TemplateResponse(
             request,
             "unclassified.html",
@@ -681,6 +677,7 @@ def unclassified_view(request: Request):
                 "request": request,
                 "documents": docs,
                 "unclassified_count": len(docs),
+                "failed_count": failed_count,
             },
         )
 
@@ -701,19 +698,26 @@ def reclassify_document(
         new_doc_type = DocType(doc_type)
     except Exception as err:
         raise HTTPException(status_code=422, detail=f"Invalid doc_type: {doc_type}") from err
+    # Hand-assignable types, positively enumerated. This is an allowlist rather
+    # than a denylist so that no Layer-2 code has to name a type it must never
+    # produce: the multi-document packaging type is decided by the split in
+    # Layer 1 and has no single-document meaning for an operator to assert here.
+    # Rejecting anything outside the list keeps that rule true automatically as
+    # types are added, instead of relying on one explicit check to be maintained.
+    if new_doc_type not in _HAND_ASSIGNABLE_DOC_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"doc_type {new_doc_type.value} cannot be hand-tagged; "
+                "assign the type of an individual document instead"
+            ),
+        )
 
     with Session(eng) as s:
         doc = s.get(Document, doc_id)
         if doc is None:
             raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
         doc.doc_type = new_doc_type
-        if new_doc_type == DocType.COMBINED:
-            # A hand-tagged COMBINED carries no VLM section evidence — force
-            # re-extraction so the FR-6.7 gate validates it before any merge.
-            from app.models import ExtractionStatus as ES
-
-            doc.extraction_status = ES.pending
-            doc.extraction_attempt_count = 0
         if po_no and po_no.strip():
             from app.services.grouping import normalize_po_no
 

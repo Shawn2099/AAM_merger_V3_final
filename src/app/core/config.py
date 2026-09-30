@@ -19,9 +19,14 @@ class PathsConfig(BaseModel):
     output_folder: Path
     quarantine_folder: Path
     stored_documents_folder: Path
-    unclassified_folder: Path
     database_path: Path
     log_folder: Path
+    # Layer-1 split parking for multi-doc PDFs (PLAN Step 4). Parents live here
+    # after being cut; never re-scanned (only `input_folder` is scanned).
+    combined_folder: Path = Path("./data/combined")
+    # `unclassified_folder` was removed 2026-09-29. Unclassified documents
+    # are identified by `documents.doc_type == UNKNOWN` and surfaced through
+    # the web UI, so no folder was ever written to it.
 
 
 class ServerConfig(BaseModel):
@@ -30,7 +35,8 @@ class ServerConfig(BaseModel):
 
 
 class VLMConfig(BaseModel):
-    provider: str = "openrouter"
+    # `provider` was removed 2026-09-29: OpenRouter was the only supported
+    # provider and nothing read the key, so it could only ever be misleading.
     model: str = "openai/gpt-6-luna"
     request_timeout_seconds: int = 60
     api_key_env_var: str = "OPENROUTER_API_KEY"
@@ -42,14 +48,16 @@ class ExtractionConfig(BaseModel):
 
 
 class MatchingConfig(BaseModel):
+    # The only matching knob that is read. `group_by_line_no` takes this as
+    # its description-similarity threshold, used solely for rows that carry
+    # no usable line number.
+    #
+    # Removed 2026-09-29 as dead config: `sanity_description_threshold`,
+    # `fuzzy_margin` and `enable_sku_rescue` all belonged to the retired v20.5
+    # matcher and were read by nothing. They were worse than inert — an
+    # `enable_sku_rescue: true` next to a matcher that has no SKU rescue
+    # invites someone to "fix" a feature that no longer exists.
     fuzzy_description_threshold: int = Field(ge=0, le=100, default=85)
-    # v20.5 3-step guards (DECISIONS_LOG §10). sanity: an exact line_no hit whose
-    # description scores below this is a wrong-index row, not a real match.
-    sanity_description_threshold: int = Field(ge=0, le=100, default=40)
-    # fuzzy winner must beat the runner-up by this margin, else ambiguous.
-    fuzzy_margin: int = Field(ge=0, le=100, default=5)
-    # v20.5 Step 3: unique normalized-SKU rescue for reworded descriptions.
-    enable_sku_rescue: bool = True
     locale: str = "en_IN"
 
     @field_validator("locale", mode="after")
@@ -66,8 +74,8 @@ class MatchingConfig(BaseModel):
 
 class MergeConfig(BaseModel):
     # Final packet order, editable via config (DECISIONS_LOG §8).
-    # Default keeps current behavior: SI→DN→PO→COMBINED→SHIPPING→CUSTOMS.
-    legal_order: list[str] = Field(default=["SI", "DN", "PO", "COMBINED", "SHIPPING", "CUSTOMS"])
+    # Default keeps current behavior: SI→DN→PO→SHIPPING→CUSTOMS.
+    legal_order: list[str] = Field(default=["SI", "DN", "PO", "SHIPPING", "CUSTOMS"])
 
     @field_validator("legal_order", mode="after")
     @classmethod
@@ -76,10 +84,8 @@ class MergeConfig(BaseModel):
             "PO",
             "DN",
             "SI",
-            "COMBINED",
             "CUSTOMS",
             "SHIPPING",
-            "COMMERCIAL_INVOICE",
             "UNKNOWN",
         }
         if not v:
@@ -106,16 +112,19 @@ class ConcurrencyConfig(BaseModel):
     po_set_lock_timeout_seconds: int = 300
 
 
+class ReconciliationConfig(BaseModel):
+    # When true, a PO Set carrying more than one PO document is quarantined
+    # instead of summing them. A PO Set is expected to hold exactly one PO; a
+    # second one usually means a re-issue or a transcription of the same PO
+    # number, and summing two POs into one baseline silently doubles every
+    # quantity, which then never reconciles.
+    single_po_document: bool = True
+
+
 class LoggingConfig(BaseModel):
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     max_file_size_mb: int = 10
     backup_count: int = 5
-
-
-class BackupConfig(BaseModel):
-    enabled: bool = True
-    folder: Path = Path("./data/backup")
-    interval_hours: int = 24
 
 
 class AppConfig(BaseSettings):
@@ -128,8 +137,8 @@ class AppConfig(BaseSettings):
     ingestion: IngestionConfig = IngestionConfig()
     prefect: PrefectConfig = PrefectConfig()
     concurrency: ConcurrencyConfig = ConcurrencyConfig()
+    reconciliation: ReconciliationConfig = ReconciliationConfig()
     logging: LoggingConfig = LoggingConfig()
-    backup: BackupConfig = BackupConfig()
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -144,7 +153,7 @@ class AppConfig(BaseSettings):
             "output_folder",
             "quarantine_folder",
             "stored_documents_folder",
-            "unclassified_folder",
+            "combined_folder",
             "log_folder",
         ]:
             p = getattr(v, field_name, None)

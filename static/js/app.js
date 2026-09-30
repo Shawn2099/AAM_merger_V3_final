@@ -108,6 +108,21 @@ document.addEventListener('htmx:afterRequest', function (event) {
       store.success('⚡ Document extraction queued.');
     } else if (path.endsWith('/redo_match')) {
       store.success('🔄 Line-item reconciliation re-matched.');
+    } else if (/\/merge$/.test(path)) {
+      // Gated merge, not Force Merge: report the outcome the server decided.
+      let body = {};
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch (e) {
+        /* non-JSON response; fall through to the generic message */
+      }
+      if (body.status === 'merged') {
+        store.success('📦 Merged: ' + (body.merged_output_path || 'packet written'));
+      } else {
+        store.warning('📦 Not merged — still ' + (body.status || 'unresolved') +
+          (body.reason ? ' (' + body.reason.replace(/_/g, ' ') + ')' : '') +
+          '. Fix that, then press Merge Now again.');
+      }
     } else if (path.endsWith('/force_merge')) {
       store.success('🚀 Force merge completed and audit log recorded.');
     } else if (path === '/sync') {

@@ -1,32 +1,27 @@
 """Adversarial edge cases: hostile inputs, hostile data shapes.
 
-These are table-driven rather than generated — each case is a specific, named
-hazard we can reason about, so a failure is immediately diagnosable.
+Table-driven rather than generated — each case is a specific, named hazard we
+can reason about, so a failure is immediately diagnosable.
+
+Scope note: the hostile-input coverage below used to be aimed at the retired
+v20.5 3-step matcher. It is now aimed at the reconciliation rule that actually
+runs. See AAM_merger_V3_PRODUCT.md.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from app.services.matching import (
-    assign_lines,
-    match_vendor_line,
-    normalize_line_no,
-    normalize_sku,
-)
-from app.services.reconciliation import check_price, reconcile
+from app.services.matching import compare_aggregates, group_by_line_no, normalize_line_no
 from app.services.sanitizer import parse_quantity_scaled
 
 
-def pl(no, desc="Widget", qty=100, price=10, part_no=None):
-    d = {"line_item_no": no, "description": desc, "quantity": qty, "unit_price": price}
-    if part_no is not None:
-        d["part_no"] = part_no
-    return d
+def pl(no, desc="Widget", qty=100):
+    """A line dict with quantity already scaled x1000, as stored."""
+    return {"line_item_no": no, "description": desc, "quantity": qty * 1000}
 
 
 # --------------------------------------------------------- hostile descriptions
-
 
 HOSTILE_DESCRIPTIONS = [
     "",  # empty
@@ -37,37 +32,39 @@ HOSTILE_DESCRIPTIONS = [
     "{{7*7}}",  # template injection attempt
     "../../etc/passwd",  # path traversal text
     "a" * 5000,  # very long
-    "\u2122 \u00a9 \u00ae \u65e5\u672c\u8a9e \u0939\u093f\u0928\u094d\u0926\u0940",  # multilingual
-    "\u1f642\u1f643",  # emoji
+    "™ © ® 日本語 हिन्दी",  # multilingual
+    "\U0001f642\U0001f643",  # emoji
     "desc\ttabbed",
     "line\nbreak",
     "zero width",  # zero-width space
     "%20%3C",  # url-encoded
     "'; DROP TABLE line_items; --",  # sql injection text
-    "\u0301combining",  # combining marks
+    "́combining",  # combining marks
     "\U0001d56a\U0001d56f\U0001d55a",  # mathematical alphanumerics
-    "\ufeffbom prefixed",  # BOM
+    "﻿bom prefixed",  # BOM
 ]
 
 
 @pytest.mark.parametrize("desc", HOSTILE_DESCRIPTIONS)
 def test_hostile_description_never_raises(desc):
-    """Fuzzy scoring must never crash, whatever text the VLM returns."""
-    idx, reason = match_vendor_line(pl("1", desc), [pl("1", desc)])
-    assert idx in (0, None)
-    assert reason is None or isinstance(reason, str)
+    """Fuzzy description fallback must never crash, whatever text the VLM returns."""
+    _pt, _vt, orphans, fail = group_by_line_no(
+        [pl("1", desc)], [{"line_item_no": None, "description": desc, "quantity": 100_000}]
+    )
+    assert fail is None
+    assert isinstance(orphans, list)
 
 
 @pytest.mark.parametrize("desc", HOSTILE_DESCRIPTIONS)
-def test_hostile_description_assign_never_raises(desc):
-    assign, reason = assign_lines([pl("1", desc)], [pl("1", desc)])
-    assert reason is None or reason in ("AMBIGUOUS_LINE_MATCH", "INDEX_DESCRIPTION_MISMATCH")
-    if reason is None:
-        assert sum(len(v) for v in assign.values()) == 1
+def test_hostile_description_on_numbered_rows_never_raises(desc):
+    """A printed number is used directly; description is not even consulted."""
+    po_totals, vendor_totals, orphans, fail = group_by_line_no([pl("1", desc)], [pl("1", desc)])
+    assert fail is None
+    assert orphans == []
+    assert compare_aggregates(po_totals, vendor_totals, orphans) == []
 
 
 # ------------------------------------------------------------- hostile line nos
-
 
 HOSTILE_LINE_NOS = [
     None,
@@ -84,7 +81,7 @@ HOSTILE_LINE_NOS = [
     "1,0",
     "1/2",
     "1\\2",
-    "\u0661\u0662\u0663",  # arabic-indic digits
+    "١٢٣",  # arabic-indic digits
     "1e5",
     "0x1",
     "1 ",
@@ -116,155 +113,92 @@ def test_hostile_line_no_never_raises(raw):
 
 
 @pytest.mark.parametrize("raw", HOSTILE_LINE_NOS)
-def test_hostile_line_no_assign_never_raises(raw):
-    _assign, reason = assign_lines([pl("1")], [pl(raw)])
-    assert reason is None or isinstance(reason, str)
-
-
-# ------------------------------------------------------------- hostile SKUs
-
-
-HOSTILE_SKUS = [
-    None,
-    "",
-    " ",
-    "---",
-    "___",
-    "///",
-    "..",
-    "../..",
-    "\x00",
-    "A" * 200,
-    "AB-100",
-    " ab-100 ",
-    "\uff21\uff22\uff0d\uff11\uff10\uff10",  # fullwidth
-    "ab\u202e100",  # RTL override
-    "1",
-    "0",
-    "-",
-    "1-2-3",
-]
-
-
-@pytest.mark.parametrize("raw", HOSTILE_SKUS)
-def test_hostile_sku_never_raises(raw):
-    assert isinstance(normalize_sku(raw), str)
-
-
-def test_sku_rescue_cannot_cross_match_two_po_lines():
-    """Two PO lines sharing a SKU must never let a third line resolve."""
-    po = [pl("1", "Alpha", part_no="AB-100"), pl("2", "Beta", part_no="AB100")]
-    idx, reason = match_vendor_line(pl(None, "Reworded", part_no="ab100"), po)
-    assert idx is None
-    assert reason == "AMBIGUOUS_LINE_MATCH"
-
-
-def test_sku_rescue_empty_sku_never_matches_everything():
-    """An absent/blank SKU must not be treated as a shared identifier."""
-    po = [pl("1", "Alpha"), pl("2", "Beta")]
-    idx, reason = match_vendor_line(pl(None, "Totally different", part_no="  "), po)
-    assert idx is None
-    assert reason == "AMBIGUOUS_LINE_MATCH"
+def test_hostile_line_no_grouping_never_raises(raw):
+    """Grouping must return a well-formed result for any printed number."""
+    po_totals, vendor_totals, orphans, fail = group_by_line_no([pl("1")], [pl(raw)])
+    assert fail is None
+    assert isinstance(po_totals, dict)
+    assert isinstance(vendor_totals, dict)
+    assert isinstance(orphans, list)
+    assert isinstance(compare_aggregates(po_totals, vendor_totals, orphans), list)
 
 
 # ------------------------------------------------------------- data shapes
 
 
 def test_many_vendor_lines_into_one_po_line_sums_correctly():
-    po = [pl("1", "Widget", qty=100)]
-    vendors = [pl("1", "Widget", qty=1) for _ in range(100)]
-    assign, reason = assign_lines(po, vendors)
-    assert reason is None
-    assert sum(v["quantity"] for v in assign[0]) == 100
+    po_totals, vendor_totals, orphans, fail = group_by_line_no(
+        [pl("1", qty=100)], [pl("1", qty=1) for _ in range(100)]
+    )
+    assert fail is None and orphans == []
+    assert vendor_totals["1"] == 100_000
+    assert compare_aggregates(po_totals, vendor_totals, orphans) == []
 
 
 def test_duplicate_vendor_line_numbers_all_land_together():
-    po = [pl("1", "Widget", qty=100)]
-    vendors = [pl("1", "Widget", qty=30), pl("1", "Widget", qty=30), pl("1", "Widget", qty=40)]
-    assign, reason = assign_lines(po, vendors)
-    assert reason is None
-    assert sum(v["quantity"] for v in assign[0]) == 100
+    po_totals, vendor_totals, orphans, _ = group_by_line_no(
+        [pl("1", qty=100)], [pl("1", qty=30), pl("1", qty=30), pl("1", qty=40)]
+    )
+    assert vendor_totals["1"] == 100_000
+    assert compare_aggregates(po_totals, vendor_totals, orphans) == []
 
 
-def test_duplicate_po_line_numbers_with_similar_text_pick_one_stably():
-    """Two PO lines sharing a printed number: the winner must be stable.
+def test_duplicate_po_line_numbers_are_summed_on_the_po_side():
+    """Two PO rows printed as line 1 become one line 1 group of their sum."""
+    po_totals, vendor_totals, orphans, fail = group_by_line_no(
+        [pl("1", qty=40), pl("1", qty=60)], [pl("1", qty=100)]
+    )
+    assert fail is None and orphans == []
+    assert po_totals == {"1": 100_000}
+    assert compare_aggregates(po_totals, vendor_totals, orphans) == []
 
-    With genuinely different descriptions the sanity guard rejects the match
-    outright (see the sibling test); when the text is close enough to pass, the
-    tie-break is first-wins, and that choice must not vary between runs.
+
+def test_known_limitation_conflicting_text_on_one_number_is_summed():
+    """PINS A KNOWN LIMITATION — do not "fix" this without a product decision.
+
+    The retired matcher quarantined a set where two rows shared a line_item_no
+    but described different items (old FR-8.4). That check is deliberately not
+    part of this product: quantities are the only signal. The consequence is
+    that conflicting rows are summed, so a wrong-item aggregate can in
+    principle reconcile. See AAM_merger_V3_PRODUCT.md, "Accepted limitations".
     """
-    po = [pl("1", "Steel Widget Large"), pl("1", "Steel Widget Large")]
-    results = {match_vendor_line(pl("1", "Steel Widget Large"), po)[0] for _ in range(5)}
-    assert len(results) == 1, "tie-break is not deterministic"
-    assert results.pop() in (0, 1)
-
-
-def test_duplicate_po_line_numbers_with_conflicting_text_is_rejected():
-    """The dangerous case: one printed number, two different items.
-
-    Must NOT silently resolve to either line. It rejects, and (since one of the
-    two genuinely matches) offers that line as a suggestion for a human.
-    """
-    po = [pl("1", "Alpha"), pl("1", "Beta")]
-    idx, reason = match_vendor_line(pl("1", "Alpha"), po)
-    assert idx is None
-    assert reason in ("INDEX_DESCRIPTION_MISMATCH", "LINE_REINDEXED")
+    po_totals, vendor_totals, orphans, _ = group_by_line_no(
+        [pl("1", "Alpha", qty=100)],
+        [pl("1", "Alpha", qty=50), pl("1", "Beta", qty=50)],
+    )
+    assert orphans == []
+    # both rows land on line 1 and the set reconciles
+    assert vendor_totals == {"1": 100_000}
+    assert compare_aggregates(po_totals, vendor_totals, orphans) == []
 
 
 def test_empty_po_set_with_vendor_lines_fails_cleanly():
-    assign, reason = assign_lines([], [pl("1")])
-    assert assign == {}
-    assert reason == "AMBIGUOUS_LINE_MATCH"
+    po_totals, vendor_totals, orphans, fail = group_by_line_no([], [pl("1")])
+    assert fail is None
+    assert po_totals == {}
+    assert len(orphans) == 1
+    assert orphans[0]["why"] == "no_po_line_with_this_number"
+    assert compare_aggregates(po_totals, vendor_totals, orphans)[0]["po_qty"] is None
 
 
 def test_very_many_po_lines_terminates():
+    """No quadratic blow-up or recursion on a large PO.
+
+    500 PO lines with one delivered: 499 come back as quantity mismatches,
+    which is the correct answer, not a hang.
+    """
     po = [pl(str(i), f"Item {i}") for i in range(500)]
-    idx, reason = match_vendor_line(pl("250", "Item 250"), po)
-    assert reason is None
-    assert idx == 250
+    po_totals, vendor_totals, orphans, fail = group_by_line_no(po, [pl("250", "Item 250")])
+    assert fail is None
+    assert orphans == []
+    diffs = compare_aggregates(po_totals, vendor_totals, orphans)
+    assert len(diffs) == 499
+    assert all(d["reason"] == "quantity_mismatch" for d in diffs)
 
 
-def test_step10_does_not_loop_or_recurse():
-    """Step-10 mapping is single-pass; huge/odd numbers must terminate."""
-    po = [pl("1000000", "Widget")]
-    idx, reason = match_vendor_line(pl("100000", "Widget"), po)
-    assert idx in (0, None)
-    assert reason is None or isinstance(reason, str)
-
-
-# ------------------------------------------------------------- reconcile math
-
-
-@pytest.mark.parametrize(
-    ("po_q", "dn_q", "si_q"),
-    [
-        (0, 0, 0),
-        (1, 0, 0),
-        (100, 0, 0),
-        (0, 100, 100),
-        (100, 100, 0),
-        (100, 100, 100),
-        (100, 101, 100),
-        (100, 100, 99),
-        (1, 1, 1),
-        (-1, -1, -1),
-        (100, -100, 100),
-        (999999999999, 999999999999, 999999999999),
-        (1, 1, 2),
-        (2, 1, 1),
-    ],
-)
-def test_reconcile_never_raises_and_agrees_only_on_exact(po_q, dn_q, si_q):
-    res = reconcile(po_q, dn_q, si_q)
-    assert "ok" in res and "quarantine" in res
-    if po_q <= 0 or dn_q <= 0 or si_q <= 0 or po_q != dn_q or po_q != si_q:
-        assert res["ok"] is False
-
-
-@pytest.mark.parametrize("a", [0, 1, -1, 10**15, -(10**15)])
-@pytest.mark.parametrize("b", [0, 1, -1, 10**15, -(10**15)])
-def test_check_price_never_raises(a, b):
-    assert check_price(a, b)["flag"] == (a != b)
+def test_huge_line_numbers_terminate():
+    _pt, _vt, _orphans, fail = group_by_line_no([pl("1000000")], [pl("100000")])
+    assert fail is None
 
 
 # ------------------------------------------------------------- sanitizer bombs

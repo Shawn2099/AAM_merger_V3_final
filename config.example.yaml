@@ -8,8 +8,8 @@ paths:
   output_folder: "./data/output"
   quarantine_folder: "./data/quarantine"
   stored_documents_folder: "./data/stored"
-  unclassified_folder: "./data/unclassified"
   database_path: "./data/aam_merger.db"
+  combined_folder: "./data/combined"
   log_folder: "./data/logs"
 
 server:
@@ -17,7 +17,6 @@ server:
   port: 8000
 
 vlm:
-  provider: "openrouter"
   model: "openai/gpt-6-luna"  # team-confirmed VLM via OpenRouter, swap via config only
   request_timeout_seconds: 60
   api_key_env_var: "OPENROUTER_API_KEY"
@@ -27,16 +26,14 @@ extraction:
   retry_backoff_seconds: [2, 5, 15]
 
 matching:
+  # Description similarity, used only for vendor rows carrying no line number.
   fuzzy_description_threshold: 85
-  sanity_description_threshold: 40   # exact line_no hit must still be this similar
-  fuzzy_margin: 5                    # winner must beat runner-up by this
-  enable_sku_rescue: true            # v20.5 Step 3: unique normalized-SKU rescue
   locale: "en_IN"  # quantity parsing locale (babel), caller-passed
 
 merge:
   # Final packet order, editable without code change. Current default:
-  # SI→DN→PO→COMBINED→SHIPPING→CUSTOMS. Unknown types fail fast at startup.
-  legal_order: ["SI", "DN", "PO", "COMBINED", "SHIPPING", "CUSTOMS"]
+  # SI→DN→PO→SHIPPING→CUSTOMS. Unknown types fail fast at startup.
+  legal_order: ["SI", "DN", "PO", "SHIPPING", "CUSTOMS"]
 
 ingestion:
   stability_poll_interval_seconds: 2
@@ -49,13 +46,18 @@ prefect:
 concurrency:
   po_set_lock_timeout_seconds: 300
 
+reconciliation:
+  # A PO Set is expected to hold exactly one PO. With this on, a second PO
+  # document quarantines the set instead of being summed into the baseline
+  # (which would double every quantity). Turn off only if your vendors genuinely
+  # issue split POs under one number.
+  single_po_document: true
+
 logging:
   level: "INFO"
   max_file_size_mb: 10
   backup_count: 5
 
-# Backup (SPEC NFR-6, simple folder copy)
-backup:
-  enabled: true
-  folder: "./data/backup"
-  interval_hours: 24
+# Database backup is NOT configured here. It was removed 2026-09-29 because
+# nothing read it. NFR-6 backup is a runbook item for the Windows host
+# (SQLite .backup), not application code.

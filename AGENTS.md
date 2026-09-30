@@ -1,8 +1,15 @@
 # AGENTS.md — AAM_MERGER-FINAL (AAM_merger_V3_final)
 
-> **Scope:** `Input → Sync → Dedup → Classify → Extract → Group → Match → Reconcile → Merge → Output`
+> **Scope:** `Input → Sync → Dedup → Classify → Extract → Group → Reconcile → Merge → Output`
 > **Repo:** `https://github.com/Shawn2099/AAM_merger_V3_final`
-> **Sources of truth:** [`AAM_merger_V3_SPEC.md`](./AAM_merger_V3_SPEC.md) > [`AAM_merger_V3_business_logic.md`](./AAM_merger_V3_business_logic.md) > this file. If this file ever contradicts SPEC, SPEC wins — STOP and ask.
+>
+> **Source of truth:** [`AAM_merger_V3_PRODUCT.md`](./AAM_merger_V3_PRODUCT.md) —
+> the product as built and intended. **If this file or the older specs
+> contradict it, the PRODUCT doc wins.** `AAM_merger_V3_SPEC.md` and
+> `AAM_merger_V3_business_logic.md` are retained for the vendor research and
+> requirement history they contain; their matching/reconciliation sections
+> describe a richer matcher that was **deliberately retired on 2026-09-29** and
+> are superseded. Do not implement against them.
 > **POC reference only:** `~/Desktop/AAM_merger_V2` — lessons-learned, never a code base to branch from.
 
 ---
@@ -34,21 +41,33 @@
 
 ---
 
-## 3. Data Model (SPEC §6 — verified line-by-line; this is a summary, SPEC is primary)
+## 3. Data Model
 
-> **Verify-before-lock:** Diffed against SPEC §6.1–6.5 + §9 on 2026-08-15. Enums, field names, and int-scaling below match exactly; AGENTS.md is a router, not a migration source. If any cell here looks off, re-read SPEC §6 before writing Alembic migrations — a "plausible paraphrase" that compiles is the silent-failure mode SPEC §1.1 warns about.
+> **Authoritative:** src/app/models/models.py. The PRODUCT doc §2-§6 explains
+> why each column exists. Summary below for grep only.
 
-| SPEC table | AGENTS.md summary | Exact match? |
-|---|---|---|
-| §6.1 `documents` | `id` PK; `sha256_hash` text unique indexed (dedup key §4.4); `original_filename` text; `stored_path` text (never auto-deleted §4.5); `doc_type` enum `PO, DN, SI, COMBINED, CUSTOMS, SHIPPING, COMMERCIAL_INVOICE, UNKNOWN`; `po_no_raw`/`po_no_normalized` text (strip non-alnum, uppercase §7); `dn_no`/`si_no`/`invoice_no` text nullable; `extraction_status` enum `pending, processing, valid, failed` (binary, §6.4); `extraction_attempt_count` int default 0 capped at 3 (§6.4); `po_set_id` FK nullable (null until grouped / if UNKNOWN); `created_at`/`updated_at` timestamp | ✅ — previously omitted `original_filename` and `created_at/updated_at` names, now restored |
-| §6.2 `line_items` | `id` PK; `document_id` FK; `line_item_no` text nullable (primary match key); `description` text; `quantity` integer scaled ×1000 (§6.4); `unit_price` integer scaled ×1000 (§6.4) | ✅ |
-| §6.3 `po_sets` | `id` PK; `po_no_normalized` text indexed (grouping key); `status` enum `pending, mismatched, quarantined, blocked_customs, merged` (§13); `has_customs_toggle` boolean default false; `customs_doc_count` int (must reach 2 `CUSTOMS`+`SHIPPING` if toggle on); `merged_output_path` text nullable (set only on `merged`); `merged_at` timestamp nullable immutable (permanently closed); `locked_by_action` text nullable (SPEC §6.3 cites "see Section 10" — actual lock rules are SPEC §9 FR-CONC-1; AGENTS.md follows SPEC §9); `created_at`/`updated_at` timestamp | ✅ — `locked_by_action` name and 5-status enum verified |
-| §6.4 numeric | All quantities *and* prices stored as integers scaled ×1000; every comparison on ints, never float | ✅ — AGENTS.md now states quantities *and* prices |
-| §6.5 `audit_log` | `id` PK; `po_set_id` FK nullable (system-level entries allowed); `action` enum `force_merge, quarantine_delete, manual_status_change` (extend only via spec change); `detail` text/JSON (e.g. customs count at Force Merge); `timestamp` timestamp; `source` text `"system"` (no user identity v1) | ✅ — previously omitted `manual_status_change`, now restored |
+| Table | Columns |
+|---|---|
+| documents | id PK; sha256_hash unique indexed (dedup key); original_filename; stored_path (never auto-deleted); doc_type enum PO, DN, SI, COMBINED, CUSTOMS, SHIPPING, COMMERCIAL_INVOICE, UNKNOWN; 
+aw_extraction_json; po_no_raw/po_no_normalized; po_reference_ambiguous (multi-PO doc is left unattached, never guessed); dn_no/si_no/invoice_no nullable; extraction_status enum pending, processing, valid, failed; extraction_attempt_count capped at 3; po_set_id FK nullable; created_at/updated_at |
+| line_items | id PK; document_id FK; line_item_no text nullable (**the** matching key); description; quantity int ×1000; unit_price int ×1000; dn_no nullable (per-line DN reference) |
+| po_sets | id PK; po_no_normalized indexed (grouping key); status enum pending, mismatched, quarantined, blocked_customs, merged; has_customs_toggle; customs_doc_count; merged_output_path; 
+econcile_reason (plain-language, dashboard reads it); merged_at (immutable); locked_by_action; locked_at; created_at/updated_at |
+| udit_log | id PK; po_set_id FK nullable ON DELETE SET NULL; ction enum orce_merge, quarantine_delete, manual_status_change; detail JSON; justification (operator note, >= 20 chars when given); 	imestamp; source |
 
-Compact form for quick grep: `documents(id, sha256_hash unique, original_filename, stored_path, doc_type[PO,DN,SI,COMBINED,CUSTOMS,SHIPPING,COMMERCIAL_INVOICE,UNKNOWN], po_no_raw/normalized, dn_no/si_no/invoice_no, extraction_status[pending,processing,valid,failed], extraction_attempt_count≤3, po_set_id, created_at/updated_at)` • `line_items(id, document_id, line_item_no, description, quantity×1000 int, unit_price×1000 int)` • `po_sets(id, po_no_normalized indexed, status[pending,mismatched,quarantined,blocked_customs,merged], has_customs_toggle, customs_doc_count, merged_output_path, merged_at immutable, locked_by_action)` • `audit_log(id, po_set_id nullable, action[force_merge, quarantine_delete, manual_status_change], detail JSON, timestamp, source="system")`. No `part_no`/`UOM` columns — do not add without spec change. Reconciliation: per-line `PO == AggDN AND PO == AggSI` exact ints, no tolerance; one line fails → whole set fails; negative/zero → quarantined; price check secondary (flag only).
+**line_items has NO part_no, NO line_type, NO uom.** These existed
+briefly to serve a retired matcher and were dropped in migration
+c1a2b3d4e5f6. Do not re-add them. See PRODUCT doc §7-§8 for why, and for what
+their absence costs.
 
----
+**Numeric:** all quantities and prices are integers scaled ×1000. Every
+comparison is on those integers, never a float.
+
+**Reconciliation** (PRODUCT doc §2): group both sides by normalised
+line_item_no and sum; PO must equal the DN aggregate AND the SI aggregate
+exactly; a vendor group with no PO counterpart quarantines; one failing line
+fails the whole set. **Quantities are the only signal** — no price, no SKU, no
+UOM, no step-10 mapping, no description-conflict check.
 
 ## 4. Branching & Git Workflow (Recommended)
 
@@ -109,11 +128,22 @@ NPM_CONFIG_CACHE=/tmp/npm-cache npx --yes skills add <owner/repo@skill> -y
 
 ## 7. Development Workflow
 
-1. **Read SPEC + business logic first.** No code until FRs understood.
-2. **TDD:** one test per FR minimum (Given/When/Then, static expected values) — e.g. FR-10.1 100=40+60 / 70+30 → reconciled; FR-8.4 conflicting descriptions → `quarantined`; FR-13.7 delete keeps files + audit row; FR-CONC-2 409 on locked set.
-3. **Implement EARS FRs in order:** ingestion → classify → extract (single VLM call for COMBINED, retry 3× `[2,5,15]`) → grouping → matching → aggregation → reconciliation → customs → merge → quarantine/manual merger → dashboard + locks.
-4. **Verify (SPEC §1.3):** real vendor samples (§17) for extraction; synthetic edge cases for reconcile; simulated concurrent Force Merge for 409. `verification-before-completion` must pass.
-5. **Ask don't guess** on any ambiguity; after 2 failed fix attempts, stop and report.
+1. **Read `AAM_merger_V3_PRODUCT.md` first.** No code until the rule in §2 and
+   the accepted limitations in §8 are understood.
+2. **TDD:** one test per behaviour, Given/When/Then with static expected
+   values. Examples that hold today: PO 100 = DN 40+60 and SI 70+30 →
+   `merged`; an orphan vendor line → `quarantined`; a set with no SI number →
+   auto-merge refuses; delete keeps files and writes an audit row; second
+   Force Merge on a locked set → 409.
+3. **If you remove a guard, add the limitation to PRODUCT §8 and pin it with a
+   test named `test_limitation_*` or `test_known_limitation_*`.** A removed
+   guard that leaves no trace is how this document came to be needed.
+4. **Verify (PRODUCT §11):** real vendor samples for extraction; synthetic edge
+   cases for reconcile; a real concurrent Force Merge for 409.
+   `verification-before-completion` must pass. A claim without an observed
+   result is not done.
+5. **Ask don't guess** on any ambiguity; after 2 failed fix attempts, stop and
+   report.
 
 ---
 
@@ -148,24 +178,25 @@ Exact patch versions to pin; DB backup cadence (NFR-6); LAN IP/firewall for `ser
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **AAM_merger_V3_final** (1290 symbols, 1636 relationships, 8 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **AAM_merger_V3_final** (1394 symbols, 2686 relationships, 62 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
 ## Always Do
 
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "main"})`.
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+- When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
 
 ## Never Do
 
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER edit a function, class, or method without first running `impact` on it.
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit changes without running `detect_changes()` to check affected scope.
 
 ## Resources
 

@@ -1,1 +1,17 @@
-3.11
+# Local development interpreter.
+#
+# 3.12, not the 3.11 that WS2016 production runs on. This is a WORKSTATION
+# constraint, not a project one:
+#
+#   Windows Smart App Control on this dev machine blocks the unsigned stdlib
+#   extensions in the uv-managed CPython 3.11 installs (_ssl.pyd, _socket.pyd,
+#   _sqlite3.pyd, _hashlib.pyd, _json.pyd ... all stripped), so `import ssl`
+#   fails for every 3.11 process here. Policy ID
+#   {0283ac0f-fff1-49ae-ada1-8a933130cad6}. Production is unaffected - it runs
+#   the signed system interpreter.
+#
+# Nothing about the code depends on this. `requires-python = ">=3.11"` is
+# unchanged, `uv.lock` resolves for >=3.11, and ruff keeps
+# `target-version = "py311"` so 3.12-only syntax is still rejected at lint
+# time. Dev on 3.12, deploy on 3.11, with a lint-time guard preventing drift.
+3.12

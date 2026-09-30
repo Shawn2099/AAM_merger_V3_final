@@ -131,17 +131,32 @@ def test_fr_10_1_pinned(tmp_path) -> None:
         assert ps_final.merged_output_path is not None
 
 
-def test_fr_8_4_conflicting_descriptions_quarantine() -> None:
-    """FR-8.4: same line_item_no with conflicting descriptions → quarantine."""
-    from app.services.matching import match_line
+def test_conflicting_descriptions_on_one_line_are_summed_not_quarantined() -> None:
+    """PINS A KNOWN LIMITATION — this is the retired FR-8.4, deliberately gone.
 
-    po = {"line_item_no": "5", "description": "Widget A 10kg"}
-    dn_lines = [
-        {"line_item_no": "5", "description": "Widget A 10kg", "quantity": 10000},
-        {"line_item_no": "5", "description": "Totally different widget", "quantity": 10000},
-    ]
-    res = match_line(po, dn_lines, [], thr=85)
-    assert res["quarantine"] is True
+    Two DN rows printed as line 5 but describing different items used to
+    quarantine the whole set. Quantities are the only signal in this product,
+    so the rows are summed instead. The consequence is that a wrong-item
+    aggregate can in principle reconcile and merge.
+
+    Named real case: PO D7264-PO186000-013-01 ships part TLMKC while its DN and
+    SI ship Runclimb-VALVE, same line number, same quantity. See
+    AAM_merger_V3_PRODUCT.md, Accepted limitations.
+    """
+    from app.services.matching import compare_aggregates, group_by_line_no
+
+    po_totals, vendor_totals, orphans, fail = group_by_line_no(
+        [{"line_item_no": "5", "description": "Widget A 10kg", "quantity": 10000}],
+        [
+            {"line_item_no": "5", "description": "Widget A 10kg", "quantity": 5000},
+            {"line_item_no": "5", "description": "Totally different widget", "quantity": 5000},
+        ],
+    )
+    assert fail is None
+    assert orphans == []
+    assert vendor_totals == {"5": 10000}
+    # sums to the PO quantity, so the set reconciles rather than quarantining
+    assert compare_aggregates(po_totals, vendor_totals, orphans) == []
 
 
 def test_fr_conc_2_409_on_locked_po_set(tmp_path) -> None:

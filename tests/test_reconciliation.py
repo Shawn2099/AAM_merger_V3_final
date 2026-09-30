@@ -1,23 +1,98 @@
 def test_reconcile_exact():
-    from app.services.reconciliation import reconcile
+    """PO == AggDN == AggSI, exact integers, no tolerance."""
+    from app.services.reconciliation import compare_po_set_lines
 
-    assert reconcile(100000, 100000, 100000)["ok"] is True  # 100*1000
-    assert reconcile(100000, 90000, 100000)["ok"] is False
+    res = compare_po_set_lines(
+        [_l(1, 100)],
+        [_l(1, 100)],
+        [_l(1, 100)],
+    )
+    assert res["flags"] == []
+
+    res = compare_po_set_lines([_l(1, 100)], [_l(1, 90)], [_l(1, 100)])
+    assert [f["reason"] for f in res["flags"]] == ["quantity_mismatch"]
+
+
+def _l(no, qty):
+    return {"line_item_no": str(no), "description": "W", "quantity": qty * 1000}
 
 
 def test_negative_quarantine():
-    from app.services.reconciliation import reconcile
+    """A zero or negative quantity quarantines the whole set, it is never
+    evaluated as a normal reconciliation case."""
+    assert _reconcile_with_quantities(0, 0, 0) == "quarantined"
+    assert _reconcile_with_quantities(100, -10, 100) == "quarantined"
+    assert _reconcile_with_quantities(100, 100, 0) == "quarantined"
 
-    assert reconcile(100000, -10000, 100000)["quarantine"] is True
-    assert reconcile(0, 0, 0)["quarantine"] is True
-    assert reconcile(100000, 100000, 0)["quarantine"] is True
+
+def test_price_check_removed():
+    """The price check is not part of this product: quantities are the only
+    signal. Retained as an explicit marker so the removal is visible rather
+    than a silent gap. See AAM_merger_V3_PRODUCT.md, Accepted limitations."""
+    import app.services.reconciliation as rec
+
+    assert not hasattr(rec, "check_price")
+    assert not hasattr(rec, "reconcile")
 
 
-def test_price_flag_priority():
-    from app.services.reconciliation import check_price
+def _reconcile_with_quantities(po_q, dn_q, si_q):
+    """Build a throwaway PO Set with one line per document and reconcile it."""
+    import tempfile
+    from pathlib import Path
 
-    assert check_price(10000, 10000)["flag"] is False
-    assert check_price(10000, 9000)["flag"] is True  # price-only not block, but flagged
+    from pypdf import PdfWriter
+    from sqlalchemy.orm import Session
+
+    from app.core.config import load_config
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus, LineItem, POSet, POSetStatus
+    from app.models.base import Base
+    from app.services.reconciliation import reconcile_po_set
+
+    tmp = Path(tempfile.mkdtemp())
+    cfg = load_config("config.example.yaml")
+    cfg.paths.database_path = str(tmp / "neg.db")
+    cfg.paths.output_folder = str(tmp / "output")
+    cfg.paths.stored_documents_folder = str(tmp / "stored")
+    (tmp / "output").mkdir(parents=True, exist_ok=True)
+    (tmp / "stored").mkdir(parents=True, exist_ok=True)
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="NEG", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+        for n, (dtype, qty) in enumerate((("PO", po_q), ("DN", dn_q), ("SI", si_q)), start=1):
+            p = tmp / "stored" / f"{n}_{dtype}.pdf"
+            PdfWriter().write(str(p))
+            d = Document(
+                sha256_hash=f"neg_{n}",
+                original_filename=f"{dtype}.pdf",
+                stored_path=str(p),
+                doc_type=DocType[dtype],
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=ps_id,
+                po_no_normalized="NEG",
+            )
+            if dtype == "SI":
+                d.si_no = "NEG-INV"
+                d.invoice_no = "NEG-INV"
+            s.add(d)
+            s.commit()
+            s.add(
+                LineItem(
+                    document_id=d.id,
+                    line_item_no="1",
+                    description="W",
+                    quantity=qty * 1000,
+                    unit_price=1000,
+                )
+            )
+            s.commit()
+    return reconcile_po_set(ps_id, cfg)["status"]
 
 
 def _create_dummy_pdf(path):
@@ -278,7 +353,7 @@ def test_reconcile_po_set_customs_blocks_merge(tmp_path):
 
 
 def test_reconcile_po_decoy_mismatch_quarantines(tmp_path):
-    """SPEC §7.3 FR-6.3: Attached doc with mismatched PO reference causes quarantine."""
+    """SPEC Â§7.3 FR-6.3: Attached doc with mismatched PO reference causes quarantine."""
     from pathlib import Path
 
     from sqlalchemy.orm import Session
@@ -581,7 +656,7 @@ def test_reconcile_partial_fulfillment_stays_pending(tmp_path):
 
 def test_reconcile_over_qty_fails_set(tmp_path):
     """FR-10.2 (decision 2026-09-05): fully-delivered lines with wrong qty
-    (including over-delivery) fail the whole set — no partial pass."""
+    (including over-delivery) fail the whole set â€” no partial pass."""
     from pathlib import Path
 
     from sqlalchemy.orm import Session
@@ -713,10 +788,21 @@ def test_reconcile_over_qty_fails_set(tmp_path):
         assert ps_after.status == POSetStatus.mismatched
 
 
-def test_reconcile_step_10_po_merges_successfully(tmp_path):
-    """When PO uses 10, 20 and DN/SI use 1, 2, sets reconcile and auto-merge."""
+def test_step_10_numbering_no_longer_maps_and_quarantines(tmp_path):
+    """PINS A KNOWN LIMITATION â€” do not "fix" this without a product decision.
+
+    A PO numbering its lines 10, 20 against DNs/SIs numbering theirs 1, 2 used
+    to be reconciled by an ERP step-10 heuristic. That heuristic is not part of
+    this product: line numbers are compared as printed, so 10 never matches 1
+    and the set quarantines instead of merging.
+
+    The failure is in the safe direction (quarantine, not a wrong merge), at the
+    cost of a human reviewing sets whose vendors number the two documents
+    differently. See AAM_merger_V3_PRODUCT.md, Accepted limitations.
+    """
     from pathlib import Path
 
+    from pypdf import PdfWriter
     from sqlalchemy.orm import Session
 
     from app.core.config import load_config
@@ -742,108 +828,47 @@ def test_reconcile_step_10_po_merges_successfully(tmp_path):
         s.refresh(ps)
         ps_id = ps.id
 
-        po_pdf = tmp_path / "stored_step10" / "po.pdf"
-        dn_pdf = tmp_path / "stored_step10" / "dn.pdf"
-        si_pdf = tmp_path / "stored_step10" / "si.pdf"
-        for p in (po_pdf, dn_pdf, si_pdf):
-            _create_dummy_pdf(p)
+        docs = {}
+        for dtype in ("PO", "DN", "SI"):
+            p = tmp_path / "stored_step10" / f"{dtype.lower()}.pdf"
+            PdfWriter().write(str(p))
+            d = Document(
+                sha256_hash=f"step10_{dtype}",
+                original_filename=f"{dtype.lower()}.pdf",
+                stored_path=str(p),
+                doc_type=DocType[dtype],
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=ps_id,
+                po_no_normalized="PO_STEP10",
+            )
+            if dtype == "SI":
+                d.si_no = "STEP10-INV"
+                d.invoice_no = "STEP10-INV"
+            s.add(d)
+            s.commit()
+            docs[dtype] = d
 
-        doc_po = Document(
-            sha256_hash="h_s10_po",
-            original_filename="po.pdf",
-            stored_path=str(po_pdf),
-            doc_type=DocType.PO,
-            extraction_status=ExtractionStatus.valid,
-            po_set_id=ps_id,
-            po_no_normalized="PO_STEP10",
-        )
-        doc_dn = Document(
-            sha256_hash="h_s10_dn",
-            original_filename="dn.pdf",
-            stored_path=str(dn_pdf),
-            doc_type=DocType.DN,
-            extraction_status=ExtractionStatus.valid,
-            po_set_id=ps_id,
-            po_no_normalized="PO_STEP10",
-            dn_no="DN1",
-        )
-        doc_si = Document(
-            sha256_hash="h_s10_si",
-            original_filename="si.pdf",
-            stored_path=str(si_pdf),
-            doc_type=DocType.SI,
-            extraction_status=ExtractionStatus.valid,
-            po_set_id=ps_id,
-            po_no_normalized="PO_STEP10",
-            si_no="SI1",
-        )
-        s.add_all([doc_po, doc_dn, doc_si])
-        s.commit()
-
-        # PO has lines 10 and 20
-        s.add(
-            LineItem(
-                document_id=doc_po.id,
-                line_item_no="10",
-                description="Hammer 4KG",
-                quantity=1000,
-                unit_price=2700000,
-            )
-        )
-        s.add(
-            LineItem(
-                document_id=doc_po.id,
-                line_item_no="20",
-                description="Battery 12V",
-                quantity=2000,
-                unit_price=500000,
-            )
-        )
-        # DN and SI have lines 1 and 2
-        s.add(
-            LineItem(
-                document_id=doc_dn.id,
-                line_item_no="1",
-                description="Hammer 4KG",
-                quantity=1000,
-                unit_price=0,
-            )
-        )
-        s.add(
-            LineItem(
-                document_id=doc_dn.id,
-                line_item_no="2",
-                description="Battery 12V",
-                quantity=2000,
-                unit_price=0,
-            )
-        )
-        s.add(
-            LineItem(
-                document_id=doc_si.id,
-                line_item_no="1",
-                description="Hammer 4KG",
-                quantity=1000,
-                unit_price=2700000,
-            )
-        )
-        s.add(
-            LineItem(
-                document_id=doc_si.id,
-                line_item_no="2",
-                description="Battery 12V",
-                quantity=2000,
-                unit_price=500000,
-            )
-        )
+        # PO numbers 10 and 20; DN and SI number them 1 and 2.
+        for dtype, nos in (("PO", ("10", "20")), ("DN", ("1", "2")), ("SI", ("1", "2"))):
+            for no in nos:
+                s.add(
+                    LineItem(
+                        document_id=docs[dtype].id,
+                        line_item_no=no,
+                        description=f"Item {no}",
+                        quantity=1000,
+                        unit_price=0,
+                    )
+                )
         s.commit()
 
     res = reconcile_po_set(ps_id, cfg)
-    assert res["status"] == "merged"
+    assert res["status"] == "quarantined"
+    assert res["reason"] == "unmatched_vendor_line"
 
     with Session(eng) as s:
         ps_after = s.get(POSet, ps_id)
-        assert ps_after.status == POSetStatus.merged
+        assert ps_after.merged_output_path is None
 
 
 def test_sync_flow_sweep_reconciles_stale_mismatched_set(tmp_path):
@@ -864,9 +889,7 @@ def test_sync_flow_sweep_reconciles_stale_mismatched_set(tmp_path):
     cfg.paths.stored_documents_folder = tmp_path / "stored"
     cfg.paths.quarantine_folder = tmp_path / "quarantine"
     cfg.paths.output_folder = tmp_path / "output"
-    cfg.paths.unclassified_folder = tmp_path / "unclassified"
     cfg.paths.log_folder = tmp_path / "logs"
-    cfg.backup.folder = tmp_path / "backup"
     cfg.ingestion.stability_poll_interval_seconds = 1
     cfg.ingestion.stability_poll_count = 1
 
@@ -874,7 +897,6 @@ def test_sync_flow_sweep_reconciles_stale_mismatched_set(tmp_path):
     cfg_data = cfg.model_dump()
     for k, v in cfg_data.get("paths", {}).items():
         cfg_data["paths"][k] = str(v)
-    cfg_data["backup"]["folder"] = str(cfg_data["backup"]["folder"])
     with open(cfg_file, "w") as f:
         yaml.dump(cfg_data, f)
     for p in [
@@ -980,297 +1002,3 @@ def test_sync_flow_sweep_reconciles_stale_mismatched_set(tmp_path):
         assert ps_after.merged_output_path is not None
 
 
-def _make_combined_set(tmp_path, raw_sections, suffix):
-    """Fixture helper: POSet with one COMBINED doc carrying given section evidence."""
-    import json
-    from pathlib import Path
-
-    from sqlalchemy.orm import Session
-
-    from app.core.config import load_config
-    from app.core.database import get_engine
-    from app.models import DocType, Document, ExtractionStatus, LineItem, POSet, POSetStatus
-    from app.models.base import Base
-
-    cfg = load_config("config.example.yaml")
-    cfg.paths.database_path = str(tmp_path / f"comb_{suffix}.db")
-    cfg.paths.stored_documents_folder = str(tmp_path / f"stored_comb_{suffix}")
-    cfg.paths.output_folder = str(tmp_path / f"out_comb_{suffix}")
-    Path(cfg.paths.stored_documents_folder).mkdir(parents=True, exist_ok=True)
-    Path(cfg.paths.output_folder).mkdir(parents=True, exist_ok=True)
-
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
-
-    with Session(eng) as s:
-        ps = POSet(po_no_normalized="PO_COMB", status=POSetStatus.pending)
-        s.add(ps)
-        s.commit()
-        s.refresh(ps)
-        ps_id = ps.id
-
-        pdf = tmp_path / f"stored_comb_{suffix}" / "combined.pdf"
-        _create_dummy_pdf(pdf)
-        doc = Document(
-            sha256_hash=f"h_comb_{suffix}",
-            original_filename="combined.pdf",
-            stored_path=str(pdf),
-            doc_type=DocType.COMBINED,
-            extraction_status=ExtractionStatus.valid,
-            po_set_id=ps_id,
-            po_no_normalized="PO_COMB",
-            invoice_no="INV-COMB-1",
-            raw_extraction_json=json.dumps(raw_sections),
-        )
-        s.add(doc)
-        s.commit()
-        s.add(
-            LineItem(
-                document_id=doc.id,
-                line_item_no="1",
-                description="Combo Widget",
-                quantity=5000,
-                unit_price=100000,
-            )
-        )
-        s.commit()
-    return ps_id, cfg, eng
-
-
-def test_combined_incomplete_sections_waits_unverified(tmp_path):
-    """W-1: COMBINED missing SI section evidence never merges (FR-6.7)."""
-    from sqlalchemy.orm import Session
-
-    from app.models import POSet, POSetStatus
-    from app.services.reconciliation import reconcile_po_set
-
-    ps_id, cfg, eng = _make_combined_set(
-        tmp_path,
-        {"has_po_section": True, "has_dn_section": True, "has_si_section": False},
-        "partial",
-    )
-    res = reconcile_po_set(ps_id, cfg)
-    assert res["status"] == "pending"
-    assert res["reason"] == "combined_unverified"
-    with Session(eng) as s:
-        ps_after = s.get(POSet, ps_id)
-        assert ps_after.status == POSetStatus.pending
-        assert ps_after.merged_output_path is None
-
-
-def test_combined_full_sections_merges(tmp_path):
-    """W-1: COMBINED with all 3 sections still auto-merges (no regression)."""
-    from sqlalchemy.orm import Session
-
-    from app.models import POSet, POSetStatus
-    from app.services.reconciliation import reconcile_po_set
-
-    ps_id, cfg, eng = _make_combined_set(
-        tmp_path,
-        {"has_po_section": True, "has_dn_section": True, "has_si_section": True},
-        "full",
-    )
-    res = reconcile_po_set(ps_id, cfg)
-    assert res["status"] == "merged"
-    with Session(eng) as s:
-        ps_after = s.get(POSet, ps_id)
-        assert ps_after.status == POSetStatus.merged
-        assert ps_after.merged_output_path is not None
-
-
-def _make_po_combined_set(tmp_path, po_qty, comb_qty, suffix):
-    """Fixture helper: PO doc + COMBINED doc (verified sections) in one set."""
-    import json
-    from pathlib import Path
-
-    from sqlalchemy.orm import Session
-
-    from app.core.config import load_config
-    from app.core.database import get_engine
-    from app.models import DocType, Document, ExtractionStatus, LineItem, POSet, POSetStatus
-    from app.models.base import Base
-
-    cfg = load_config("config.example.yaml")
-    cfg.paths.database_path = str(tmp_path / f"pocomb_{suffix}.db")
-    cfg.paths.stored_documents_folder = str(tmp_path / f"stored_pocomb_{suffix}")
-    cfg.paths.output_folder = str(tmp_path / f"out_pocomb_{suffix}")
-    Path(cfg.paths.stored_documents_folder).mkdir(parents=True, exist_ok=True)
-    Path(cfg.paths.output_folder).mkdir(parents=True, exist_ok=True)
-
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
-
-    with Session(eng) as s:
-        ps = POSet(po_no_normalized="PO_COMB", status=POSetStatus.pending)
-        s.add(ps)
-        s.commit()
-        s.refresh(ps)
-        ps_id = ps.id
-
-        po_pdf = tmp_path / f"stored_pocomb_{suffix}" / "po.pdf"
-        _create_dummy_pdf(po_pdf)
-        po_doc = Document(
-            sha256_hash=f"h_pocomb_po_{suffix}",
-            original_filename="po.pdf",
-            stored_path=str(po_pdf),
-            doc_type=DocType.PO,
-            extraction_status=ExtractionStatus.valid,
-            po_set_id=ps_id,
-            po_no_normalized="PO_COMB",
-        )
-        s.add(po_doc)
-        s.commit()
-        s.add(
-            LineItem(
-                document_id=po_doc.id,
-                line_item_no="1",
-                description="Combo Widget",
-                quantity=po_qty,
-                unit_price=100000,
-            )
-        )
-
-        comb_pdf = tmp_path / f"stored_pocomb_{suffix}" / "combined.pdf"
-        _create_dummy_pdf(comb_pdf)
-        comb_doc = Document(
-            sha256_hash=f"h_pocomb_comb_{suffix}",
-            original_filename="combined.pdf",
-            stored_path=str(comb_pdf),
-            doc_type=DocType.COMBINED,
-            extraction_status=ExtractionStatus.valid,
-            po_set_id=ps_id,
-            po_no_normalized="PO_COMB",
-            invoice_no="INV-POCOMB-1",
-            si_no="INV-POCOMB-1",
-            raw_extraction_json=json.dumps(
-                {"has_po_section": True, "has_dn_section": True, "has_si_section": True}
-            ),
-        )
-        s.add(comb_doc)
-        s.commit()
-        s.add(
-            LineItem(
-                document_id=comb_doc.id,
-                line_item_no="1",
-                description="Combo Widget",
-                quantity=comb_qty,
-                unit_price=100000,
-            )
-        )
-        s.commit()
-    return ps_id, cfg, eng
-
-
-def test_combined_with_po_exact_merges_both_pools(tmp_path):
-    """Option A: COMBINED qty == PO qty deducts cleanly from both pools - merged."""
-    from sqlalchemy.orm import Session
-
-    from app.models import POSet, POSetStatus
-    from app.services.reconciliation import reconcile_po_set
-
-    ps_id, cfg, eng = _make_po_combined_set(tmp_path, 5000, 5000, "exact")
-    res = reconcile_po_set(ps_id, cfg)
-    assert res["status"] == "merged"
-    with Session(eng) as s:
-        ps_after = s.get(POSet, ps_id)
-        assert ps_after.status == POSetStatus.merged
-        assert ps_after.merged_output_path is not None
-
-
-def test_combined_with_po_overflow_merges_neither_pool(tmp_path):
-    """Option A atomic: COMBINED over-supply fails both pools, nothing merges."""
-    from sqlalchemy.orm import Session
-
-    from app.models import POSet, POSetStatus
-    from app.services.reconciliation import reconcile_po_set
-
-    ps_id, cfg, eng = _make_po_combined_set(tmp_path, 5000, 6000, "over")
-    res = reconcile_po_set(ps_id, cfg)
-    assert res["status"] == "mismatched"
-    with Session(eng) as s:
-        ps_after = s.get(POSet, ps_id)
-        assert ps_after.status == POSetStatus.mismatched
-        assert ps_after.merged_output_path is None
-
-
-def test_combined_excludes_separate_dn_si_lines(tmp_path):
-    """FR-14.7 in reconciliation: COMBINED is authoritative - separate DN/SI
-    lines must NOT also count, or quantities double and the set strands at
-    mismatched forever (caught by probe, fixed by pool exclusivity)."""
-    import json
-
-    from sqlalchemy.orm import Session
-
-    from app.core.config import load_config
-    from app.core.database import get_engine
-    from app.models import DocType, Document, ExtractionStatus, LineItem, POSet, POSetStatus
-    from app.models.base import Base
-    from app.services.reconciliation import reconcile_po_set
-
-    cfg = load_config("config.example.yaml")
-    cfg.paths.database_path = str(tmp_path / "comb_excl.db")
-    cfg.paths.stored_documents_folder = str(tmp_path / "stored_comb_excl")
-    cfg.paths.output_folder = str(tmp_path / "out_comb_excl")
-    cfg.paths.quarantine_folder = str(tmp_path / "quar_comb_excl")
-    for d in ("stored_comb_excl", "out_comb_excl", "quar_comb_excl"):
-        (tmp_path / d).mkdir(parents=True, exist_ok=True)
-
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
-
-    with Session(eng) as s:
-        ps = POSet(po_no_normalized="PO_EXCL", status=POSetStatus.pending)
-        s.add(ps)
-        s.commit()
-        s.refresh(ps)
-        pid = ps.id
-
-        specs = [
-            ("po", DocType.PO, 5000, {}, "PO_EXCL"),
-            ("dn", DocType.DN, 5000, {}, "PO_EXCL"),
-            ("si", DocType.SI, 5000, {"si_no": "INV-1", "invoice_no": "INV-1"}, "PO_EXCL"),
-            (
-                "comb",
-                DocType.COMBINED,
-                5000,
-                {
-                    "si_no": "INV-C",
-                    "invoice_no": "INV-C",
-                    "raw_extraction_json": json.dumps(
-                        {"has_po_section": True, "has_dn_section": True, "has_si_section": True}
-                    ),
-                },
-                "PO_EXCL",
-            ),
-        ]
-        for name, dtype, qty, extra, po_no in specs:
-            pdf = tmp_path / "stored_comb_excl" / f"{name}.pdf"
-            _create_dummy_pdf(pdf)
-            d = Document(
-                sha256_hash=f"h_excl_{name}",
-                original_filename=f"{name}.pdf",
-                stored_path=str(pdf),
-                doc_type=dtype,
-                extraction_status=ExtractionStatus.valid,
-                po_set_id=pid,
-                po_no_normalized=po_no,
-                **extra,
-            )
-            s.add(d)
-            s.commit()
-            s.add(
-                LineItem(
-                    document_id=d.id,
-                    line_item_no="1",
-                    description="Widget",
-                    quantity=qty,
-                    unit_price=100000,
-                )
-            )
-            s.commit()
-
-    res = reconcile_po_set(pid, cfg)
-    assert res["status"] == "merged"
-    assert not res.get("flags")
-    with Session(eng) as s:
-        assert s.get(POSet, pid).status == POSetStatus.merged

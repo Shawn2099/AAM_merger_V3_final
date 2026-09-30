@@ -1,4 +1,4 @@
-"""Tests for customs gate — FR-12.1-12.4."""
+"""Tests for customs gate â€” FR-12.1-12.4."""
 
 from app.core.config import load_config
 
@@ -109,33 +109,35 @@ def test_requires_two_docs(tmp_path):
         assert is_blocked(ps) is False  # both present -> not blocked
 
 
-def test_commercial_invoice_optional(tmp_path):
-    """FR-12.4: COMMERCIAL_INVOICE never required to clear blocked_customs."""
+def test_only_customs_and_shipping_satisfy_the_gate(tmp_path):
+    """The gate requires CUSTOMS *and* SHIPPING, and nothing else substitutes.
+
+    COMMERCIAL_INVOICE was removed from the product, so it can no longer be
+    attached at all. This test pins the narrower rule it used to illustrate:
+    a single customs-family document never clears the gate.
+    """
     from sqlalchemy.orm import Session
 
     from app.core.database import get_engine
     from app.models import POSet
     from app.services.customs import is_blocked, toggle_customs
 
-    po_set_id, cfg = _create_po_set(tmp_path, "PO-COMM")
+    po_set_id, cfg = _create_po_set(tmp_path, "PO-CUST")
     ps = toggle_customs(po_set_id, cfg)
     assert is_blocked(ps) is True
 
-    _add_doc(tmp_path, cfg, po_set_id, "COMMERCIAL_INVOICE")
+    # CUSTOMS alone is not enough - the gate wants a pair.
+    _add_doc(tmp_path, cfg, po_set_id, "CUSTOMS")
     eng = get_engine(cfg)
     with Session(eng) as s:
         ps = s.get(POSet, po_set_id)
-        assert is_blocked(ps) is True  # still blocked
+        assert is_blocked(ps) is True
 
-    _add_doc(tmp_path, cfg, po_set_id, "CUSTOMS")
-    with Session(eng) as s:
-        ps = s.get(POSet, po_set_id)
-        assert is_blocked(ps) is True  # CUSTOMS + COMMERCIAL_INVOICE != 2 required
-
+    # Only adding SHIPPING clears it.
     _add_doc(tmp_path, cfg, po_set_id, "SHIPPING")
     with Session(eng) as s:
         ps = s.get(POSet, po_set_id)
-        assert is_blocked(ps) is False  # CUSTOMS+SHIPPING clears, COMMERCIAL_INVOICE irrelevant
+        assert is_blocked(ps) is False
 
 
 def test_toggle_any_status(tmp_path):
@@ -160,28 +162,6 @@ def test_toggle_any_status(tmp_path):
         assert is_blocked(ps2) is False
 
 
-def test_combined_still_blocked(tmp_path):
-    """FR-12.3: COMBINED self-reconciled still waits on customs if toggle on."""
-    from app.services.customs import is_blocked, toggle_customs
-
-    po_set_id, cfg = _create_po_set(tmp_path, "PO-COMBINED")
-    _add_doc(tmp_path, cfg, po_set_id, "COMBINED")
-    ps = toggle_customs(po_set_id, cfg)
-    assert is_blocked(ps) is True  # COMBINED does not satisfy customs gate
-
-    _add_doc(tmp_path, cfg, po_set_id, "CUSTOMS")
-    _add_doc(tmp_path, cfg, po_set_id, "SHIPPING")
-    from sqlalchemy.orm import Session
-
-    from app.core.database import get_engine
-    from app.models import POSet
-
-    eng = get_engine(cfg)
-    with Session(eng) as s:
-        ps = s.get(POSet, po_set_id)
-        assert is_blocked(ps) is False
-
-
 def test_is_blocked_without_toggle_false(tmp_path):
     """Without toggle, never blocked even with no customs docs."""
     from sqlalchemy.orm import Session
@@ -197,8 +177,8 @@ def test_is_blocked_without_toggle_false(tmp_path):
         assert ps.has_customs_toggle is False
         assert is_blocked(ps) is False
 
-    # even after adding COMMERCIAL_INVOICE
-    _add_doc(tmp_path, cfg, po_set_id, "COMMERCIAL_INVOICE")
+    # documents attached to an untoggled set can never block it
+    _add_doc(tmp_path, cfg, po_set_id, "CUSTOMS")
     with Session(eng) as s:
         ps = s.get(POSet, po_set_id)
         assert is_blocked(ps) is False

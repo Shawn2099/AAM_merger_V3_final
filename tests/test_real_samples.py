@@ -201,8 +201,13 @@ REAL_SETS: dict[str, dict] = {
         S: [("1", "Bestolife- COPR99, 5 Gallon Pail Line Item - 1", "655547", "3.00")],
     },
     # SET-15 — Valaris. Sub-numbering "1-1" and part_no with a space.
+    # SET — Bridon. PO numbers the line "1-1"; the DN and SI number it "1".
+    # Previously reconciled by the retired SKU rescue (BRILUBE70 vs "Brilube
+    # 70"). Line numbers are now compared as printed, so "1" has no PO
+    # counterpart and the set quarantines. Wrong direction for a human, right
+    # direction for correctness: no merge rather than a guessed one.
     "100060000080880": {
-        "expect": "merged",
+        "expect": "quarantined",
         P: [("1-1", "LUBRICANT, BRIDON, BRILUBE 70,GREASE F/WIRE ROPES", "BRILUBE70", "2.00")],
         D: [
             (
@@ -257,8 +262,12 @@ REAL_SETS: dict[str, dict] = {
         ],
     },
     # SET-06 — RAK. DN re-indexes PO line 2 onto its own line 1.
+    # ADES. The DN/SI row is described as "Line Item - 2" but printed as line
+    # 1, and PO line 1 (10 EA of pads) is never delivered. The retired reindex
+    # detector used to call this a quarantine; the product now reports it as
+    # `mismatched`. Both are non-merge, so the outcome is equally safe.
     "15676": {
-        "expect": "quarantined",
+        "expect": "mismatched",
         P: [
             (
                 "1",
@@ -342,8 +351,24 @@ REAL_SETS: dict[str, dict] = {
     },
     # SET-09 — McDermott. PO prints "D7264-PO-186000-013-01", DN/SI print
     # "D7264-PO186000-013-01-" (hyphen moved). Ground truth says quarantined.
+    # ======================================================================
+    # KNOWN LIMITATION — this set MERGES and should not.
+    #
+    # Real ADES/NOMAC set D7264-PO186000-013-01. The PO orders part TLMKC.
+    # The DN and SI ship part Runclimb-VALVE instead. Same printed line number,
+    # same quantity, so the quantities reconcile exactly and the packet merges.
+    #
+    # The guard that used to catch this (conflicting model code / description
+    # on a matched line number) was the retired FR-8.4 check, deliberately
+    # removed: quantities are the only signal in this product. Nothing here
+    # compares the part the PO ordered against the part that shipped.
+    #
+    # This is the clearest real-world cost of that decision, and it is why the
+    # CA's human review remains load-bearing rather than a formality.
+    # See AAM_merger_V3_PRODUCT.md, Accepted limitations.
+    # ======================================================================
     "D7264PO18600001301": {
-        "expect": "quarantined",
+        "expect": "merged",
         P: [("1", "COIL MAGNETIC SOLENOID OPENING FOR COMMISSIONING ACTIVITY", "TLMKC", "2.00")],
         D: [
             (
@@ -387,29 +412,37 @@ def _build(tmp_path, po_no, spec):
         s.commit()
         s.refresh(ps)
         ps_id = ps.id  # capture inside the session; ps detaches on close
+        n = 0
+        # ONE document per doc type, carrying all of its line items — which is
+        # what a real extracted PDF looks like. (Building one Document per line
+        # would make a 3-line PO look like 3 PO documents, which the
+        # single_po_document gate correctly rejects.)
         for dtype in (P, D, S):
             if dtype not in spec:
                 continue
-            for line_no, desc, part_no, qty in spec[dtype]:
-                n += 1
-                name = f"doc{n}"
-                p = tmp_path / "stored" / f"{name}.pdf"
-                PdfWriter().write(str(p))
-                extra = {}
-                if dtype == S:
-                    extra = {"si_no": f"SI-{n}", "invoice_no": f"SI-{n}"}
-                d = Document(
-                    sha256_hash=f"real_{po_no}_{name}",
-                    original_filename=f"{name}.pdf",
-                    stored_path=str(p),
-                    doc_type=DocType[dtype],
-                    extraction_status=ExtractionStatus.valid,
-                    po_set_id=ps_id,
-                    po_no_normalized=po_no,
-                    **extra,
-                )
-                s.add(d)
-                s.commit()
+            n += 1
+            name = f"doc{n}"
+            p = tmp_path / "stored" / f"{name}.pdf"
+            PdfWriter().write(str(p))
+            extra = {}
+            if dtype == S:
+                extra = {"si_no": f"SI-{n}", "invoice_no": f"SI-{n}"}
+            d = Document(
+                sha256_hash=f"real_{po_no}_{name}",
+                original_filename=f"{name}.pdf",
+                stored_path=str(p),
+                doc_type=DocType[dtype],
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=ps_id,
+                po_no_normalized=po_no,
+                **extra,
+            )
+            s.add(d)
+            s.commit()
+            # (line_no, description, part_no_as_printed, qty). part_no is
+            # recorded because it is useful when reading a failure, but it is
+            # NOT stored and NOT a matching input in this product.
+            for line_no, desc, _part_no, qty in spec[dtype]:
                 # Route the raw printed string through the real sanitizer so
                 # OCR failures behave exactly as they would in production.
                 from app.services.sanitizer import parse_quantity_scaled
@@ -425,7 +458,6 @@ def _build(tmp_path, po_no, spec):
                         description=desc,
                         quantity=q,
                         unit_price=100000,
-                        part_no=part_no or None,
                     )
                 )
                 s.commit()

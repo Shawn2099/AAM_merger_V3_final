@@ -1,217 +1,146 @@
-def test_match_by_line_no():
-    from app.services.matching import match_line
+"""Tests for the reconciliation rule: group by line number, sum, compare.
 
-    po = {"line_item_no": "5", "description": "Widget A"}
-    dn = [{"line_item_no": "5", "description": "Widget A", "qty": 10}]
-    assert match_line(po, dn, [], thr=85)["matched"] is True
+These are the only matching tests in the project. The v20.5 3-step matcher
+(SKU rescue, reindex detection, ERP step-10 alignment, description sanity
+guard) was retired — see AAM_merger_V3_PRODUCT.md — and the tests that covered
+it were removed with it rather than left failing.
+"""
 
+from __future__ import annotations
 
-def test_match_si_by_line_no():
-    from app.services.matching import match_line
-
-    po = {"line_item_no": "5", "description": "Widget A"}
-    si = [{"line_item_no": "5", "description": "Widget A", "qty": 10}]
-    assert match_line(po, [], si, thr=85)["matched"] is True
-
-
-def test_fuzzy_fallback():
-    from app.services.matching import match_line
-
-    po = {"line_item_no": None, "description": "Widget A 10kg"}
-    dn = [{"line_item_no": None, "description": "Widget A 10 KG", "qty": 10}]
-    assert match_line(po, dn, [], thr=85)["matched"] is True
+from app.services.matching import (
+    compare_aggregates,
+    group_by_line_no,
+    normalize_line_no,
+)
 
 
-def test_fuzzy_si_fallback():
-    from app.services.matching import match_line
-
-    po = {"line_item_no": None, "description": "Widget A 10kg"}
-    si = [{"line_item_no": None, "description": "Widget A 10 KG", "qty": 10}]
-    assert match_line(po, [], si, thr=85)["matched"] is True
+def _ln(no, desc="Widget", qty=100):
+    """A line dict with the quantity already scaled x1000, as stored."""
+    return {"line_item_no": no, "description": desc, "quantity": qty * 1000}
 
 
-def test_conflict_quarantine():
-    from app.services.matching import match_line
-
-    po = {"line_item_no": "5", "description": "Widget A"}
-    dn = [
-        {"line_item_no": "5", "description": "Conflict", "qty": 10},
-        {"line_item_no": "5", "description": "Widget A", "qty": 10},
-    ]
-    assert match_line(po, dn, [], thr=85)["quarantine"] is True
+# --- normalize_line_no -----------------------------------------------------
 
 
-def test_si_conflict_quarantine():
-    from app.services.matching import match_line
-
-    po = {"line_item_no": "5", "description": "Widget A"}
-    si = [
-        {"line_item_no": "5", "description": "Conflict Desc", "qty": 10},
-        {"line_item_no": "5", "description": "Widget A", "qty": 10},
-    ]
-    assert match_line(po, [], si, thr=85)["quarantine"] is True
-
-
-def test_find_unmatched_all_clean():
-    from app.services.matching import find_unmatched
-
-    po_lines = [{"line_item_no": "1", "description": "Widget A"}]
-    dn_lines = [{"line_item_no": "1", "description": "Widget A"}]
-    si_lines = [{"line_item_no": "1", "description": "Widget A"}]
-    assert find_unmatched(po_lines, dn_lines, si_lines, thr=85) == []
-
-
-def test_find_unmatched_extra_dn_line():
-    from app.services.matching import find_unmatched
-
-    po_lines = [{"line_item_no": "1", "description": "Widget A"}]
-    dn_lines = [
-        {"line_item_no": "1", "description": "Widget A"},
-        {"line_item_no": "2", "description": "Extra Unmatched DN Line"},
-    ]
-    si_lines = [{"line_item_no": "1", "description": "Widget A"}]
-    unmatched = find_unmatched(po_lines, dn_lines, si_lines, thr=85)
-    assert len(unmatched) == 1
-    assert unmatched[0]["line_item_no"] == "2"
-
-
-def test_find_unmatched_extra_si_line():
-    from app.services.matching import find_unmatched
-
-    po_lines = [{"line_item_no": "1", "description": "Widget A"}]
-    dn_lines = [{"line_item_no": "1", "description": "Widget A"}]
-    si_lines = [
-        {"line_item_no": "1", "description": "Widget A"},
-        {"line_item_no": "99", "description": "Rogue SI item"},
-    ]
-    unmatched = find_unmatched(po_lines, dn_lines, si_lines, thr=85)
-    assert len(unmatched) == 1
-    assert unmatched[0]["line_item_no"] == "99"
-
-
-def test_step_10_matching_alignment():
-    from app.services.matching import find_unmatched, get_matching_candidates, match_line
-
-    po_lines = [
-        {"line_item_no": "10", "description": "Item 1"},
-        {"line_item_no": "20", "description": "Item 2"},
-        {"line_item_no": "30", "description": "Item 3"},
-    ]
-    dn_lines = [
-        {"line_item_no": "1", "description": "Item 1"},
-        {"line_item_no": "2", "description": "Item 2"},
-        {"line_item_no": "3", "description": "Item 3"},
-    ]
-    si_lines = [
-        {"line_item_no": "1", "description": "Item 1"},
-        {"line_item_no": "2", "description": "Item 2"},
-        {"line_item_no": "3", "description": "Item 3"},
-    ]
-
-    # Check match_line on line 10
-    res = match_line(po_lines[0], dn_lines, si_lines, all_po_lines=po_lines)
-    assert res["matched"] is True
-    assert res["quarantine"] is False
-
-    # Check get_matching_candidates returns line 1
-    cands = get_matching_candidates(po_lines[0], dn_lines, all_po_lines=po_lines)
-    assert len(cands) == 1
-    assert cands[0]["line_item_no"] == "1"
-
-    # Reverse check passes with 0 unmatched
-    unmatched = find_unmatched(po_lines, dn_lines, si_lines, thr=85)
-    assert unmatched == []
-
-
-def test_step_10_per_line_despite_mixed_po():
-    """FR-8.1a: one unit-numbered PO line must not disable step-10 mapping
-    for the remaining step-10 lines."""
-    from app.services.matching import get_matching_candidates
-
-    po_lines = [
-        {"line_item_no": "10", "description": "Hexagon head bolt M12 x 50mm grade 8.8"},
-        {"line_item_no": "5", "description": "Item 5"},
-    ]
-    dn_lines = [
-        {"line_item_no": "1", "description": "Bolt"},
-        {"line_item_no": "5", "description": "Item 5"},
-    ]
-    cands = get_matching_candidates(po_lines[0], dn_lines, all_po_lines=po_lines)
-    assert len(cands) == 1
-    assert cands[0]["line_item_no"] == "1"
-    # the unit-numbered line still exact-matches, unaffected
-    cands5 = get_matching_candidates(po_lines[1], dn_lines, all_po_lines=po_lines)
-    assert len(cands5) == 1
-    assert cands5[0]["line_item_no"] == "5"
-
-
-def test_step_10_reverse_per_line():
-    """FR-8.1a: reverse check maps DN line 1 to PO line 10 per line."""
-    from app.services.matching import find_unmatched
-
-    po_lines = [
-        {"line_item_no": "10", "description": "Hexagon head bolt M12 x 50mm grade 8.8"},
-        {"line_item_no": "5", "description": "Flat Washer SAE"},
-    ]
-    dn_lines = [{"line_item_no": "1", "description": "Bolt"}]
-    assert find_unmatched(po_lines, dn_lines, [], thr=85) == []
-
-
-def test_conflict_third_description_quarantine():
-    """W-4: with 3+ distinct descriptions on one line, every pair is
-    compared — a conflicting third description cannot slip through."""
-    from app.services.matching import match_line
-
-    po = {"line_item_no": "5", "description": "Widget A"}
-    dn = [
-        {"line_item_no": "5", "description": "Widget A", "qty": 10},
-        {"line_item_no": "5", "description": "Widget A+", "qty": 10},
-        {"line_item_no": "5", "description": "Totally different gadget", "qty": 10},
-    ]
-    assert match_line(po, dn, [], thr=85)["quarantine"] is True
-
-
-def test_conflict_third_description_quarantine_si():
-    """W-4, SI branch: same all-pairs rule."""
-    from app.services.matching import match_line
-
-    po = {"line_item_no": "5", "description": "Widget A"}
-    si = [
-        {"line_item_no": "5", "description": "Widget A", "qty": 10},
-        {"line_item_no": "5", "description": "Widget A+", "qty": 10},
-        {"line_item_no": "5", "description": "Totally different gadget", "qty": 10},
-    ]
-    assert match_line(po, [], si, thr=85)["quarantine"] is True
-
-
-def test_normalize_line_no():
-    """DECISIONS_LOG 5: strip whitespace + leading zeros, keep alphanumerics."""
-    from app.services.matching import normalize_line_no
-
+def test_normalize_line_no_strips_whitespace_and_leading_zeros():
     assert normalize_line_no("01") == "1"
     assert normalize_line_no(" 001 ") == "1"
     assert normalize_line_no("1") == "1"
+    assert normalize_line_no("0") == "0"
+
+
+def test_normalize_line_no_preserves_alphanumeric_forms():
+    """Vendors print '1a' and '1-1'; these must survive verbatim."""
     assert normalize_line_no("1a") == "1a"
     assert normalize_line_no("01a") == "1a"
-    assert normalize_line_no("0") == "0"
+    assert normalize_line_no("1-1") == "1-1"
+
+
+def test_normalize_line_no_missing_is_empty_key():
     assert normalize_line_no("") == ""
     assert normalize_line_no(None) == ""
 
 
-def test_match_leading_zero_line_no():
-    """PO 1 matches DN 01 and SI 001."""
-    from app.services.matching import find_unmatched, match_line
-
-    po = {"line_item_no": "1", "description": "Widget A"}
-    dn = [{"line_item_no": "01", "description": "Widget A", "qty": 10}]
-    si = [{"line_item_no": "001", "description": "Widget A", "qty": 10}]
-    assert match_line(po, dn, si, thr=85)["matched"] is True
-    assert find_unmatched([po], dn, si, thr=85) == []
+# --- group_by_line_no ------------------------------------------------------
 
 
-def test_match_alphanumeric_line_no():
-    from app.services.matching import match_line
+def test_split_delivery_sums_into_one_po_line():
+    """One PO line delivered across two DN rows reconciles as a single line."""
+    po_totals, vendor_totals, orphans, fail = group_by_line_no(
+        [_ln("1", qty=100)], [_ln("1", qty=40), _ln("1", qty=60)]
+    )
+    assert fail is None
+    assert orphans == []
+    assert po_totals == {"1": 100_000}
+    assert vendor_totals == {"1": 100_000}
+    assert compare_aggregates(po_totals, vendor_totals, orphans) == []
 
-    po = {"line_item_no": "1a", "description": "Widget A"}
-    dn = [{"line_item_no": "1a", "description": "Widget A", "qty": 10}]
-    assert match_line(po, dn, [], thr=85)["matched"] is True
+
+def test_leading_zero_line_numbers_reconcile_across_documents():
+    po_totals, vendor_totals, orphans, fail = group_by_line_no(
+        [_ln("1", qty=100)], [_ln("01", qty=100)]
+    )
+    assert fail is None and orphans == []
+    assert compare_aggregates(po_totals, vendor_totals, orphans) == []
+
+
+def test_shortfall_is_reported_as_a_quantity_mismatch():
+    po_totals, vendor_totals, orphans, fail = group_by_line_no(
+        [_ln("1", qty=100)], [_ln("1", qty=40)]
+    )
+    assert fail is None and orphans == []
+    diffs = compare_aggregates(po_totals, vendor_totals, orphans)
+    assert len(diffs) == 1
+    assert diffs[0] == {
+        "line": "1",
+        "po_qty": 100_000,
+        "vendor_qty": 40_000,
+        "reason": "quantity_mismatch",
+    }
+
+
+def test_over_delivery_is_reported_as_a_quantity_mismatch():
+    po_totals, vendor_totals, orphans, _ = group_by_line_no(
+        [_ln("1", qty=100)], [_ln("1", qty=250)]
+    )
+    diffs = compare_aggregates(po_totals, vendor_totals, orphans)
+    assert diffs[0]["reason"] == "quantity_mismatch"
+    assert diffs[0]["vendor_qty"] == 250_000
+
+
+def test_vendor_line_with_no_po_counterpart_is_an_orphan():
+    """A delivered line that resolves nowhere is an identity failure."""
+    po_totals, vendor_totals, orphans, _ = group_by_line_no(
+        [_ln("1", qty=100)], [_ln("1", qty=100), _ln("99", desc="Rogue item", qty=5)]
+    )
+    assert len(orphans) == 1
+    assert orphans[0]["why"] == "no_po_line_with_this_number"
+    # orphans are reported in place of quantity diffs
+    diffs = compare_aggregates(po_totals, vendor_totals, orphans)
+    assert diffs[0]["po_qty"] is None
+    assert diffs[0]["reason"] == "no_po_line_with_this_number"
+
+
+def test_unnumbered_vendor_row_falls_back_to_description():
+    """No usable line number -> try the description, and only then."""
+    po_totals, vendor_totals, orphans, _ = group_by_line_no(
+        [_ln("1", desc="Hexagon head bolt M12", qty=100)],
+        [{"line_item_no": None, "description": "hexagon head bolt m 12", "quantity": 100_000}],
+    )
+    assert orphans == []
+    assert vendor_totals == {"1": 100_000}
+    assert compare_aggregates(po_totals, vendor_totals, orphans) == []
+
+
+def test_unnumbered_row_with_no_similar_description_is_an_orphan():
+    _po, _vt, orphans, _ = group_by_line_no(
+        [_ln("1", desc="Hexagon head bolt M12")],
+        [{"line_item_no": None, "description": "Copper pipe fitting", "quantity": 5_000}],
+    )
+    assert len(orphans) == 1
+    assert orphans[0]["why"] == "no_line_number_and_no_description_match"
+
+
+def test_description_never_overrides_a_real_line_number():
+    """A printed number is authoritative even when the text reads like another
+    line. This is the rule that stops a wrong-item aggregate shipping."""
+    po_totals, vendor_totals, orphans, _ = group_by_line_no(
+        [_ln("1", desc="Widget Alpha"), _ln("2", desc="Widget Beta")],
+        [_ln("1", desc="Widget Beta", qty=100)],
+    )
+    assert orphans == []
+    # it landed on line 1, not line 2
+    assert vendor_totals == {"1": 100_000}
+    assert compare_aggregates(po_totals, vendor_totals, orphans)[0]["line"] == "2"
+
+
+def test_po_line_without_a_line_number_fails_the_set():
+    """An unaddressable PO line is unresolvable by definition."""
+    _pt, _vt, _orphans, fail = group_by_line_no([_ln("1"), _ln(None)], [_ln("1")])
+    assert fail == "po_line_missing_line_item_no"
+
+
+def test_missing_line_number_fails_even_when_other_lines_are_fine():
+    _pt, _vt, _orphans, fail = group_by_line_no([_ln("1"), _ln("2"), _ln("")], [_ln("1"), _ln("2")])
+    assert fail == "po_line_missing_line_item_no"

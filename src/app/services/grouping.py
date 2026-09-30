@@ -87,16 +87,6 @@ def normalize_po_no(raw: str) -> str:
     return "".join(kept).upper()
 
 
-def effective_dn_no(line, document) -> str | None:
-    """The delivery-note number that applies to one line.
-
-    Vendors either print the DN number once in the header or against every
-    individual row. A line-wise value overrides the document-level one for
-    that row; both raw values are kept so the evidence is never lost.
-    """
-    return (getattr(line, "dn_no", None) or getattr(document, "dn_no", None) or None) or None
-
-
 def get_or_create_po_set(po_no: str, cfg, create: bool = True):
     from sqlalchemy.orm import Session
 
@@ -120,7 +110,7 @@ def get_or_create_po_set(po_no: str, cfg, create: bool = True):
         if not create:
             # Attach-only (BLOCKER-5): DN/SI/UNKNOWN docs must never mint
             # orphan sets from decoy codes — they wait visibly unattached
-            # (unclassified view) until a PO/COMBINED anchors the key.
+            # (unclassified view) until a PO anchors the key.
             return None
         ps = POSet(po_no_normalized=norm, status=POSetStatus.pending)
         s.add(ps)
@@ -151,6 +141,7 @@ def attach_unattached_to_open_sets(cfg) -> set[int]:
                 Document.po_set_id.is_(None),
                 Document.extraction_status == ExtractionStatus.valid,
                 Document.po_no_normalized.isnot(None),
+                Document.is_split_parent.is_(False),
             )
             .all()
         )
@@ -177,13 +168,70 @@ def attach_unattached_to_open_sets(cfg) -> set[int]:
     return touched
 
 
+def _anchor_from_po_line_ref(session, dn_no: str | None) -> tuple[int | None, str | None]:
+    """Find the PO Set whose PO names this delivery-note number on a row.
+
+    Some POs print, per line, which delivery note will cover that line. A
+    delivery note that arrives without a printed PO number still knows its own
+    number in `documents.dn_no`, so that per-row reference is the only route
+    from the note back to its PO Set.
+
+    Why the PO is the anchor: only PO documents mint sets
+    (`app/flows/sync.py::_ANCHOR_TYPES`), so a PO in the database is attached
+    to a set by construction. Anchoring on a sibling delivery note instead
+    would be circular — a DN is frequently unattached for exactly the reason
+    this path exists.
+
+    Returns (po_set_id, po_no_normalized) when every PO carrying this
+    reference belongs to the SAME set, else (None, None). Ambiguity is
+    refused rather than resolved first-wins: a delivery note spanning two POs
+    has no single correct set, and guessing it would attach a document to a
+    transaction it may not belong to.
+    """
+    if not dn_no:
+        return None, None
+
+    from app.models import DocType, LineItem
+
+    po_doc_ids = {
+        doc_id
+        for (doc_id,) in session.query(LineItem.document_id)
+        .filter(LineItem.dn_no == dn_no)
+        .distinct()
+        .all()
+    }
+    if not po_doc_ids:
+        return None, None
+
+    from app.models import Document
+
+    anchor_rows = (
+        session.query(Document)
+        .filter(
+            Document.id.in_(po_doc_ids),
+            Document.doc_type == DocType.PO,
+            Document.po_set_id.isnot(None),
+        )
+        .all()
+    )
+    anchor_sets = {r.po_set_id for r in anchor_rows if r.po_set_id}
+    if len(anchor_sets) != 1:
+        return None, None
+
+    only_set = anchor_sets.pop()
+    anchor = next(r for r in anchor_rows if r.po_set_id == only_set)
+    return only_set, anchor.po_no_normalized
+
+
 def resolve_unattached_documents(cfg) -> set[int]:
     """Group unattached documents (e.g. Delivery Notes without printed PO) into PO Sets.
 
-    Strategies:
-    1. Cross-reference: If doc has dn_no and an SI document has the same dn_no
+    Strategies, in order of evidential strength:
+    1. Cross-reference: If doc has dn_no and another document has the same dn_no
        and an open po_set_id.
-    2. Sibling filename prefix: If doc shares a batch filename prefix (e.g. SIV-DTS-25-477)
+    2. PO line reference: If the doc's dn_no is printed against rows of a PO
+       that is already attached, inherit that PO Set. (See _anchor_from_po_line_ref.)
+    3. Sibling filename prefix: If doc shares a batch filename prefix (e.g. SIV-DTS-25-477)
        with an already-grouped SI or PO document in an open PO set.
     """
     from sqlalchemy.orm import Session
@@ -200,6 +248,7 @@ def resolve_unattached_documents(cfg) -> set[int]:
             .filter(
                 Document.po_set_id.is_(None),
                 Document.extraction_status == ExtractionStatus.valid,
+                Document.is_split_parent.is_(False),
             )
             .all()
         )
@@ -228,7 +277,13 @@ def resolve_unattached_documents(cfg) -> set[int]:
                     matched_ps_id = anchor.po_set_id
                     matched_po_norm = anchor.po_no_normalized
 
-            # 2. Match by sibling filename prefix
+            # 2. Match via the PO's per-line delivery-note reference. Stronger
+            # evidence than the filename heuristic below: the number is
+            # printed on the document itself, not inferred from a name.
+            if not matched_ps_id:
+                matched_ps_id, matched_po_norm = _anchor_from_po_line_ref(s, doc.dn_no)
+
+            # 3. Match by sibling filename prefix
             if not matched_ps_id and doc.original_filename:
                 fn = doc.original_filename
                 parts = fn.replace("_", "-").split("-pages-")[0].split("-")

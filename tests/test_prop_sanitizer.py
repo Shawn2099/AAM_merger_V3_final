@@ -15,11 +15,13 @@ from hypothesis import strategies as st
 
 from app.services.sanitizer import parse_quantity_scaled
 
-# A decimal with at most 3 dp, always strictly positive.
+# A decimal with at most 2 significant decimals, always strictly positive.
+# Real quantities are whole units or occasional .50; 2dp is the product
+# contract (PRODUCT doc section 5).
 quantities = st.decimals(
-    min_value=Decimal("0.0001"),
+    min_value=Decimal("0.01"),
     max_value=Decimal("1000000"),
-    places=3,
+    places=2,
     allow_nan=False,
     allow_infinity=False,
 )
@@ -83,7 +85,7 @@ def test_outer_whitespace_irrelevant(d, pad):
 @settings(max_examples=300, deadline=None)
 def test_monotonic_in_value(d):
     """A larger printed quantity must never parse to a smaller scaled int."""
-    bigger = d + Decimal("0.001")
+    bigger = d + Decimal("0.01")
     assume(bigger <= Decimal("1000000"))
     assert parse_quantity_scaled(as_plain(bigger)) > parse_quantity_scaled(as_plain(d))
 
@@ -100,7 +102,7 @@ def test_indian_grouping_equivalence(d):
 @given(quantities)
 @settings(max_examples=200, deadline=None)
 def test_round_trip_through_scaled_int(d):
-    """parse -> scaled int -> decimal must be lossless at 3dp precision."""
+    """parse -> scaled int -> decimal must be lossless at 2dp precision."""
     scaled = parse_quantity_scaled(as_plain(d))
     assert Decimal(scaled) / 1000 == d
 
@@ -110,17 +112,32 @@ def test_round_trip_through_scaled_int(d):
 
 @given(quantities)
 @settings(max_examples=200, deadline=None)
-def test_rejects_more_than_three_decimals(d):
-    bad = as_plain(d) + "5"  # a 4th decimal place
+def test_rejects_more_than_two_decimals(d):
+    """A third significant decimal must be rejected, not silently rounded."""
+    bad = as_plain(d) + "5"
     assume("." in bad)
     with pytest.raises(ValueError):
         parse_quantity_scaled(bad)
 
 
+@given(quantities, st.integers(min_value=0, max_value=8))
+@settings(max_examples=200, deadline=None)
+def test_trailing_zeros_are_never_rejected(d, extra):
+    """Padding a value with trailing zeros must not change accept/reject.
+
+    "12.45", "12.450" and "12.45000000" are one number. A precision check that
+    counts characters rather than significant decimals would quarantine
+    documents that are perfectly legible, which vendors emit constantly.
+    """
+    plain = as_plain(d)
+    padded = plain + ("0" * extra)
+    assert parse_quantity_scaled(padded) == parse_quantity_scaled(plain)
+
+
 @given(st.integers(min_value=1, max_value=10000))
 @settings(max_examples=100, deadline=None)
 def test_rejects_zero_and_negative(n):
-    for bad in ("0", "0.000", "-1", f"-{n}", "-0.001"):
+    for bad in ("0", "0.00", "-1", f"-{n}", "-0.01"):
         with pytest.raises(ValueError):
             parse_quantity_scaled(bad)
 
@@ -165,7 +182,9 @@ def test_inner_space_separator_never_guessed(n):
     [
         "1 000",  # space as a thousands separator — never guessed
         "1,5",  # ambiguous grouping
-        "1.0005",  # four decimals
+        "1.0005",  # four significant decimals
+        "1.234",  # three significant decimals (European thousands separator)
+        "0.001",  # three significant decimals
         "",
         "   ",
         "INF",
@@ -217,13 +236,18 @@ def test_accepted_variants(raw, expected):
 
 @pytest.mark.parametrize("raw", ["100,000", "1,234,567"])
 def test_western_grouping_is_rejected_under_en_in(raw):
-    """en_IN strict demands Indian grouping: 1,00,000, never 100,000.
+    """DECIDED 2026-09-29 — accepted limit, not a bug. Do not "fix" unasked.
 
-    Only 5+ digit numbers differ between the two schemes (1,000 and 10,000 are
-    written the same either way). This fails SAFE (INVALID_QUANTITY ->
-    quarantine, never a bad merge) but it WILL quarantine genuinely valid
-    documents that print Western grouping, so it is called out explicitly for
-    the team to decide on a fallback locale.
+    en_IN strict demands Indian grouping: 1,00,000, never 100,000. The client
+    base is English-language UAE and USA, which print Western grouping, so a
+    six-digit quantity would quarantine.
+
+    It fails SAFE (INVALID_QUANTITY -> 0 -> `non_positive_quantity` ->
+    quarantine, never a bad merge), and it has never been observed: real
+    quantities are whole units or occasional .50. A dual-locale parse (accept
+    when en_IN and en_US agree, reject when they disagree) is the fix if it ever
+    bites; until then the one-line remedy is `matching.locale: "en_US"` in
+    config.yaml, no code change. See AAM_merger_V3_PRODUCT.md section 8.
     """
     with pytest.raises(ValueError):
         parse_quantity_scaled(raw)
@@ -239,7 +263,7 @@ def test_never_returns_float(d):
 @given(quantities)
 @settings(max_examples=150, deadline=None)
 def test_scaled_is_multiple_of_one(d):
-    """Values with <=3dp scale by exactly 1000 — no rounding surprises."""
+    """Values with <=2dp scale by exactly 1000 — no rounding surprises."""
     scaled = parse_quantity_scaled(as_plain(d))
     assert scaled == int(d * 1000)
     assert scaled % 1 == 0

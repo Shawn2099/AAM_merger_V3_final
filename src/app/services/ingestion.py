@@ -29,6 +29,9 @@ def ingest_file(src: Path, cfg: AppConfig) -> Document:
     data = src.read_bytes()
     h = hashlib.sha256(data).hexdigest()
     eng = get_engine(cfg)
+    from app.models.base import Base
+
+    Base.metadata.create_all(eng)
     with Session(eng) as s:
         existing = s.query(Document).filter_by(sha256_hash=h).first()
         if existing:
@@ -44,12 +47,36 @@ def ingest_file(src: Path, cfg: AppConfig) -> Document:
         stored = Path(cfg.paths.stored_documents_folder) / f"{h}{src.suffix}"
         stored.parent.mkdir(parents=True, exist_ok=True)
         stored.write_bytes(data)
+        # Split-child linkage (PLAN Rev 2 §4.5): `<sha16>_p<i>.pdf` filenames
+        # resolve to the sterile parent via SHA prefix. Crash-safe, no sidecar.
+        # A doc that is itself a split parent never becomes a child.
+        parent_id: int | None = None
+        try:
+            from app.services.splitting import parse_child_filename
+
+            sha16, _ = parse_child_filename(src.name)
+            parent_row = (
+                s.query(Document)
+                .filter(
+                    Document.is_split_parent.is_(True),
+                    Document.sha256_hash.like(f"{sha16}%"),
+                )
+                .order_by(Document.id.asc())
+                .first()
+            )
+            if parent_row is not None:
+                parent_id = parent_row.id
+        except ValueError:
+            pass  # ordinary filename — no linkage
+        except Exception:
+            pass  # linkage must never fail an ingest
         doc = Document(
             sha256_hash=h,
             original_filename=src.name,
             stored_path=str(stored),
             doc_type=DocType.UNKNOWN,
             extraction_status=ExtractionStatus.pending,
+            parent_document_id=parent_id,
         )
         s.add(doc)
         s.commit()
@@ -57,9 +84,20 @@ def ingest_file(src: Path, cfg: AppConfig) -> Document:
         return doc
 
 
-def clear_input_if_merged(po_set: POSet) -> bool:
-    """FR-4.8 gate: clear input only if merged output exists and extraction persisted."""
-    return bool(po_set.status == POSetStatus.merged and po_set.merged_output_path)
+def find_input_pdfs(input_folder: Path | str) -> list[Path]:
+    """Every PDF in the input folder, once each, on any platform.
+
+    Do NOT write this as `glob("*.pdf") + glob("*.PDF")`. pathlib's glob is
+    CASE-INSENSITIVE on Windows, so both patterns match the same files and the
+    input set is enumerated twice. That is not harmless: `sync_flow` extracts
+    after ingesting, so every document was sent to the VLM a second time on
+    every sync — double the API cost, on the one platform this is deployed to.
+    It reproduces only on Windows, so Linux development hides it.
+    """
+    folder = Path(input_folder)
+    if not folder.exists():
+        return []
+    return sorted(f for f in folder.iterdir() if f.is_file() and f.suffix.lower() == ".pdf")
 
 
 def delete_input_files(po_set: POSet, input_folder: Path | str) -> list[str]:
@@ -100,15 +138,16 @@ def delete_input_files(po_set: POSet, input_folder: Path | str) -> list[str]:
 
     # 2. Delete any remaining duplicate files matching the SHA-256 hashes
     if valid_hashes:
-        for f in list(in_dir.glob("*.pdf")) + list(in_dir.glob("*.PDF")):
-            if f.exists():
-                try:
-                    f_hash = hashlib.sha256(f.read_bytes()).hexdigest()
-                    if f_hash in valid_hashes:
-                        f.unlink(missing_ok=True)
-                        if f.name not in deleted:
-                            deleted.append(f.name)
-                except Exception:
-                    pass
+        for f in find_input_pdfs(in_dir):
+            if not f.exists():
+                continue
+            try:
+                f_hash = hashlib.sha256(f.read_bytes()).hexdigest()
+                if f_hash in valid_hashes:
+                    f.unlink(missing_ok=True)
+                    if f.name not in deleted:
+                        deleted.append(f.name)
+            except Exception:
+                pass
 
     return deleted

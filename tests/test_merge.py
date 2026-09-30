@@ -1,4 +1,4 @@
-"""Tests for merge — order SI→DN→PO→(AWB→Customs), filename=invoice_no, merged immutable (FR-14.1-14.7)."""
+"""Tests for merge â€” order SIâ†’DNâ†’POâ†’(AWBâ†’Customs), filename=invoice_no, merged immutable (FR-14.1-14.7)."""
 
 from pathlib import Path
 
@@ -27,7 +27,7 @@ def _tiny_pdf(p: Path, width: int = 200, height: int = 200) -> Path:
 def _create_poset_with_docs(tmp_path, cfg, po_no="PO-1234", status=None, docs_info=None):
     """Create POSet and Document rows with tiny PDFs.
 
-    docs_info: list of dict(doc_type, si_no/invoice_no, width) — width used to identify order.
+    docs_info: list of dict(doc_type, si_no/invoice_no, width) â€” width used to identify order.
     """
     import hashlib
 
@@ -68,7 +68,7 @@ def _create_poset_with_docs(tmp_path, cfg, po_no="PO-1234", status=None, docs_in
             )
             s.add(doc)
             s.flush()
-            # one evidence line per doc — auto-merge requires line items (W-22)
+            # one evidence line per doc â€” auto-merge requires line items (W-22)
             from app.models import LineItem as _LineItem
 
             s.add(
@@ -85,7 +85,7 @@ def _create_poset_with_docs(tmp_path, cfg, po_no="PO-1234", status=None, docs_in
 
 
 def test_merge_order_si_dn_po(tmp_path):
-    """FR-14.3: order SI→DN→PO, 3 pages."""
+    """FR-14.3: order SIâ†’DNâ†’PO, 3 pages."""
     from pypdf import PdfReader
 
     from app.services.merge import merge_po_set
@@ -108,7 +108,7 @@ def test_merge_order_si_dn_po(tmp_path):
     assert len(reader.pages) == 3
     # verify order by page mediabox widths
     widths = [float(p.mediabox.width) for p in reader.pages]
-    assert widths == [400, 300, 200], f"expected SI→DN→PO order, got {widths}"
+    assert widths == [400, 300, 200], f"expected SIâ†’DNâ†’PO order, got {widths}"
 
 
 def test_merge_filename_is_invoice_no(tmp_path):
@@ -144,7 +144,7 @@ def test_merge_filename_is_invoice_no(tmp_path):
 
 
 def test_merge_order_with_customs(tmp_path):
-    """FR-14.3: SI→DN→PO→(SHIPPING→CUSTOMS) when customs applies."""
+    """FR-14.3: SIâ†’DNâ†’POâ†’(SHIPPINGâ†’CUSTOMS) when customs applies."""
     from pypdf import PdfReader
 
     from app.services.merge import merge_po_set
@@ -167,7 +167,7 @@ def test_merge_order_with_customs(tmp_path):
     reader = PdfReader(str(out))
     assert len(reader.pages) == 5
     widths = [float(p.mediabox.width) for p in reader.pages]
-    assert widths == [400, 300, 200, 500, 600], f"expected SI→DN→PO→SHIPPING→CUSTOMS, got {widths}"
+    assert widths == [400, 300, 200, 500, 600], f"expected SIâ†’DNâ†’POâ†’SHIPPINGâ†’CUSTOMS, got {widths}"
 
 
 def test_merge_returns_none_if_mismatched(tmp_path):
@@ -310,30 +310,6 @@ def test_force_merge_bypasses_and_writes_audit(tmp_path):
         assert ps.merged_output_path == str(out)
 
 
-def test_combined_excludes_separate_docs(tmp_path):
-    """FR-14.7: COMBINED + separate docs → authoritative COMBINED packet only,
-    separate docs remain visible but non-authoritative (no content doubling)."""
-    from pypdf import PdfReader
-
-    from app.services.merge import merge_po_set
-
-    cfg = _cfg_with_tmp(tmp_path)
-    po_set_id = _create_poset_with_docs(
-        tmp_path,
-        cfg,
-        docs_info=[
-            {"doc_type": "COMBINED", "invoice_no": "INV-COMB-1", "width": 100},
-            {"doc_type": "SI", "si_no": "INV-SI-9", "width": 400},
-            {"doc_type": "DN", "width": 300},
-            {"doc_type": "PO", "width": 200},
-        ],
-    )
-    out = merge_po_set(po_set_id, cfg)
-    assert out is not None
-    reader = PdfReader(str(out))
-    assert len(reader.pages) == 1
-
-
 def test_zero_evidence_auto_merge_refused(tmp_path):
     """W-22: auto-merge with zero line items refuses, status untouched."""
     from sqlalchemy.orm import Session
@@ -374,9 +350,100 @@ def test_zero_evidence_auto_merge_refused(tmp_path):
         assert ps_after.merged_output_path is None
 
 
+def test_merge_now_route_merges_when_eligible_and_never_forces(tmp_path):
+    """Merge Now is a gated re-evaluation, not a second Force Merge.
+
+    It must merge a set that has just become eligible (here: the customs
+    documents landed), and it must refuse a set that is still not reconciled
+    rather than merging it anyway.
+    """
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import Session
+
+    import app.api.routes.po_sets as po_routes
+    from app.core.database import get_engine
+    from app.main import app
+    from app.models import DocType, POSet
+
+    cfg = _cfg_with_tmp(tmp_path)
+    po_set_id = _create_poset_with_docs(
+        tmp_path,
+        cfg,
+        docs_info=[
+            {"doc_type": "PO", "width": 200},
+            {"doc_type": "DN", "width": 300},
+            {"doc_type": "SI", "si_no": "INV-MERGENOW", "width": 400},
+        ],
+    )
+    eng = get_engine(cfg)
+
+    # break it first: the DN is short, so nothing may merge
+    with Session(eng) as s:
+        ps = s.get(POSet, po_set_id)
+        for doc in ps.documents:
+            for li in doc.line_items:
+                li.quantity = 100_000
+        dn = next(d for d in ps.documents if d.doc_type == DocType.DN)
+        dn.line_items[0].quantity = 40_000
+        s.commit()
+
+    original = po_routes.load_config
+    po_routes.load_config = lambda: cfg
+    try:
+        client = TestClient(app)
+
+        # not eligible: Merge Now must say so and write nothing
+        r = client.post(f"/po_sets/{po_set_id}/merge")
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] != "merged", "must not merge an unreconciled set"
+        with Session(eng) as s:
+            assert s.get(POSet, po_set_id).merged_output_path is None
+
+        # fix it, then Merge Now must deliver
+        with Session(eng) as s:
+            dn = next(d for d in s.get(POSet, po_set_id).documents if d.doc_type == DocType.DN)
+            dn.line_items[0].quantity = 100_000
+            s.commit()
+
+        r2 = client.post(f"/po_sets/{po_set_id}/merge")
+        assert r2.status_code == 200, r2.text
+        body = r2.json()
+        assert body["status"] == "merged", body
+        assert body["merged_output_path"]
+    finally:
+        po_routes.load_config = original
+
+
+def test_merge_now_releases_its_lock(tmp_path):
+    """A second Merge Now immediately after must not 409 on our own lock."""
+    from fastapi.testclient import TestClient
+
+    import app.api.routes.po_sets as po_routes
+    from app.main import app
+
+    cfg = _cfg_with_tmp(tmp_path)
+    po_set_id = _create_poset_with_docs(
+        tmp_path,
+        cfg,
+        docs_info=[{"doc_type": "SI", "si_no": "INV-LOCK", "width": 200}],
+    )
+    original = po_routes.load_config
+    po_routes.load_config = lambda: cfg
+    try:
+        client = TestClient(app)
+        assert client.post(f"/po_sets/{po_set_id}/merge").status_code == 200
+        assert client.post(f"/po_sets/{po_set_id}/merge").status_code == 200
+    finally:
+        po_routes.load_config = original
+
+
 def test_standard_set_names_strictly_from_si(tmp_path):
-    """W-2: standard set where only the DN carries an invoice number cannot
-    be named from it → auto-merge refuses instead of misnaming the packet."""
+    """A number printed only on the DN must NOT name the packet.
+
+    The name comes from the SI document, or - when no SI number was extracted
+    at all - from the PO number. A DN's own number is never used, because a
+    packet named from the wrong document is worse than an unnamed one.
+    """
     from app.services.merge import merge_po_set
 
     cfg = _cfg_with_tmp(tmp_path)
@@ -389,4 +456,55 @@ def test_standard_set_names_strictly_from_si(tmp_path):
             {"doc_type": "PO"},
         ],
     )
-    assert merge_po_set(po_set_id, cfg) is None
+    out = merge_po_set(po_set_id, cfg)
+    assert out is not None
+    # fell back to the PO number, NOT the DN's number
+    assert Path(out).name == "PO-1234.pdf"
+
+
+def test_missing_invoice_number_falls_back_to_po_number_and_says_so(tmp_path):
+    """A packet named from the PO number is reported so the gap stays visible.
+
+    The quantities are what reconciliation proves, so a missing invoice label
+    must not veto a correct packet. But the reviewer should be told the file is
+    not invoice-named, in case the customer expects it to be.
+    """
+    from app.services.merge import merge_po_set
+
+    cfg = _cfg_with_tmp(tmp_path)
+    po_set_id = _create_poset_with_docs(
+        tmp_path,
+        cfg,
+        docs_info=[
+            {"doc_type": "SI"},
+            {"doc_type": "DN"},
+            {"doc_type": "PO"},
+        ],
+    )
+    info: dict = {}
+    out = merge_po_set(po_set_id, cfg, info=info)
+    assert out is not None
+    assert Path(out).name == "PO-1234.pdf"
+    assert info["invoice_no_missing"] is True
+    assert info["output_name"] == "PO-1234.pdf"
+
+
+def test_invoice_number_is_preferred_over_po_number(tmp_path):
+    """When an SI number exists it wins, and the fallback flag stays False."""
+    from app.services.merge import merge_po_set
+
+    cfg = _cfg_with_tmp(tmp_path)
+    po_set_id = _create_poset_with_docs(
+        tmp_path,
+        cfg,
+        docs_info=[
+            {"doc_type": "SI", "si_no": "INV-777"},
+            {"doc_type": "DN"},
+            {"doc_type": "PO"},
+        ],
+    )
+    info: dict = {}
+    out = merge_po_set(po_set_id, cfg, info=info)
+    assert out is not None
+    assert Path(out).name == "INV-777.pdf"
+    assert info["invoice_no_missing"] is False

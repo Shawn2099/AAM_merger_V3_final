@@ -12,9 +12,7 @@ from app.models.base import Base
 def is_blocked(po_set: POSet) -> bool:
     """Return True if customs toggle is on and CUSTOMS+SHIPPING not both present.
 
-    FR-12.2: requires exactly CUSTOMS and SHIPPING (2 docs).
-    FR-12.4: COMMERCIAL_INVOICE never required — ignored.
-    FR-12.3: COMBINED does not satisfy gate — only CUSTOMS/SHIPPING count.
+    FR-12.2: requires exactly CUSTOMS and SHIPPING (2 docs) and nothing else.
     """
     if not po_set.has_customs_toggle:
         return False

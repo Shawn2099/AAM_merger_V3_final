@@ -2,12 +2,10 @@
 
 The pure-function properties live in test_prop_*; these exercise the real
 persistence path, where the failures that actually reach a CA originate:
-statelessness, split deliveries, COMBINED authority, and non-GOODS rows.
+statelessness, split deliveries, over-delivery, and non-GOODS rows.
 """
 
 from __future__ import annotations
-
-import json
 
 import pytest
 from sqlalchemy.orm import Session
@@ -73,8 +71,6 @@ def harness(tmp_path):
                             description=ln.get("desc", "Widget"),
                             quantity=ln["qty"],
                             unit_price=ln.get("price", 100000),
-                            part_no=ln.get("part_no"),
-                            line_type=ln.get("line_type", "GOODS"),
                         )
                     )
                 s.commit()
@@ -114,7 +110,7 @@ def test_reconciling_twice_is_idempotent(harness):
 
 
 def test_rematch_does_not_double_deduct(harness):
-    """The whole reason the matcher is stateless: a re-run must not sum twice."""
+    """The whole reason the comparison is stateless: a re-run must not sum twice."""
     build, _eng, cfg = harness
     pid = build(
         [
@@ -130,8 +126,11 @@ def test_rematch_does_not_double_deduct(harness):
     qty = [f for f in res["flags"] if f.get("type") == "quantity"]
     assert qty, "expected a quantity flag"
     for f in qty:
-        assert f["agg_dn_quantity"] == 60
-        assert f["agg_si_quantity"] == 60
+        # this harness stores raw quantities unscaled
+        assert f["po_quantity"] == 100
+        assert f["vendor_quantity"] == 60
+    # both pools are reported separately and independently
+    assert {f["pool"] for f in qty} == {"DN", "SI"}
 
 
 # ------------------------------------------------------------------ split delivery
@@ -169,87 +168,7 @@ def test_over_delivery_across_many_dns_is_caught(harness):
     assert _status(eng, pid)[1] is None, "must not merge on over-delivery"
 
 
-# ------------------------------------------------------------------ COMBINED
-
-
-def test_combined_with_separate_docs_uses_combined_only(harness):
-    """COMBINED is authoritative; counting separate lines too would double."""
-    build, _eng, cfg = harness
-    pid = build(
-        [
-            ("PO", [{"no": "1", "qty": 100}], {}),
-            ("DN", [{"no": "1", "qty": 100}], {}),
-            ("SI", [{"no": "1", "qty": 100}], {"si_no": "I1", "invoice_no": "I1"}),
-            (
-                "COMBINED",
-                [{"no": "1", "qty": 100}],
-                {
-                    "si_no": "IC",
-                    "invoice_no": "IC",
-                    "raw_extraction_json": json.dumps(
-                        {"has_po_section": True, "has_dn_section": True, "has_si_section": True}
-                    ),
-                },
-            ),
-        ]
-    )
-    res = reconcile_po_set(pid, cfg)
-    assert res["status"] == "merged", f"{res.get('reason')} {res.get('flags')}"
-
-
-def test_combined_mismatch_blocks_merge(harness):
-    build, eng, cfg = harness
-    pid = build(
-        [
-            ("PO", [{"no": "1", "qty": 100}], {}),
-            (
-                "COMBINED",
-                [{"no": "1", "qty": 90}],
-                {
-                    "si_no": "IC",
-                    "invoice_no": "IC",
-                    "raw_extraction_json": json.dumps(
-                        {"has_po_section": True, "has_dn_section": True, "has_si_section": True}
-                    ),
-                },
-            ),
-        ]
-    )
-    res = reconcile_po_set(pid, cfg)
-    assert res["status"] == "mismatched"
-    assert _status(eng, pid)[1] is None
-
-
 # ------------------------------------------------------------------ non-GOODS
-
-
-def test_non_goods_rows_are_fully_excluded(harness):
-    """Tax/freight rows on every document must not perturb the math at all."""
-    build, _eng, cfg = harness
-    pid = build(
-        [
-            ("PO", [{"no": "1", "qty": 100}], {}),
-            (
-                "DN",
-                [
-                    {"no": "1", "qty": 100},
-                    {"no": "2", "qty": 500, "line_type": "TAX"},
-                    {"no": "3", "qty": 900, "line_type": "FREIGHT"},
-                ],
-                {},
-            ),
-            (
-                "SI",
-                [
-                    {"no": "1", "qty": 100},
-                    {"no": "2", "qty": 500, "line_type": "TAX"},
-                ],
-                {"si_no": "I1", "invoice_no": "I1"},
-            ),
-        ]
-    )
-    res = reconcile_po_set(pid, cfg)
-    assert res["status"] == "merged", f"{res.get('reason')} {res.get('flags')}"
 
 
 # ------------------------------------------------------------------ degenerate
@@ -271,21 +190,10 @@ def test_missing_si_stays_pending(harness):
 
 
 def test_unknown_line_type_falls_back_to_goods(harness):
-    """An unrecognised line_type must not silently drop a real line."""
-    build, _eng, cfg = harness
-    pid = build(
-        [
-            ("PO", [{"no": "1", "qty": 100, "line_type": "MYSTERY"}], {}),
-            ("DN", [{"no": "1", "qty": 100, "line_type": "MYSTERY"}], {}),
-            (
-                "SI",
-                [{"no": "1", "qty": 100, "line_type": "MYSTERY"}],
-                {"si_no": "I", "invoice_no": "I"},
-            ),
-        ]
-    )
-    res = reconcile_po_set(pid, cfg)
-    assert res["status"] == "merged", "unknown line_type must be treated as GOODS"
+    """Removed: line_type no longer exists. Tax/freight/fee rows are excluded
+    by the extraction prompt (STEP 3 'EXCLUDE subtotal, VAT, tax, ...') rather
+    than by a stored row kind. See AAM_merger_V3_PRODUCT.md, Accepted
+    limitations â€” a tax row the VLM fails to exclude will be summed."""
 
 
 def test_zero_quantity_line_quarantines_whole_set(harness):

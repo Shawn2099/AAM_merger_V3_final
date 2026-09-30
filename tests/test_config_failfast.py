@@ -44,7 +44,7 @@ def test_phase1_defaults_from_example():
     cfg = load_config("config.example.yaml")
     assert cfg.vlm.model == "openai/gpt-6-luna"
     assert cfg.matching.locale == "en_IN"
-    assert cfg.merge.legal_order == ["SI", "DN", "PO", "COMBINED", "SHIPPING", "CUSTOMS"]
+    assert cfg.merge.legal_order == ["SI", "DN", "PO", "SHIPPING", "CUSTOMS"]
 
 
 def test_bad_locale_fails_fast(tmp_path, monkeypatch):

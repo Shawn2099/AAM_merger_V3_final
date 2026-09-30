@@ -40,6 +40,13 @@
   --clr-quarantined-text: #991b1b;
   --clr-quarantined-border: #fecaca;
 
+  /* Document extraction permanently failed — stronger than quarantined,
+     which describes a PO Set a human can still act on. A failed document
+     will not be retried at all until an operator resets the attempt count. */
+  --clr-failed-bg: #7f1d1d;
+  --clr-failed-text: #fff1f2;
+  --clr-failed-border: #991b1b;
+
   /* Elevation */
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
@@ -309,6 +316,13 @@ nav.app-navbar {
   background-color: var(--clr-quarantined-bg);
   color: var(--clr-quarantined-text);
   border: 1px solid var(--clr-quarantined-border);
+}
+
+.badge-failed {
+  background-color: var(--clr-failed-bg);
+  color: var(--clr-failed-text);
+  border: 1px solid var(--clr-failed-border);
+  font-weight: 600;
 }
 
 .badge-gray {

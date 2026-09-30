@@ -1,4 +1,4 @@
-"""Task 10 TDD — Dashboard + Audit + Polish (§8). Tests wire all views, 5-status filter, customs toggle,
+"""Task 10 TDD â€” Dashboard + Audit + Polish (Â§8). Tests wire all views, 5-status filter, customs toggle,
 Redo vs Redo matching split, Force Merge modal, HTMX partial refresh, audit read-only, cross-platform."""
 
 from __future__ import annotations
@@ -31,14 +31,12 @@ def tmp_cfg(tmp_path):
     cfg.paths.output_folder = tmp_path / "output"
     cfg.paths.quarantine_folder = tmp_path / "quarantine"
     cfg.paths.stored_documents_folder = tmp_path / "stored"
-    cfg.paths.unclassified_folder = tmp_path / "unclassified"
     cfg.paths.log_folder = tmp_path / "logs"
     for p in [
         cfg.paths.input_folder,
         cfg.paths.output_folder,
         cfg.paths.quarantine_folder,
         cfg.paths.stored_documents_folder,
-        cfg.paths.unclassified_folder,
         cfg.paths.log_folder,
     ]:
         Path(p).mkdir(parents=True, exist_ok=True)
@@ -450,46 +448,6 @@ def test_unclassified_view_and_reclassify(tmp_cfg, client):
         assert ps.po_no_normalized == "MANUALPO999"
 
 
-def test_reclassify_to_combined_forces_reextract(tmp_cfg, client):
-    """W-1: hand-tagging a doc COMBINED resets extraction so the FR-6.7
-    section gate re-validates it before any merge."""
-    from sqlalchemy.orm import Session
-
-    from app.core.database import get_engine
-    from app.models import DocType, Document, ExtractionStatus
-    from app.models.base import Base
-
-    eng = get_engine(tmp_cfg)
-    Base.metadata.create_all(eng)
-
-    with Session(eng) as s:
-        doc = Document(
-            sha256_hash="unk_hash_combined",
-            original_filename="maybe_combined.pdf",
-            stored_path="data/stored/maybe_combined.pdf",
-            doc_type=DocType.UNKNOWN,
-            extraction_status=ExtractionStatus.valid,
-            extraction_attempt_count=2,
-        )
-        s.add(doc)
-        s.commit()
-        s.refresh(doc)
-        doc_id = doc.id
-
-    r_post = client.post(
-        f"/unclassified/{doc_id}/reclassify",
-        data={"doc_type": "COMBINED", "po_no": "REC999"},
-        headers={"HX-Request": "true"},
-    )
-    assert r_post.status_code == 200
-
-    with Session(eng) as s:
-        d = s.get(Document, doc_id)
-        assert d.doc_type == DocType.COMBINED
-        assert d.extraction_status == ExtractionStatus.pending
-        assert d.extraction_attempt_count == 0
-
-
 def test_manual_merger_back_link_points_to_dashboard(client):
     r = client.get("/manual/merger")
     assert r.status_code == 200
@@ -509,7 +467,7 @@ def _pdf_bytes() -> bytes:
 
 
 def test_upload_duplicate_does_not_rewrite(tmp_cfg, client):
-    """W-12: duplicate upload is idempotent — stored bytes + rows untouched."""
+    """W-12: duplicate upload is idempotent â€” stored bytes + rows untouched."""
     from sqlalchemy.orm import Session
 
     from app.core.database import get_engine
@@ -532,7 +490,7 @@ def test_upload_duplicate_does_not_rewrite(tmp_cfg, client):
             files={"file": ("customs.pdf", payload, "application/pdf")},
             data={"doc_type": "CUSTOMS"},
         )
-        # RedirectResponse to the set view (TestClient follows → 200 + 302 history)
+        # RedirectResponse to the set view (TestClient follows â†’ 200 + 302 history)
         assert r.status_code == 200, r.text
         assert r.history and r.history[0].status_code == 302
 
@@ -555,6 +513,60 @@ def test_upload_duplicate_does_not_rewrite(tmp_cfg, client):
         assert s.query(Document).filter_by(po_set_id=ps_id).count() == 1
         docs = s.query(Document).filter_by(po_set_id=ps_id).all()
         assert Path(docs[0].stored_path).read_bytes() == b"SENTINEL"
+
+
+def test_upload_same_file_to_another_set_is_rejected_visibly(tmp_cfg, client):
+    """A file already owned by another PO Set cannot be silently re-attached.
+
+    `documents.sha256_hash` is unique, so identical bytes are one document.
+    Uploading them to a *different* set used to fall through the dedup branch
+    untouched: HTTP 302 to a page that still showed the customs gate
+    unsatisfied, with nothing written. The operator could not tell a working
+    upload from a discarded one, and the gate could never clear.
+    """
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import Document
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        a = POSet(po_no_normalized="PO_OWNER", status=POSetStatus.pending)
+        b = POSet(po_no_normalized="PO_THIEF", status=POSetStatus.pending)
+        s.add(a)
+        s.add(b)
+        s.commit()
+        s.refresh(a)
+        s.refresh(b)
+        owner_id, thief_id = a.id, b.id
+
+    payload = _pdf_bytes()
+    r = client.post(
+        f"/po_sets/{owner_id}/upload",
+        files={"file": ("customs.pdf", payload, "application/pdf")},
+        data={"doc_type": "CUSTOMS"},
+    )
+    assert r.status_code == 200, r.text
+
+    # the same bytes, offered to a different set
+    r2 = client.post(
+        f"/po_sets/{thief_id}/upload",
+        files={"file": ("customs.pdf", payload, "application/pdf")},
+        data={"doc_type": "CUSTOMS"},
+    )
+    assert r2.status_code == 409, f"expected a visible conflict, got {r2.status_code}"
+    assert "PO_OWNER" in r2.text, "the error must name the PO Set that already holds the file"
+
+    with Session(eng) as s:
+        assert s.query(Document).filter_by(po_set_id=owner_id).count() == 1
+        assert s.query(Document).filter_by(po_set_id=thief_id).count() == 0, (
+            "the duplicate must not be attached to the second set"
+        )
+        # and the gate is still honestly reported as unsatisfied on that set
+        thief = s.get(POSet, thief_id)
+        assert thief.customs_doc_count == 0
 
 
 def test_upload_rejects_non_pdf(tmp_cfg, client):
@@ -692,3 +704,123 @@ def test_static_assets_served(client):
     r_js = client.get("/static/js/app.js")
     assert r_js.status_code == 200
     assert "pdfDrawer" in r_js.text
+
+
+def test_detail_matrix_absent_dn_pool_shows_mismatch(tmp_cfg, client, tmp_path):
+    """An absent DN pool is unmet demand: the matrix must not show a match."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus, LineItem, POSet, POSetStatus
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO-MAT", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+        for dtype, lines in (("PO", [("1", 100)]), ("SI", [("1", 100)])):
+            d = Document(
+                sha256_hash=f"h_mat_{dtype}",
+                original_filename=f"{dtype.lower()}.pdf",
+                stored_path=str(tmp_path / f"{dtype.lower()}.pdf"),
+                doc_type=DocType[dtype],
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=ps_id,
+                po_no_normalized="PO-MAT",
+            )
+            s.add(d)
+            s.commit()
+            for ln, q in lines:
+                s.add(
+                    LineItem(
+                        document_id=d.id,
+                        line_item_no=ln,
+                        description=f"item {ln}",
+                        quantity=q * 1000,
+                        unit_price=1000,
+                    )
+                )
+            s.commit()
+
+    r = client.get(f"/po_sets/{ps_id}/view")
+    assert r.status_code == 200, r.text
+    assert "row-mismatch" in r.text
+    assert "DN: 0" in r.text
+
+
+def test_reclassify_combined_rejected(tmp_cfg, client):
+    """COMBINED is a Layer-1 packaging fact; the operator cannot hand-tag it."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="unk_hash_nocomb",
+            original_filename="maybe.pdf",
+            stored_path="data/stored/maybe.pdf",
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.valid,
+            extraction_attempt_count=2,
+        )
+        s.add(doc)
+        s.commit()
+        s.refresh(doc)
+        doc_id = doc.id
+
+    r_post = client.post(
+        f"/unclassified/{doc_id}/reclassify",
+        data={"doc_type": "COMBINED", "po_no": "REC999"},
+        headers={"HX-Request": "true"},
+    )
+    assert r_post.status_code == 422, r_post.text
+    with Session(eng) as s:
+        d = s.get(Document, doc_id)
+        assert d.doc_type == DocType.UNKNOWN
+        assert d.extraction_attempt_count == 2
+
+
+def test_unclassified_lists_failed_non_unknown(tmp_cfg, client):
+    """A failed typed document is a loss the holding area must show."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        s.add(
+            Document(
+                sha256_hash="h_wait_unknown",
+                original_filename="waiting.pdf",
+                stored_path="data/stored/waiting.pdf",
+                doc_type=DocType.UNKNOWN,
+                extraction_status=ExtractionStatus.pending,
+            )
+        )
+        s.add(
+            Document(
+                sha256_hash="h_dead_dn",
+                original_filename="dead_dn.pdf",
+                stored_path="data/stored/dead_dn.pdf",
+                doc_type=DocType.DN,
+                extraction_status=ExtractionStatus.failed,
+                extraction_attempt_count=3,
+            )
+        )
+        s.commit()
+
+    r = client.get("/unclassified")
+    assert r.status_code == 200, r.text
+    assert "waiting.pdf" in r.text
+    assert "dead_dn.pdf" in r.text
