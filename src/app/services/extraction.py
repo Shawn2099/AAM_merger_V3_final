@@ -531,7 +531,7 @@ def extract_document(doc_id: int, cfg) -> Document:
                 .execution_options(synchronize_session=False)
             )
             s.commit()
-            if cas_result.rowcount == 0:
+            if getattr(cas_result, "rowcount", 0) == 0:
                 # Another caller already claimed it — return current persisted state.
                 s.refresh(doc)
                 return doc
