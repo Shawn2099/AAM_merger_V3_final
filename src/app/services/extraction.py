@@ -84,7 +84,7 @@ _PAGE_PROMPT = (
     'PO: {"document_type":"PO","document_number":"210851","po_reference":null,"line_items":[{"line_item_no":"1","description":"WASHER, FLAT SAE 1/4 IN YELLOW ZINC PLATED CS","quantity":"1","unit_price":"1620.00"}]}\n'
     'DN bundle: {"document_type":"DN","document_number":"GDN-ARS-26-4619","po_reference":"210851","line_items":[{"line_item_no":"1","description":"WASHER, LOCK, 3/8\\" - MFG: FLY","quantity":"50","unit_price":"1000.00"}]}\n'
     'Re-indexed DN (side column lies, use the embedded marker): {"document_type":"DN","document_number":"GDN-RHO-25-513","po_reference":"8300023893","line_items":[{"line_item_no":"10","description":"GATE VALVE 2IN CL150 - Line Item - 10","quantity":"2","dn_no":"GDN-RHO-25-513"}]}\n'
-    'COMBINED: {"document_type":"COMBINED","document_number":"SIV-RAK-25-3049","po_reference":"3049PO123","line_items":[{"line_item_no":"1","description":"WASHER, FLAT SAE 1/4 IN","quantity":"50","unit_price":"120.00"}]}\n'
+    'COMBINED: {"document_type":"COMBINED","document_number":"SIV-RAK-25-3049","po_reference":"3049PO123","page_count":3,"components":[{"document_type":"PO","page_start":1,"page_end":1},{"document_type":"DN","page_start":2,"page_end":2},{"document_type":"SI","page_start":3,"page_end":3}],"line_items":[{"line_item_no":"1","description":"WASHER, FLAT SAE 1/4 IN","quantity":"50","unit_price":"120.00"}]}\n'
 )
 
 
@@ -276,7 +276,8 @@ def _call_vlm(stored_path: str, doc_type: str, cfg) -> dict:
             for c in (resp.components or [])
         ],
         "document_number": resp.document_number,
-        "po_no_raw": resp.po_reference or resp.document_number,
+        "po_no_raw": resp.po_reference
+        or (resp.document_number if resp.document_type == "PO" else None),
         "po_reference": resp.po_reference,
         "po_reference_ambiguous": resp.po_reference_ambiguous,
         "vendor_name": resp.vendor_name,
