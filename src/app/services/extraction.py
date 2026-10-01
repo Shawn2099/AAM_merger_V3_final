@@ -35,12 +35,15 @@ _SYSTEM_PROMPT = (
     "You are Luna document parser for AAM_merger V3. Return strict JSON matching schema: "
     "document_type enum[PO,SI,DN,COMBINED,SKIP,UNKNOWN], "
     "has_po_section:bool, has_dn_section:bool, has_si_section:bool, "
+    "page_count:int, components[] {document_type enum[PO,DN,SI,SKIP], page_start:int, page_end:int}, "
     "document_number (own SI No/DN No/PO No or null for COMBINED), "
     "po_reference (the PO No visible for SI/DN/COMBINED, null for PO), "
     "po_reference_ambiguous:bool, "
     "vendor_name, line_items[] {line_item_no, description, quantity: NUMBER-ONLY as printed "
-    "(no unit/UOM/currency), dn_no}. "
-    "COMBINED = single PDF containing PO+DN+SI sections together (CA merged). Omit nulls, no markdown."
+    "(no unit/UOM/currency), dn_no, unit_price}. "
+    "COMBINED = multi-document PDF containing runs of PO/DN/SI. When COMBINED: return page_count and "
+    "components (1-based page ranges for splitting); do NOT extract line_items (leave line_items empty []). "
+    "Omit nulls, no markdown."
 )
 
 _PAGE_PROMPT = (
@@ -65,7 +68,7 @@ _PAGE_PROMPT = (
     "  description: COMPLETE, do not truncate. Keep the 'Line Item - N' text inside it if it was printed there.\n"
     "  dn_no: only if a delivery-note number is printed against THIS individual row; otherwise null. "
     "Most vendors print the DN number once in the header, not per line.\n"
-    "  For COMBINED: emit union of all sections but do NOT duplicate sections.\n"
+    "  For COMBINED: DO NOT EXTRACT LINE ITEMS. Leave line_items empty []. The file is split by page range, and each child document will have its line items extracted individually.\n"
     "  EXCLUDE subtotal, VAT, tax, total, amount-in-words, payment terms, signatures.\n\n"
     "STEP 4 — QUANTITY (the NUMBER ONLY; do NOT calculate, do NOT scale):\n"
     '  quantity = the digits as printed, and nothing else. "1", "50", "12.5", "12.45000000".\n'
@@ -73,7 +76,7 @@ _PAGE_PROMPT = (
     "MT, BAGS), currency symbols, and words like EACH or SET. If the cell reads "
     "'12.5 EA' return \"12.5\"; if it reads '1,200.00 M3' return \"1200.00\".\n"
     "  UOM itself is NOT extracted anywhere in this system. Never return it.\n\n"
-    "STEP 5 — MULTI-PAGE / MULTI-DN: if PDF contains 2-3 DNs or COMBINED multi-page, emit first po_reference, include ALL line_items across pages in order.\n"
+    "STEP 5 — MULTI-PAGE / MULTI-DN: if PDF contains 2-3 DNs, emit first po_reference, include ALL line_items across pages in order.\n"
     "STEP 6 — MULTI-DOC SPLIT (COMBINED branch only): enumerate each contiguous same-type run as a component "
     "with its REAL PDF page indices (1-based position in this file as pypdf sees it, never numbers printed on the page). "
     "A page that continues the current PO/DN/SI extends the run; a page that changes type ends the run and starts a new component. "
@@ -84,7 +87,7 @@ _PAGE_PROMPT = (
     'PO: {"document_type":"PO","document_number":"210851","po_reference":null,"line_items":[{"line_item_no":"1","description":"WASHER, FLAT SAE 1/4 IN YELLOW ZINC PLATED CS","quantity":"1","unit_price":"1620.00"}]}\n'
     'DN bundle: {"document_type":"DN","document_number":"GDN-ARS-26-4619","po_reference":"210851","line_items":[{"line_item_no":"1","description":"WASHER, LOCK, 3/8\\" - MFG: FLY","quantity":"50","unit_price":"1000.00"}]}\n'
     'Re-indexed DN (side column lies, use the embedded marker): {"document_type":"DN","document_number":"GDN-RHO-25-513","po_reference":"8300023893","line_items":[{"line_item_no":"10","description":"GATE VALVE 2IN CL150 - Line Item - 10","quantity":"2","dn_no":"GDN-RHO-25-513"}]}\n'
-    'COMBINED: {"document_type":"COMBINED","document_number":"SIV-RAK-25-3049","po_reference":"3049PO123","page_count":3,"components":[{"document_type":"PO","page_start":1,"page_end":1},{"document_type":"DN","page_start":2,"page_end":2},{"document_type":"SI","page_start":3,"page_end":3}],"line_items":[{"line_item_no":"1","description":"WASHER, FLAT SAE 1/4 IN","quantity":"50","unit_price":"120.00"}]}\n'
+    'COMBINED: {"document_type":"COMBINED","document_number":null,"po_reference":"3049PO123","page_count":3,"components":[{"document_type":"PO","page_start":1,"page_end":1},{"document_type":"DN","page_start":2,"page_end":2},{"document_type":"SI","page_start":3,"page_end":3}],"line_items":[]}\n'
 )
 
 

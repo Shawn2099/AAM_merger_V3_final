@@ -381,3 +381,76 @@ def test_delete_audit_survives_with_detail(tmp_path):
         surviving = s.query(AuditLog).filter_by(id=audit.id).one()
         assert surviving.po_set_id is None
         assert json.loads(surviving.detail)["document_count"] == 3
+
+
+def test_quarantine_si_dn_missing_po_reference(tmp_path, monkeypatch):
+    """Client rule: an SI or DN document with no PO number must be immediately quarantined."""
+    from pypdf import PdfWriter
+    from sqlalchemy.orm import Session
+
+    from app.core.config import load_config
+    from app.core.database import get_engine
+    from app.flows.sync import sync_flow
+    from app.models import Document, ExtractionStatus
+
+    cfg = load_config("config.example.yaml")
+    cfg.paths.database_path = str(tmp_path / "missing_po.db")
+    cfg.paths.input_folder = str(tmp_path / "input")
+    cfg.paths.output_folder = str(tmp_path / "output")
+    cfg.paths.quarantine_folder = str(tmp_path / "quarantine")
+    cfg.paths.stored_documents_folder = str(tmp_path / "stored")
+    cfg.paths.combined_folder = str(tmp_path / "combined")
+    for p in (
+        cfg.paths.input_folder,
+        cfg.paths.output_folder,
+        cfg.paths.quarantine_folder,
+        cfg.paths.stored_documents_folder,
+    ):
+        Path(p).mkdir(parents=True, exist_ok=True)
+
+    # Create dummy SI PDF without PO
+    si_pdf = Path(cfg.paths.input_folder) / "si_no_po.pdf"
+    w = PdfWriter()
+    w.add_blank_page(width=100, height=100)
+    with open(si_pdf, "wb") as f:
+        w.write(f)
+
+    # Mock VLM extraction returning SI with no po_reference
+    monkeypatch.setattr(
+        "app.services.extraction._call_vlm",
+        lambda *a, **kw: {
+            "document_type": "SI",
+            "document_number": "SI-1001",
+            "po_reference": None,
+            "vendor_name": "Test Vendor",
+            "line_items": [
+                {
+                    "line_item_no": "1",
+                    "description": "Item 1",
+                    "quantity": "10",
+                    "unit_price": "100.00",
+                }
+            ],
+        },
+    )
+
+    # Run sync flow
+    monkeypatch.setattr("app.flows.sync.load_config", lambda *a, **kw: cfg)
+    monkeypatch.setattr("app.core.config.load_config", lambda *a, **kw: cfg)
+    sync_flow()
+
+    # Verify input file was removed
+    assert not si_pdf.exists(), "Quarantined file should be removed from input folder"
+
+    # Verify document in DB is marked failed
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        doc = s.query(Document).filter_by(original_filename="si_no_po.pdf").one()
+        assert doc.extraction_status == ExtractionStatus.failed
+        assert doc.po_no_normalized is None
+
+    # Verify quarantine file and QUARANTINE.txt exist
+    q_docs = list((Path(cfg.paths.quarantine_folder) / "_documents").glob("*"))
+    assert len(q_docs) == 1
+    q_txt = (q_docs[0] / "QUARANTINE.txt").read_text(encoding="utf-8")
+    assert "missing_po_reference" in q_txt

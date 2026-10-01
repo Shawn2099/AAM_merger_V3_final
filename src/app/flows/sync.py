@@ -50,7 +50,12 @@ def _persisted_extraction_status(eng, doc_id) -> ExtractionStatus | None:
 
 
 def _quarantine_broken_document(
-    doc_id: int, cfg, eng, input_file: Path | None, touched_po_set_ids: set[int]
+    doc_id: int,
+    cfg,
+    eng,
+    input_file: Path | None,
+    touched_po_set_ids: set[int],
+    reason: str | None = None,
 ) -> None:
     """Take a document that failed permanently out of the running.
 
@@ -73,12 +78,14 @@ def _quarantine_broken_document(
     from app.models import POSet, POSetStatus
     from app.services.quarantine import quarantine_copy, quarantine_document
 
+    default_reason = (
+        "Extraction failed permanently (attempt cap reached); document content could not be read."
+    )
     try:
         quarantine_document(
             doc_id,
             cfg,
-            reason="Extraction failed permanently (attempt cap reached); "
-            "document content could not be read.",
+            reason=reason or default_reason,
         )
     except Exception:
         logger.warning("Could not quarantine broken document %s", doc_id, exc_info=True)
@@ -308,6 +315,22 @@ def _recovery_flow_locked(
                             d.po_set_id = ps.id
                             s_grp.commit()
                         touched_po_set_ids.add(ps.id)
+                elif (
+                    d
+                    and not d.is_split_parent
+                    and _doc_type_val(d) in ("SI", "DN", "COMMERCIAL_INVOICE")
+                    and not d.po_no_normalized
+                ):
+                    d.extraction_status = ExtractionStatus.failed
+                    s_grp.commit()
+                    _quarantine_broken_document(
+                        d.id,
+                        cfg,
+                        eng,
+                        None,
+                        touched_po_set_ids,
+                        reason="missing_po_reference: Document is missing a PO number",
+                    )
         except Exception:
             logger.warning("Grouping failed for pending doc %s", doc_id, exc_info=True)
             recovered_errors += 1
@@ -477,6 +500,22 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
                             d2.po_set_id = ps.id
                             s2.commit()
                         touched_po_set_ids.add(ps.id)
+                    elif (
+                        d2
+                        and not d2.is_split_parent
+                        and _doc_type_val(d2) in ("SI", "DN", "COMMERCIAL_INVOICE")
+                        and not d2.po_no_normalized
+                    ):
+                        d2.extraction_status = ExtractionStatus.failed
+                        s2.commit()
+                        _quarantine_broken_document(
+                            d2.id,
+                            cfg,
+                            eng,
+                            f,
+                            touched_po_set_ids,
+                            reason="missing_po_reference: Document is missing a PO number",
+                        )
             except Exception:
                 logger.warning("Grouping failed for doc %s", doc.id, exc_info=True)
                 errors += 1
