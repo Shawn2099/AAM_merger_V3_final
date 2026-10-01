@@ -398,9 +398,7 @@ def redo_match(po_set_id: int):
 
 
 @router.delete("/{po_set_id}/quarantine")
-def delete_quarantined(
-    po_set_id: int, response: Response, justification: str = Form("")
-):
+def delete_quarantined(po_set_id: int, response: Response, justification: str = Form("")):
     """Delete quarantined PO Set - per-PO locked (FR-CONC-1).
 
     `justification` is optional; when given it must be >= 20 chars and is

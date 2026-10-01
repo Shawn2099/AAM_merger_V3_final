@@ -365,7 +365,6 @@ def _recovery_flow_locked(
     }
 
 
-
 @flow(name="sync_flow")
 def sync_flow(cfg_path: str | None = None, held_lock=None) -> dict:
     """One Prefect flow per Sync run (FR-4.1-4.8).

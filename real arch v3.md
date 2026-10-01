@@ -2248,13 +2248,17 @@ a link when non-null and `â€”` when the `ON DELETE SET NULL` fired.
 Quoted logic (`app/services/matching.py:41`):
 
 ```python
-if s is None: return ""
+if s is None:
+    return ""
 t = str(s).strip()
-if not t: return ""
+if not t:
+    return ""
 m = re.match(r"^0*(\d.*)$", t, re.DOTALL)
-if not m: return t                       # <- non-numeric-leading returns verbatim
+if not m:
+    return t  # <- non-numeric-leading returns verbatim
 m2 = re.match(r"^(\d+)(.*)$", m.group(1), re.DOTALL)
-if m2 is None: return t
+if m2 is None:
+    return t
 num = m2.group(1).lstrip("0") or "0"
 return num + m2.group(2)
 ```
@@ -2354,10 +2358,11 @@ number; `grouping.py:289-291` only ever takes the first four dash-segments as a
 Quoted logic (`app/services/matching.py:31-38`):
 
 ```python
-if not s: return ""
+if not s:
+    return ""
 s = s.lower()
-s = re.sub(r"(\d)([A-Za-z])", r"\1 \2", s)   # digit -> letter
-s = re.sub(r"([A-Za-z])(\d)", r"\1 \2", s)   # letter -> digit
+s = re.sub(r"(\d)([A-Za-z])", r"\1 \2", s)  # digit -> letter
+s = re.sub(r"([A-Za-z])(\d)", r"\1 \2", s)  # letter -> digit
 return s.strip()
 ```
 
@@ -2391,15 +2396,22 @@ Quoted logic (`app/services/sanitizer.py:33-74`), `MAX_DECIMAL_PLACES = 2`,
 `locale="en_IN"`:
 
 ```python
-if raw is None or not str(raw).strip():  raise ValueError("Quantity string is empty.")
-val = parse_decimal(cleaned, locale=locale, strict=True)   # NumberFormatError/ValueError -> ValueError
-if not val.is_finite():             raise ValueError(f"Quantity is not a finite number: {raw!r}")
-if val <= 0:                        raise ValueError(f"Quantity must be strictly positive: {raw!r}")
-if val.adjusted() > 12:             raise ValueError(f"Quantity is implausibly large: {raw!r}")
+if raw is None or not str(raw).strip():
+    raise ValueError("Quantity string is empty.")
+val = parse_decimal(
+    cleaned, locale=locale, strict=True
+)  # NumberFormatError/ValueError -> ValueError
+if not val.is_finite():
+    raise ValueError(f"Quantity is not a finite number: {raw!r}")
+if val <= 0:
+    raise ValueError(f"Quantity must be strictly positive: {raw!r}")
+if val.adjusted() > 12:
+    raise ValueError(f"Quantity is implausibly large: {raw!r}")
 normalised = Decimal(str(val)).normalize()
-exponent   = normalised.as_tuple().exponent
-decimals   = -exponent if exponent < 0 else 0
-if decimals > MAX_DECIMAL_PLACES:  raise ValueError(f"Quantity has {decimals} significant decimals (max 2): {raw!r}")
+exponent = normalised.as_tuple().exponent
+decimals = -exponent if exponent < 0 else 0
+if decimals > MAX_DECIMAL_PLACES:
+    raise ValueError(f"Quantity has {decimals} significant decimals (max 2): {raw!r}")
 return int(val * 1000)
 ```
 
@@ -2463,12 +2475,14 @@ Quoted logic (`app/services/matching.py:107-123`):
 
 ```python
 v_desc = _norm(vendor_line.get("description") or "")
-if not v_desc: return ""
+if not v_desc:
+    return ""
 best_key, best_score = "", 0.0
 for key, p_desc in po_desc.items():
-    if not p_desc: continue
+    if not p_desc:
+        continue
     score = fuzz.token_sort_ratio(v_desc, p_desc)
-    if score > best_score:                 # <- strictly greater: first key wins a tie
+    if score > best_score:  # <- strictly greater: first key wins a tie
         best_key, best_score = key, score
 return best_key if best_score >= threshold else ""
 ```

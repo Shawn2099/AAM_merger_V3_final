@@ -257,7 +257,9 @@ def merge_po_set(po_set_id: int, cfg, info: dict | None = None) -> Path | None:
         return Path(ps.merged_output_path)
 
 
-def force_merge(po_set_id: int, cfg, justification: str | None = None, source: str = "system") -> Path:
+def force_merge(
+    po_set_id: int, cfg, justification: str | None = None, source: str = "system"
+) -> Path:
     """Force merge unconditional — bypasses the reconciliation and customs gates.
 
     The operator's explicit override. Still immutable once merged: returns the

@@ -292,7 +292,9 @@ def validate_justification(text: str | None) -> str | None:
     return cleaned
 
 
-def delete_quarantined(po_set_id: int, cfg, justification: str | None = None, source: str = "system") -> AuditLog:
+def delete_quarantined(
+    po_set_id: int, cfg, justification: str | None = None, source: str = "system"
+) -> AuditLog:
     """Delete quarantined POSet DB rows only, keep files, write audit_log (FR-13.6-13.7).
 
     Removes po_sets + documents + line_items rows scoped to po_set_id.

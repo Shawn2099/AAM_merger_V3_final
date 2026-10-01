@@ -28,7 +28,7 @@ def deploy() -> None:
     )
     deployment_id = deployment.apply()
     print(
-        f"✅ Prefect deployment 'aam-midnight-sync' registered successfully "
+        f"[OK] Prefect deployment 'aam-midnight-sync' registered successfully "
         f"(ID: {deployment_id}, Pool: {pool_name}, Schedule: 0 0 * * *)"
     )
 

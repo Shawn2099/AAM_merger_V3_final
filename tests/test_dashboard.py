@@ -911,4 +911,3 @@ def test_reclassify_customs_updates_count_and_clears_blocked(tmp_cfg, client):
         ps = s.get(POSet, pid)
         assert ps.customs_doc_count == 2
         assert ps.status == POSetStatus.pending
-

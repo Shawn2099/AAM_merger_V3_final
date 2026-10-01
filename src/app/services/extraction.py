@@ -448,11 +448,7 @@ def populate_from_raw_dict(doc: Document, result: dict, s: Session, cfg) -> None
         doc.invoice_no = result["document_number"]
     if result.get("document_type") == "DN" and result.get("document_number"):
         doc.dn_no = result["document_number"]
-    if (
-        result.get("document_type") == "PO"
-        and result.get("document_number")
-        and not doc.po_no_raw
-    ):
+    if result.get("document_type") == "PO" and result.get("document_number") and not doc.po_no_raw:
         doc.po_no_raw = result["document_number"]
         from app.services.grouping import normalize_po_no
 
@@ -476,9 +472,7 @@ def populate_from_raw_dict(doc: Document, result: dict, s: Session, cfg) -> None
         s.add(
             LineItem(
                 document_id=doc.id,
-                line_item_no=str(li.get("line_item_no"))
-                if li.get("line_item_no")
-                else None,
+                line_item_no=str(li.get("line_item_no")) if li.get("line_item_no") else None,
                 description=str(li.get("description")),
                 quantity=qty_i,
                 unit_price=price_i,

@@ -85,7 +85,10 @@ REASON_TEXT: dict[str, str] = {
     "packet_naming_failed": "The merged packet could not be named unambiguously",
     "po_reference_mismatch": "A document references a different PO number",
     "quantity_mismatch": "PO, delivery, and invoice quantities do not agree",
-    "po_document_has_no_line_items": "The PO document was read but contains no line items — re-extract or contact the VLM operator",
+    "po_document_has_no_line_items": (
+        "The PO document was read but contains no line items — "
+        "re-extract or contact the VLM operator"
+    ),
 }
 
 
@@ -350,8 +353,9 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
 
         # A PO document exists but extraction produced zero line items while vendor
         # documents contain line items. The fault is in PO extraction (VLM returned nothing),
-        # not in vendor documents — so the quarantine reason must say so explicitly rather than
-        # falling through to "unmatched vendor line", which would point the operator at the wrong files.
+        # not in vendor documents — so the quarantine reason must say so explicitly
+        # rather than falling through to "unmatched vendor line", which would point
+        # the operator at the wrong files.
         if not po_lines and (dn_lines or si_lines):
             ps.status = POSetStatus.quarantined
             s.commit()

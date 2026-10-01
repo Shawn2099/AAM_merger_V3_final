@@ -1041,4 +1041,3 @@ def test_re_reconcile_merged_set_preserves_naming_reason(tmp_path):
     with Session(eng) as s:
         ps_after = s.get(POSet, ps_id)
         assert ps_after.reconcile_reason == original_reason
-
