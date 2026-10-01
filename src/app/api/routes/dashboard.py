@@ -4,6 +4,7 @@ Cross-platform via pathlib. No hardcoded paths. Sync def handlers."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -55,14 +56,12 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
     if status_filter:
         if status_filter not in _ALLOWED_STATUSES:
             return []
-        all_sets = q.all()
-        pools = [
-            ps
-            for ps in all_sets
-            if (ps.status.value if hasattr(ps.status, "value") else str(ps.status)) == status_filter
-        ]
-    else:
-        pools = q.all()
+        try:
+            target_status = POSetStatus(status_filter)
+            q = q.filter(POSet.status == target_status)
+        except ValueError:
+            return []
+    pools = q.all()
 
     if not pools:
         return []
@@ -74,7 +73,7 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
         .group_by(Document.po_set_id)
         .all()
     )
-    doc_counts = dict(doc_count_rows)
+    doc_counts = {r[0]: r[1] for r in doc_count_rows if r[0] is not None}
 
     out = []
     for ps in pools:
@@ -94,7 +93,16 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
                 "is_locked": is_locked(ps, cfg),
             }
         )
-    out.sort(key=lambda x: x["updated_at"] or x["id"], reverse=True)  # type: ignore[no-matching-overload]
+
+    def _sort_key(x: dict) -> tuple[datetime, int]:
+        dt = x.get("updated_at")
+        if dt is None:
+            return (datetime.min, x.get("id") or 0)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(UTC).replace(tzinfo=None)
+        return (dt, x.get("id") or 0)
+
+    out.sort(key=_sort_key, reverse=True)
     return out
 
 
@@ -306,12 +314,17 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
             from app.services.matching import normalize_line_no
 
             for p in po_lines:
-                key = normalize_line_no(p.get("line_item_no"))
-                agg_dn = comparison["dn_totals"].get(key, 0) / 1000
-                agg_si = comparison["si_totals"].get(key, 0) / 1000
-                po_q = p["quantity"] / 1000
-                reconciled = (dn_lines and agg_dn * 1000 == p["quantity"]) and (
-                    si_lines and agg_si * 1000 == p["quantity"]
+                raw_line_no = p.get("line_item_no")
+                key = normalize_line_no(str(raw_line_no) if raw_line_no is not None else None)
+                dn_scaled = comparison["dn_totals"].get(key, 0)
+                si_scaled = comparison["si_totals"].get(key, 0)
+                agg_dn = dn_scaled / 1000
+                agg_si = si_scaled / 1000
+                raw_qty = int(p.get("quantity") or 0)
+                raw_price = int(p.get("unit_price") or 0)
+                po_q = raw_qty / 1000
+                reconciled = (bool(dn_lines) and dn_scaled == raw_qty) and (
+                    bool(si_lines) and si_scaled == raw_qty
                 )
                 if reconciled:
                     row_class, badge, verdict = "row-match", "badge-merged", "✅ Match"
@@ -325,7 +338,7 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
                         "po_qty": po_q,
                         "dn_agg_qty": agg_dn,
                         "si_agg_qty": agg_si,
-                        "po_price": p["unit_price"] / 1000,
+                        "po_price": raw_price / 1000,
                         "si_price": None,
                         "row_class": row_class,
                         "badge": badge,
@@ -515,6 +528,8 @@ def upload_manual_doc(
                 1 if DocType.SHIPPING.value in types_present else 0
             )
             ps.customs_doc_count = cnt
+            if ps.has_customs_toggle and cnt == 2 and ps.status == POSetStatus.blocked_customs:
+                ps.status = POSetStatus.pending
             s.commit()
             if already_attached:
                 # Same file, same set: nothing changed. Say so rather than
@@ -578,12 +593,16 @@ def quarantine_view(request: Request):
         qs = s.query(POSet).filter(POSet.status == POSetStatus.quarantined).all()
         po_set_ids = [ps.id for ps in qs]
         doc_counts = (
-            dict(
-                s.query(Document.po_set_id, func.count(Document.id))
-                .filter(Document.po_set_id.in_(po_set_ids))
-                .group_by(Document.po_set_id)
-                .all()
-            )
+            {
+                r[0]: r[1]
+                for r in (
+                    s.query(Document.po_set_id, func.count(Document.id))
+                    .filter(Document.po_set_id.in_(po_set_ids))
+                    .group_by(Document.po_set_id)
+                    .all()
+                )
+                if r[0] is not None
+            }
             if po_set_ids
             else {}
         )
@@ -616,12 +635,16 @@ def quarantine_table(request: Request):
         qs = s.query(POSet).filter(POSet.status == POSetStatus.quarantined).all()
         po_set_ids = [ps.id for ps in qs]
         doc_counts = (
-            dict(
-                s.query(Document.po_set_id, func.count(Document.id))
-                .filter(Document.po_set_id.in_(po_set_ids))
-                .group_by(Document.po_set_id)
-                .all()
-            )
+            {
+                r[0]: r[1]
+                for r in (
+                    s.query(Document.po_set_id, func.count(Document.id))
+                    .filter(Document.po_set_id.in_(po_set_ids))
+                    .group_by(Document.po_set_id)
+                    .all()
+                )
+                if r[0] is not None
+            }
             if po_set_ids
             else {}
         )
@@ -726,6 +749,26 @@ def reclassify_document(
             doc.po_no_normalized = normalize_po_no(raw)
             ps = get_or_create_po_set(raw, cfg)
             doc.po_set_id = ps.id
+
+        # Update customs_doc_count and status transition if attached to a PO Set
+        if doc.po_set_id is not None:
+            ps_target = s.get(POSet, doc.po_set_id)
+            if ps_target is not None:
+                docs = s.query(Document).filter_by(po_set_id=ps_target.id).all()
+                types_present = {
+                    d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type)
+                    for d in docs
+                }
+                cnt = (1 if DocType.CUSTOMS.value in types_present else 0) + (
+                    1 if DocType.SHIPPING.value in types_present else 0
+                )
+                ps_target.customs_doc_count = cnt
+                if (
+                    ps_target.has_customs_toggle
+                    and cnt == 2
+                    and ps_target.status == POSetStatus.blocked_customs
+                ):
+                    ps_target.status = POSetStatus.pending
         s.commit()
 
         if request.headers.get("HX-Request") == "true":

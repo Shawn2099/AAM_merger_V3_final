@@ -31,10 +31,11 @@ def test_normalize_line_no_strips_whitespace_and_leading_zeros():
 
 
 def test_normalize_line_no_preserves_alphanumeric_forms():
-    """Vendors print '1a' and '1-1'; these must survive verbatim."""
+    """Vendors print '1a', '1-1', and '01-01'; these must normalize correctly."""
     assert normalize_line_no("1a") == "1a"
     assert normalize_line_no("01a") == "1a"
     assert normalize_line_no("1-1") == "1-1"
+    assert normalize_line_no("01-01") == "1-1"
 
 
 def test_normalize_line_no_missing_is_empty_key():

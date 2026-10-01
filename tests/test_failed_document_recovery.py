@@ -250,3 +250,50 @@ def test_detail_page_lists_each_document_with_its_read_state(env, vlm):
     assert "Read" in detail
     # every listed file was read, so no failure note should appear
     assert "attempts used" not in detail, detail
+
+
+def test_recovery_flow_standalone(env, vlm):
+    """recovery_flow can run standalone to recover pending documents and reconcile."""
+    from app.flows.sync import recovery_flow
+
+    cfg = env
+    vlm["dn_readable"] = True
+    stored_path = _pdf(Path(cfg.paths.stored_documents_folder) / "PO_pending.pdf", W_PO)
+
+    with Session(get_engine(cfg)) as s:
+        d = Document(
+            sha256_hash="sha_standalone_rec",
+            original_filename="PO_pending.pdf",
+            stored_path=str(stored_path),
+            doc_type=DocType.PO,
+            extraction_status=ExtractionStatus.pending,
+        )
+        s.add(d)
+        s.commit()
+
+    run_fn = getattr(recovery_flow, "fn", recovery_flow)
+    res = run_fn()
+    assert res.get("status") != "skipped"
+    assert res.get("processed") == 1
+    assert res.get("errors") == 0
+
+    with Session(get_engine(cfg)) as s:
+        doc = s.query(Document).filter_by(sha256_hash="sha_standalone_rec").one()
+        assert doc.extraction_status == ExtractionStatus.valid
+        assert doc.po_set_id is not None
+
+
+def test_recovery_flow_skips_when_lock_held(env):
+    """Direct recovery_flow with a held lock returns skipped summary."""
+    import app.services.sync_lock as sl
+    from app.flows.sync import recovery_flow
+
+    holder = sl.acquire_sync_lock()
+    assert holder is not None
+    try:
+        run_fn = getattr(recovery_flow, "fn", recovery_flow)
+        res = run_fn()
+        assert res.get("status") == "skipped"
+        assert res.get("reason") == "sync_already_running"
+    finally:
+        sl.release_sync_lock(holder)

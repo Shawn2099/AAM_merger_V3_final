@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}PO Set {{ po_set.po_no_normalized }} â€” 3-Way Reconciliation{% endblock %}
+{% block title %}PO Set {{ po_set.po_no_normalized }} — 3-Way Reconciliation{% endblock %}
 
 {% block content %}
 {% set status_str = po_set.status.value if po_set.status.value is defined else (po_set.status|string) %}
@@ -17,7 +17,7 @@
   <div class="card-header" style="margin-bottom:12px;">
     <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
       <a href="/dashboard" class="btn btn-secondary btn-sm" title="Return to main dashboard">
-        â† Dashboard
+        ← Dashboard
       </a>
       <h1 class="card-title" style="margin:0; font-size:1.5rem;">
         <span>PO Set:</span>
@@ -25,20 +25,20 @@
       </h1>
 
       {% if status_str == 'merged' %}
-        <span class="badge badge-merged" style="font-size:0.9rem; padding:6px 14px;">âœ… Merged &amp; Ready</span>
+        <span class="badge badge-merged" style="font-size:0.9rem; padding:6px 14px;">✅ Merged &amp; Ready</span>
       {% elif status_str == 'mismatched' %}
-        <span class="badge badge-mismatched" style="font-size:0.9rem; padding:6px 14px;">âš ï¸ Needs Review (Discrepancy)</span>
+        <span class="badge badge-mismatched" style="font-size:0.9rem; padding:6px 14px;">⚠️ Needs Review (Discrepancy)</span>
       {% elif status_str == 'blocked_customs' %}
-        <span class="badge badge-blocked" style="font-size:0.9rem; padding:6px 14px;">ðŸ”’ Awaiting Customs (2 docs needed)</span>
+        <span class="badge badge-blocked" style="font-size:0.9rem; padding:6px 14px;">🔒 Awaiting Customs (2 docs needed)</span>
       {% elif status_str == 'quarantined' %}
-        <span class="badge badge-quarantined" style="font-size:0.9rem; padding:6px 14px;">ðŸš¨ Quarantined</span>
+        <span class="badge badge-quarantined" style="font-size:0.9rem; padding:6px 14px;">🚨 Quarantined</span>
       {% elif status_str == 'pending' %}
-        <span class="badge badge-pending" style="font-size:0.9rem; padding:6px 14px;">â³ Processing</span>
+        <span class="badge badge-pending" style="font-size:0.9rem; padding:6px 14px;">⏳ Processing</span>
       {% endif %}
 
       {% if is_locked %}
         <span class="badge badge-quarantined" title="Locked by active background process">
-          ðŸ”’ Locked by {{ po_set.locked_by_action }}
+          🔒 Locked by {{ po_set.locked_by_action }}
         </span>
       {% endif %}
     </div>
@@ -52,18 +52,18 @@
           download 
           title="Download the compiled merged PDF packet"
         >
-          <span>ðŸ“¥ Download Merged PDF</span>
+          <span>📥 Download Merged PDF</span>
         </a>
       {% endif %}
     </div>
   </div>
 
   <div style="display:flex; gap:20px; flex-wrap:wrap; font-size:0.85rem; color:var(--text-muted); border-top:1px solid var(--border); padding-top:12px; align-items:center;">
-    <div><strong>Last Updated:</strong> {{ po_set.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC') if po_set.updated_at else 'â€”' }}</div>
+    <div><strong>Last Updated:</strong> {{ po_set.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC') if po_set.updated_at else '—' }}</div>
     <div><strong>Customs Requirement:</strong> <span style="font-weight:600; color:{{ 'var(--primary)' if po_set.has_customs_toggle else 'var(--text-muted)' }};">{{ 'ENABLED (CUSTOMS + SHIPPING Required)' if po_set.has_customs_toggle else 'DISABLED' }}</span></div>
     {% if po_set.has_customs_toggle %}
-      <div><strong>Customs Clearance:</strong> <span style="font-weight:600;">{% if po_set.customs_doc_count >= 1 and po_set.status.value != 'blocked_customs' %}âœ… Attached{% elif 'CUSTOMS' in documents|map(attribute='doc_type')|map(attribute='value')|list %}âœ… Attached{% else %}âŒ Missing{% endif %}</span></div>
-      <div><strong>Shipping (AWB):</strong> <span style="font-weight:600;">{% if po_set.customs_doc_count == 2 and po_set.status.value != 'blocked_customs' %}âœ… Attached{% elif 'SHIPPING' in documents|map(attribute='doc_type')|map(attribute='value')|list %}âœ… Attached{% else %}âŒ Missing{% endif %}</span></div>
+      <div><strong>Customs Clearance:</strong> <span style="font-weight:600;">{% if po_set.customs_doc_count >= 1 and po_set.status.value != 'blocked_customs' %}✅ Attached{% elif 'CUSTOMS' in documents|map(attribute='doc_type')|map(attribute='value')|list %}✅ Attached{% else %}❌ Missing{% endif %}</span></div>
+      <div><strong>Shipping (AWB):</strong> <span style="font-weight:600;">{% if po_set.customs_doc_count == 2 and po_set.status.value != 'blocked_customs' %}✅ Attached{% elif 'SHIPPING' in documents|map(attribute='doc_type')|map(attribute='value')|list %}✅ Attached{% else %}❌ Missing{% endif %}</span></div>
     {% endif %}
   </div>
 
@@ -77,21 +77,21 @@
       title="Toggle whether Customs and Shipping documents are required for this PO Set"
       {% if is_locked %}disabled{% endif %}
     >
-      <span>ðŸ›¡ï¸ Customs Check:</span>
+      <span>🛡️ Customs Check:</span>
       <strong>{{ 'ON' if po_set.has_customs_toggle else 'OFF' }}</strong>
     </button>
 
-    <!-- Merge now (gated) â€” use after finishing a manual step, e.g. uploading
+    <!-- Merge now (gated) — use after finishing a manual step, e.g. uploading
          the two customs documents. NOT Force Merge: every gate still applies,
          so pressing it on a set that is not ready simply explains why. -->
     <button
       class="btn btn-primary"
       hx-post="/po_sets/{{ po_set.id }}/merge"
       hx-swap="none"
-      title="Re-check and merge if now eligible. All checks still apply â€” use Force Merge only to override them"
+      title="Re-check and merge if now eligible. All checks still apply — use Force Merge only to override them"
       {% if is_locked %}disabled{% endif %}
     >
-      <span>ðŸ“¦ Merge Now</span>
+      <span>📦 Merge Now</span>
     </button>
 
     <!-- Redo Match (Free, Instant) -->
@@ -102,7 +102,7 @@
       title="Re-run matching rules on existing extracted data without calling the AI (Fast &amp; Free)"
       {% if is_locked %}disabled{% endif %}
     >
-      <span>ðŸ”„ Re-Match (Instant)</span>
+      <span>🔄 Re-Match (Instant)</span>
     </button>
 
     <!-- Redo Extract (AI) -->
@@ -113,7 +113,7 @@
       title="Re-send all documents to the AI vision parser to re-extract lines and text"
       {% if is_locked %}disabled{% endif %}
     >
-      <span>âš¡ Re-Extract with AI</span>
+      <span>⚡ Re-Extract with AI</span>
     </button>
 
     <!-- Force Merge Button -->
@@ -124,7 +124,7 @@
         title="Override matching and customs requirements to merge immediately with available documents"
         {% if is_locked %}disabled{% endif %}
       >
-        <span>âš ï¸ Force Merge</span>
+        <span>⚠️ Force Merge</span>
       </button>
     </div>
   </div>
@@ -194,7 +194,7 @@
           </td>
 
           <td style="text-align:right; font-family:ui-monospace, monospace; font-size:0.85rem;">
-            <span class="muted">{{ '{:g}'.format(r.po_price) if r.po_price else 'â€”' }}</span>
+            <span class="muted">{{ '{:g}'.format(r.po_price) if r.po_price else '—' }}</span>
           </td>
 
           <td style="text-align:center;">
@@ -207,7 +207,7 @@
   </div>
   {% else %}
   <div style="text-align:center; padding:32px; color:var(--text-muted); background:#f8fafc; border-radius:var(--radius-md);">
-    <div style="font-size:1.6rem; margin-bottom:6px;">ðŸ“‹</div>
+    <div style="font-size:1.6rem; margin-bottom:6px;">📋</div>
     <div style="font-weight:600; color:var(--text-main);">No extracted line items yet</div>
     <div style="font-size:0.85rem; margin-top:4px;">Click <strong>Re-Extract with AI</strong> above to extract product lines from attached documents.</div>
   </div>
@@ -244,15 +244,15 @@
         <tr>
           <td>
             {% if dt == 'PO' %}
-              <span class="badge badge-pending">ðŸ“„ Purchase Order</span>
+              <span class="badge badge-pending">📄 Purchase Order</span>
             {% elif dt == 'DN' %}
-              <span class="badge badge-pending">ðŸ“¦ Delivery Note</span>
+              <span class="badge badge-pending">📦 Delivery Note</span>
             {% elif dt == 'SI' %}
-              <span class="badge badge-pending">ðŸ§¾ Sales Invoice</span>
+              <span class="badge badge-pending">🧾 Sales Invoice</span>
             {% elif dt in ['CUSTOMS', 'SHIPPING'] %}
-              <span class="badge badge-blocked">ðŸ›ƒ {{ dt }}</span>
+              <span class="badge badge-blocked">🛃 {{ dt }}</span>
             {% else %}
-              <span class="badge badge-gray">â“ {{ dt }}</span>
+              <span class="badge badge-gray">❓ {{ dt }}</span>
             {% endif %}
           </td>
 
@@ -262,18 +262,18 @@
 
           <td>
             {% if es == 'valid' %}
-              <span class="badge badge-merged">âœ… Valid</span>
+              <span class="badge badge-merged">✅ Valid</span>
             {% elif es == 'failed' %}
-              <span class="badge badge-quarantined">âŒ Failed</span>
+              <span class="badge badge-quarantined">❌ Failed</span>
             {% elif es == 'processing' %}
-              <span class="badge badge-pending">â³ Extracting</span>
+              <span class="badge badge-pending">⏳ Extracting</span>
             {% else %}
               <span class="badge badge-gray">{{ es }}</span>
             {% endif %}
           </td>
 
           <td class="muted" style="font-family:ui-monospace, monospace;">
-            {{ d.po_no_raw or 'â€”' }}
+            {{ d.po_no_raw or '—' }}
           </td>
 
           <td style="text-align:right;">
@@ -282,7 +282,7 @@
               @click="$store.pdfDrawer.open('/documents/{{ d.id }}/preview', '{{ d.original_filename }}')"
               title="Preview document PDF"
             >
-              <span>ðŸ‘ï¸ Preview</span>
+              <span>👁️ Preview</span>
             </button>
           </td>
         </tr>
@@ -297,7 +297,7 @@
   <!-- Manual Upload Sub-Form -->
   <div style="background:#f8fafc; border:1px solid var(--border); border-radius:var(--radius-md); padding:16px 20px;">
     <h3 style="font-size:1rem; font-weight:700; color:var(--text-main); margin-bottom:4px;">
-      ðŸ“Ž Attach Supporting Document (Customs / Shipping)
+      📎 Attach Supporting Document (Customs / Shipping)
     </h3>
     <p class="muted" style="font-size:0.82rem; margin-bottom:12px;">
       Attached as-is without AI extraction. To clear the <strong>Awaiting Customs</strong> gate, upload both a <strong>CUSTOMS</strong> and a <strong>SHIPPING</strong> document.
@@ -338,7 +338,7 @@
 <!-- Quarantined Deletion Card (Only if quarantined) -->
 {% if status_str == 'quarantined' %}
 <div class="card" style="border-color:var(--clr-quarantined-border); background:#fff5f5;">
-  <h3 style="color:#991b1b; font-size:1.1rem; margin-bottom:4px;">ðŸš¨ Delete Quarantined PO Set</h3>
+  <h3 style="color:#991b1b; font-size:1.1rem; margin-bottom:4px;">🚨 Delete Quarantined PO Set</h3>
   <p class="muted" style="margin-bottom:14px; font-size:0.85rem;">
     Removes database records for this PO Set while keeping stored files and quarantine copies safely on disk. An audit log entry is written.
   </p>
@@ -378,7 +378,7 @@
 <!-- Force Merge Modal -->
 <div id="force-merge-modal" class="modal-backdrop">
   <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="fm-title">
-    <h3 id="fm-title" style="margin-bottom:8px; color:#b91c1c;">âš ï¸ Confirm Force Merge</h3>
+    <h3 id="fm-title" style="margin-bottom:8px; color:#b91c1c;">⚠️ Confirm Force Merge</h3>
     <p class="muted" style="margin-bottom:16px;">
       Force Merge bypasses all reconciliation matching checks and customs requirements. It compiles whatever files currently exist into the final merged PDF and creates an immutable audit record.
     </p>

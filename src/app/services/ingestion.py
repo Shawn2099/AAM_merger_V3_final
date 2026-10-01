@@ -126,13 +126,18 @@ def delete_input_files(po_set: POSet, input_folder: Path | str) -> list[str]:
         if doc.extraction_status == ExtractionStatus.valid and doc.original_filename
     }
 
-    # 1. Delete by direct filename
+    valid_real_hashes = {h for h in valid_hashes if len(h) == 64}
+
+    # 1. Delete by direct filename (verifying content hash matches if
+    # real 64-char sha256 is present)
     for name in valid_names:
         target = in_dir / name
         if target.exists():
             try:
-                target.unlink(missing_ok=True)
-                deleted.append(name)
+                target_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+                if not valid_real_hashes or target_hash in valid_real_hashes:
+                    target.unlink(missing_ok=True)
+                    deleted.append(name)
             except Exception:
                 pass
 

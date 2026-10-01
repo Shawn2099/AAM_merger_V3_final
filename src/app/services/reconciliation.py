@@ -85,6 +85,7 @@ REASON_TEXT: dict[str, str] = {
     "packet_naming_failed": "The merged packet could not be named unambiguously",
     "po_reference_mismatch": "A document references a different PO number",
     "quantity_mismatch": "PO, delivery, and invoice quantities do not agree",
+    "po_document_has_no_line_items": "The PO document was read but contains no line items — re-extract or contact the VLM operator",
 }
 
 
@@ -131,9 +132,9 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
 def _persist_reason(po_set_id: int, result: dict, cfg: AppConfig) -> None:
     status = result.get("status")
     flags = result.get("flags") or []
+    naming = [f for f in flags if f.get("type") == "naming"]
     if status == "merged":
         note = "Fully reconciled — packet merged"
-        naming = [f for f in flags if f.get("type") == "naming"]
         if naming:
             note = f"Fully reconciled — packet merged. {naming[0].get('message', '')}"
     else:
@@ -143,6 +144,13 @@ def _persist_reason(po_set_id: int, result: dict, cfg: AppConfig) -> None:
         with Session(eng) as s:
             ps = s.get(POSet, po_set_id)
             if ps is not None:
+                if (
+                    ps.status == POSetStatus.merged
+                    and ps.reconcile_reason
+                    and not naming
+                    and status == "merged"
+                ):
+                    return
                 ps.reconcile_reason = note
                 s.commit()
     except Exception:  # never fail a reconcile because a note could not be saved
@@ -180,6 +188,20 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 "status": "merged",
                 "po_set_id": po_set_id,
                 "merged_output_path": ps.merged_output_path,
+                "flags": [],
+            }
+
+        # Quarantine reason is preserved under automated sweeps. The Phase 2
+        # sweep must not overwrite the reason written by the flow that originally
+        # quarantined the set (e.g. 'extraction failed permanently' being replaced
+        # by 'unmatched vendor line' because the broken PO doc has 0 lines).
+        # Operator actions (redo_extract, redo_match) reset status to pending
+        # before calling reconcile — that reset is the explicit gate for re-entry.
+        if ps.status == POSetStatus.quarantined:
+            return {
+                "status": "quarantined",
+                "reason": ps.reconcile_reason or "quarantined",
+                "po_set_id": po_set_id,
                 "flags": [],
             }
 
@@ -302,6 +324,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             for d in po_docs
             for li in d.line_items
         ]
+
         dn_source = dn_docs
         si_source = si_docs
         dn_lines = [
@@ -325,8 +348,23 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             for li in d.line_items
         ]
 
+        # A PO document exists but extraction produced zero line items while vendor
+        # documents contain line items. The fault is in PO extraction (VLM returned nothing),
+        # not in vendor documents — so the quarantine reason must say so explicitly rather than
+        # falling through to "unmatched vendor line", which would point the operator at the wrong files.
+        if not po_lines and (dn_lines or si_lines):
+            ps.status = POSetStatus.quarantined
+            s.commit()
+            quarantine_copy(ps.id, cfg, reason="po_document_has_no_line_items")
+            return {
+                "status": "quarantined",
+                "reason": "po_document_has_no_line_items",
+                "po_set_id": po_set_id,
+                "flags": [],
+            }
+
         all_lines = po_lines + dn_lines + si_lines
-        if any(line["quantity"] <= 0 for line in all_lines):
+        if any(int(line.get("quantity") or 0) <= 0 for line in all_lines):
             ps.status = POSetStatus.quarantined
             s.commit()
             quarantine_copy(ps.id, cfg, reason="non_positive_quantity")

@@ -34,15 +34,13 @@ def is_blocked(po_set: POSet) -> bool:
 def toggle_customs(po_set_id: int, cfg) -> POSet:
     """Flip has_customs_toggle regardless of current status (FR-12.1) and update status.
 
-    - Flips has_customs_toggle
-    - If now True and is_blocked -> status = blocked_customs (FR-12.2)
-    - If now True and NOT blocked (both docs already present) -> still set blocked_customs
-      per 'force into blocked_customs' wording, but is_blocked will be False.
-      To keep status/is_blocked consistent, we keep original status when already satisfied.
-      However brief expects flip -> blocked_customs, so we force blocked_customs when
-      toggle ON unless already satisfied we leave status as-is (so is_blocked False).
-    - If now False and status was blocked_customs -> status = pending
-    - Also maintains customs_doc_count (count of CUSTOMS+SHIPPING attached).
+    - Flips has_customs_toggle.
+    - If now True and NOT yet satisfied (is_blocked) → status = blocked_customs (FR-12.2).
+    - If now True and already satisfied (both CUSTOMS + SHIPPING present, is_blocked is
+      False) → status is unchanged. Forcing blocked_customs would immediately unblock on
+      the next reconcile pass, so the net effect is always a no-op — leave it alone.
+    - If now False and status was blocked_customs → status = pending (gate lifted).
+    - Also maintains customs_doc_count (count of CUSTOMS + SHIPPING docs attached).
     """
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)

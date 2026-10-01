@@ -222,7 +222,8 @@ def test_audit_log_shows_quarantine_delete(tmp_cfg, client):
         s.add(doc)
         s.commit()
     # HTMX delete or POST delete quarantined
-    client.delete(f"/po_sets/{pid}/quarantine")
+    resp_del = client.delete(f"/po_sets/{pid}/quarantine")
+    assert resp_del.headers.get("HX-Redirect") == "/quarantine"
     r = client.get("/audit")
     assert r.status_code == 200
     assert "quarantine_delete" in r.text.lower() or "quarantine" in r.text.lower()
@@ -490,7 +491,7 @@ def test_upload_duplicate_does_not_rewrite(tmp_cfg, client):
             files={"file": ("customs.pdf", payload, "application/pdf")},
             data={"doc_type": "CUSTOMS"},
         )
-        # RedirectResponse to the set view (TestClient follows â†’ 200 + 302 history)
+        # RedirectResponse to the set view (TestClient follows -> 200 + 302 history)
         assert r.status_code == 200, r.text
         assert r.history and r.history[0].status_code == 302
 
@@ -824,3 +825,90 @@ def test_unclassified_lists_failed_non_unknown(tmp_cfg, client):
     assert r.status_code == 200, r.text
     assert "waiting.pdf" in r.text
     assert "dead_dn.pdf" in r.text
+
+
+def test_customs_upload_clears_blocked_status(tmp_cfg, client):
+    """Uploading both CUSTOMS and SHIPPING docs transitions blocked_customs to pending."""
+    import io
+
+    from pypdf import PdfWriter
+
+    pid = _create_poset(tmp_cfg, po_no="POCUSTCLEAR", status=POSetStatus.blocked_customs)
+    with Session(get_engine(tmp_cfg)) as s:
+        ps = s.get(POSet, pid)
+        ps.has_customs_toggle = True
+        s.commit()
+
+    def _make_pdf(w_val: float):
+        w = PdfWriter()
+        w.add_blank_page(width=w_val, height=100)
+        buf = io.BytesIO()
+        w.write(buf)
+        return buf.getvalue()
+
+    r1 = client.post(
+        f"/po_sets/{pid}/upload",
+        data={"doc_type": "CUSTOMS"},
+        files={"file": ("customs.pdf", _make_pdf(100.0), "application/pdf")},
+        follow_redirects=False,
+    )
+    assert r1.status_code == 302
+    with Session(get_engine(tmp_cfg)) as s:
+        ps = s.get(POSet, pid)
+        assert ps.customs_doc_count == 1
+        assert ps.status == POSetStatus.blocked_customs
+
+    r2 = client.post(
+        f"/po_sets/{pid}/upload",
+        data={"doc_type": "SHIPPING"},
+        files={"file": ("shipping.pdf", _make_pdf(200.0), "application/pdf")},
+        follow_redirects=False,
+    )
+    assert r2.status_code == 302
+    with Session(get_engine(tmp_cfg)) as s:
+        ps = s.get(POSet, pid)
+        assert ps.customs_doc_count == 2
+        assert ps.status == POSetStatus.pending
+
+
+def test_reclassify_customs_updates_count_and_clears_blocked(tmp_cfg, client):
+    """Reclassifying a document into CUSTOMS/SHIPPING updates customs_doc_count and unblocks."""
+    po_raw = "123456"
+    pid = _create_poset(tmp_cfg, po_no=po_raw, status=POSetStatus.blocked_customs)
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        ps = s.get(POSet, pid)
+        ps.has_customs_toggle = True
+        ps.customs_doc_count = 1
+        # add existing SHIPPING document
+        doc_ship = Document(
+            sha256_hash="sha_ship_reclass",
+            original_filename="ship.pdf",
+            stored_path="data/stored/ship.pdf",
+            doc_type=DocType.SHIPPING,
+            extraction_status=ExtractionStatus.valid,
+            po_set_id=pid,
+        )
+        # add unclassified document
+        doc_unk = Document(
+            sha256_hash="sha_unk_reclass",
+            original_filename="unknown.pdf",
+            stored_path="data/stored/unknown.pdf",
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.valid,
+        )
+        s.add_all([doc_ship, doc_unk])
+        s.commit()
+        s.refresh(doc_unk)
+        unk_id = doc_unk.id
+
+    r = client.post(
+        f"/unclassified/{unk_id}/reclassify",
+        data={"doc_type": "CUSTOMS", "po_no": po_raw},
+    )
+    assert r.status_code in (200, 302)
+    with Session(eng) as s:
+        ps = s.get(POSet, pid)
+        assert ps.customs_doc_count == 2
+        assert ps.status == POSetStatus.pending
+

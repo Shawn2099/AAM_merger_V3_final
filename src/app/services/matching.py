@@ -41,8 +41,8 @@ def _norm(s: str) -> str:
 def normalize_line_no(s: str | None) -> str:
     """Normalise a printed line number to its comparison key.
 
-    Strips whitespace and leading zeros ('01' -> '1', ' 001 ' -> '1') but
-    compares as a string so alphanumeric forms ('1a', '1-1') survive intact.
+    Strips whitespace and leading zeros ('01' -> '1', ' 001 ' -> '1', '01-01' -> '1-1')
+    but compares as a string so alphanumeric forms ('1a', '1-1') survive intact.
     '' / None -> '' (no usable number).
     """
     if s is None:
@@ -50,14 +50,7 @@ def normalize_line_no(s: str | None) -> str:
     t = str(s).strip()
     if not t:
         return ""
-    m = re.match(r"^0*(\d.*)$", t, re.DOTALL)
-    if not m:
-        return t
-    m2 = re.match(r"^(\d+)(.*)$", m.group(1), re.DOTALL)
-    if m2 is None:  # unreachable: the outer regex guarantees a leading digit
-        return t
-    num = m2.group(1).lstrip("0") or "0"
-    return num + m2.group(2)
+    return re.sub(r"(^|[-._/])0+(\d+)", r"\1\2", t)
 
 
 def group_by_line_no(

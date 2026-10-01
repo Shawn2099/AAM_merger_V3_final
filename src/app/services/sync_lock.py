@@ -110,21 +110,23 @@ def release_sync_lock(lock: FileLock) -> None:
 def _is_sync_running(cfg_path: str | None = None) -> bool:
     """True while any thread/process holds the sync lock (FR-CONC-3).
 
-    Read-only: performs no directory creation. A missing lock dir/file means
-    no holder can exist → False.
+    Checks the sidecar file only — never acquires the lock. Acquiring the lock
+    for a status check introduces a TOCTOU window: concurrent dashboard polls
+    would briefly see each other's acquisitions as 'running', causing the Sync
+    button to flicker incorrectly.
+
+    Sidecar contract (above): written immediately after acquisition, deleted
+    immediately after release. Its presence + recency is sufficient to confirm
+    an active holder without touching the lock itself.
     """
-    lock = get_sync_lock(cfg_path, ensure_dirs=False)
-    if not Path(lock.lock_file).parent.exists():
-        return False
-    _break_if_stale(lock)
-    if lock.is_locked:
-        return True
     try:
-        lock.acquire(timeout=0)
-    except Timeout:
-        return True
+        lock_file = _lock_file(cfg_path, ensure_dirs=False)
     except Exception:
         return False
-    with contextlib.suppress(Exception):
-        lock.release()
-    return False
+    sc = _sidecar_for(lock_file)
+    try:
+        age = time.time() - sc.stat().st_mtime
+        return age <= SYNC_STALE_SECONDS
+    except OSError:
+        # Sidecar absent → no active holder
+        return False

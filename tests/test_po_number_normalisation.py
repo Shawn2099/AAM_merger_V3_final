@@ -79,7 +79,10 @@ def test_distinct_pos_never_collide():
         ("Purchase Order: 8300023893", "8300023893"),
         # SAP revision counter
         ("PO, Rev # 161538,0", "161538"),
+        ("PO, Rev # 161538, 12", "161538"),
         ("161538,0", "161538"),
+        ("PO, 161538", "161538"),
+        ("Purchase Order, 8300023893", "8300023893"),
         # Structured codes must survive intact
         ("D7264-PO-186000-013-01", "D7264PO18600001301"),
         ("D7264-PO186000-013-01-", "D7264PO18600001301"),

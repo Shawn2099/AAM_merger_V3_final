@@ -21,7 +21,7 @@ def get_engine(cfg: AppConfig) -> Engine:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     # SQLite URL — pathlib as_posix for cross-platform, WAL via pragmas
     url = f"sqlite:///{key}"
-    engine = create_engine(url, connect_args={"check_same_thread": False})
+    engine = create_engine(url, connect_args={"check_same_thread": False, "timeout": 30.0})
 
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_conn, _):
@@ -29,6 +29,7 @@ def get_engine(cfg: AppConfig) -> Engine:
         cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("PRAGMA synchronous=NORMAL;")
         cursor.execute("PRAGMA foreign_keys=ON;")
+        cursor.execute("PRAGMA busy_timeout=30000;")
         cursor.close()
 
     _engine_cache[key] = engine

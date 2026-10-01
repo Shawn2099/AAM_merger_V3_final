@@ -57,7 +57,8 @@ def acquire_lock(ps: POSet, action: str, session: Session, cfg: AppConfig) -> bo
     )
     result = session.execute(stmt)
     session.commit()
-    if result.rowcount > 0:
+    rowcount = getattr(result, "rowcount", 0)
+    if rowcount > 0:
         session.refresh(ps)
         return True
     session.refresh(ps)

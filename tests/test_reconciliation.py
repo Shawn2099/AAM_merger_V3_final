@@ -1002,3 +1002,43 @@ def test_sync_flow_sweep_reconciles_stale_mismatched_set(tmp_path):
         assert ps_after.merged_output_path is not None
 
 
+def test_re_reconcile_merged_set_preserves_naming_reason(tmp_path):
+    """Re-reconciling a merged set must not overwrite existing naming explanation."""
+    from sqlalchemy.orm import Session
+
+    from app.core.config import load_config
+    from app.core.database import get_engine
+    from app.models import POSet, POSetStatus
+    from app.models.base import Base
+    from app.services.reconciliation import reconcile_po_set
+
+    cfg = load_config("config.example.yaml")
+    cfg.paths.database_path = str(tmp_path / "merged_preserve.db")
+    cfg.paths.stored_documents_folder = str(tmp_path / "stored")
+    cfg.paths.output_folder = str(tmp_path / "output")
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+
+    original_reason = (
+        "Fully reconciled — packet merged. No invoice number was extracted; "
+        "packet named 'PO123' from the PO number"
+    )
+
+    with Session(eng) as s:
+        ps = POSet(
+            po_no_normalized="PO123",
+            status=POSetStatus.merged,
+            merged_output_path=str(tmp_path / "PO123.pdf"),
+            reconcile_reason=original_reason,
+        )
+        s.add(ps)
+        s.commit()
+        ps_id = ps.id
+
+    res = reconcile_po_set(ps_id, cfg)
+    assert res.get("status") == "merged"
+
+    with Session(eng) as s:
+        ps_after = s.get(POSet, ps_id)
+        assert ps_after.reconcile_reason == original_reason
+

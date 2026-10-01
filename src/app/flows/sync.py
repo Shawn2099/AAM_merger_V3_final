@@ -159,6 +159,213 @@ def _extract_task_for(cfg):
     )
 
 
+@flow(name="recovery_flow")
+def recovery_flow(
+    cfg_path: str | None = None,
+    held_lock=None,
+    initial_touched_po_set_ids: list[int] | None = None,
+) -> dict:
+    """Dedicated flow for pending document recovery, unattached document resolution, and open-set reconciliation sweep.
+
+    Can run standalone (e.g. background recovery cron or manual trigger) or as
+    a subflow from `sync_flow`.
+    """
+    from app.services.sync_lock import acquire_sync_lock, release_sync_lock
+
+    own_lock = None
+    if held_lock is None:
+        own_lock = acquire_sync_lock(cfg_path)
+        if own_lock is None:
+            logger.warning("Recovery skipped: sync or recovery is already running")
+            return {
+                "status": "skipped",
+                "reason": "sync_already_running",
+                "processed": 0,
+                "extracted": 0,
+                "errors": 0,
+                "touched_po_sets": 0,
+                "reconciled_count": 0,
+            }
+    try:
+        return _recovery_flow_locked(
+            cfg_path=cfg_path, initial_touched_po_set_ids=initial_touched_po_set_ids
+        )
+    finally:
+        if own_lock is not None:
+            release_sync_lock(own_lock)
+
+
+def _recovery_flow_locked(
+    cfg_path: str | None = None,
+    initial_touched_po_set_ids: list[int] | None = None,
+) -> dict:
+    cfg = load_config(cfg_path) if cfg_path else load_config()
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    from app.models import Document as _Doc
+    from app.models import POSet as _POSet
+    from app.models import POSetStatus
+    from app.services.grouping import (
+        attach_unattached_to_open_sets,
+        get_or_create_po_set,
+        resolve_unattached_documents,
+    )
+    from app.services.ingestion import delete_input_files
+    from app.services.locking import acquire_lock, is_locked, release_lock
+    from app.services.reconciliation import reconcile_po_set
+
+    input_folder = Path(cfg.paths.input_folder)
+    input_folder.mkdir(parents=True, exist_ok=True)
+
+    touched_po_set_ids: set[int] = set(initial_touched_po_set_ids or [])
+    recovered_processed = 0
+    recovered_errors = 0
+
+    def _reconcile_with_lock_guard(ps_id: int) -> dict | None:
+        """Reconcile a POSet, skipping if a UI action currently holds the per-PO DB lock.
+
+        Skipping is safe: UI routes (redo_extract, redo_match, force_merge) call
+        reconcile_po_set themselves on completion, so the set is reconciled with
+        the correct post-action state. The sweep never permanently orphans a set
+        because the next sync run will encounter it again in Phase 2.
+
+        The lock acquired here uses action name 'sync_reconcile'. If a UI action
+        tries to act on this set while the sweep holds the lock it will get a 409,
+        which is correct \u2014 one state-changing operation at a time per PO Set.
+        """
+        with Session(eng) as s:
+            ps = s.get(_POSet, ps_id)
+            if ps is None:
+                return None
+            if is_locked(ps, cfg):
+                logger.info(
+                    "Reconcile sweep skipping POSet %s: held by UI action '%s'",
+                    ps_id,
+                    ps.locked_by_action,
+                )
+                return None
+            acquired = acquire_lock(ps, "sync_reconcile", s, cfg)
+            if not acquired:
+                logger.info(
+                    "Reconcile sweep skipping POSet %s: could not acquire lock (held by '%s')",
+                    ps_id,
+                    ps.locked_by_action,
+                )
+                return None
+
+        try:
+            res = reconcile_po_set(ps_id, cfg)
+            if res.get("status") in ("merged", POSetStatus.merged.value):
+                with Session(eng) as s3:
+                    ps_merged = s3.get(_POSet, ps_id)
+                    if ps_merged:
+                        delete_input_files(ps_merged, input_folder)
+            return res
+        finally:
+            # Release using a fresh session \u2014 same pattern as _release_lock in routes.
+            # action-scoped release: never clears a lock set by a concurrent UI action.
+            with Session(eng) as s_rel:
+                ps_rel = s_rel.get(_POSet, ps_id)
+                if ps_rel is not None:
+                    release_lock(ps_rel, s_rel, action="sync_reconcile")
+
+    # 1. Pending docs already in DB (from prior runs or interrupted syncs)
+    with Session(eng) as s:
+        pending_ids = [
+            r[0]
+            for r in s.query(_Doc.id)
+            .filter(_Doc.extraction_status == ExtractionStatus.pending)
+            .all()
+        ]
+
+    for doc_id in pending_ids:
+        recovered_processed += 1
+        try:
+            _extract_task_for(cfg)(doc_id, cfg_path=cfg_path)
+        except Exception:
+            logger.warning("Extract task failed for pending doc %s", doc_id, exc_info=True)
+            recovered_errors += 1
+        else:
+            if _persisted_extraction_status(eng, doc_id) == ExtractionStatus.failed:
+                logger.error(
+                    "Extraction did not succeed for pending doc %s; counted as an error",
+                    doc_id,
+                )
+                recovered_errors += 1
+                _quarantine_broken_document(doc_id, cfg, eng, None, touched_po_set_ids)
+
+        try:
+            with Session(eng) as s_grp:
+                d = s_grp.get(_Doc, doc_id)
+                if d and d.po_no_normalized:
+                    ps = get_or_create_po_set(
+                        d.po_no_raw or d.po_no_normalized,
+                        cfg,
+                        create=_doc_type_val(d) in _ANCHOR_TYPES,
+                    )
+                    if ps is not None:
+                        if d.po_set_id is None:
+                            d.po_set_id = ps.id
+                            s_grp.commit()
+                        touched_po_set_ids.add(ps.id)
+        except Exception:
+            logger.warning("Grouping failed for pending doc %s", doc_id, exc_info=True)
+            recovered_errors += 1
+
+    # 2. Resolve unattached documents (e.g. Delivery Notes without PO printed on face)
+    unattached_touched = resolve_unattached_documents(cfg)
+    touched_po_set_ids.update(unattached_touched)
+
+    # 3. Attach DN/SI/UNKNOWN docs that waited for their PO anchor (BLOCKER-5)
+    attached_touched = attach_unattached_to_open_sets(cfg)
+    touched_po_set_ids.update(attached_touched)
+
+    # 4. Phase 1: Reconcile newly touched PO Sets (FR-4.8, FR-14.1)
+    # Per-PO lock guard: if a UI action (force_merge, redo_extract) holds the
+    # lock for this set, we skip it. The UI action calls reconcile_po_set on
+    # completion, so the set is reconciled with correct post-action state.
+    reconciled_count = 0
+    reconciled_set_ids: set[int] = set()
+    for ps_id in sorted(touched_po_set_ids):
+        try:
+            res = _reconcile_with_lock_guard(ps_id)
+            if res is not None:
+                reconciled_count += 1
+                reconciled_set_ids.add(ps_id)
+        except Exception:
+            logger.warning("Reconciliation failed for PO Set %s", ps_id, exc_info=True)
+            recovered_errors += 1
+
+    # 5. Phase 2: Re-reconcile sweep of all open (non-merged) sets
+    with Session(eng) as s_sweep:
+        open_sets = (
+            s_sweep.query(_POSet)
+            .filter(_POSet.status != POSetStatus.merged)
+            .with_entities(_POSet.id)
+            .all()
+        )
+    for (ps_id,) in open_sets:
+        if ps_id in reconciled_set_ids:
+            continue
+        try:
+            res = _reconcile_with_lock_guard(ps_id)
+            if res is not None:
+                reconciled_count += 1
+                reconciled_set_ids.add(ps_id)
+        except Exception:
+            logger.warning("Re-reconcile sweep failed for PO Set %s", ps_id, exc_info=True)
+            recovered_errors += 1
+
+    return {
+        "processed": recovered_processed,
+        "extracted": max(0, recovered_processed - recovered_errors),
+        "errors": recovered_errors,
+        "touched_po_sets": len(touched_po_set_ids),
+        "reconciled_count": reconciled_count,
+    }
+
+
+
 @flow(name="sync_flow")
 def sync_flow(cfg_path: str | None = None, held_lock=None) -> dict:
     """One Prefect flow per Sync run (FR-4.1-4.8).
@@ -167,8 +374,7 @@ def sync_flow(cfg_path: str | None = None, held_lock=None) -> dict:
     1. Ingestion & dedup (SHA-256)
     2. VLM Extraction & Classification per doc (task with retry)
     3. Grouping by normalized PO number into POSet
-    4. Reconciliation orchestrator (matching, exact qty aggregate, customs check, auto-merge)
-    5. Input folder clearing for merged sets (FR-4.8)
+    4. Recovery, unattached resolution, reconciliation, & input folder clearing via recovery_flow
 
     Concurrency (FR-4.3): the inter-process sync lock is held for the whole
     run. Route-triggered runs pass their already-held lock via held_lock;
@@ -205,16 +411,12 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     from app.models import Document as _Doc
-    from app.models import POSet as _POSet
-    from app.models import POSetStatus
     from app.services.grouping import get_or_create_po_set
     from app.services.ingestion import (
-        delete_input_files,
         find_input_pdfs,
         ingest_file,
         is_file_stable,
     )
-    from app.services.reconciliation import reconcile_po_set
 
     input_folder = Path(cfg.paths.input_folder)
     input_folder.mkdir(parents=True, exist_ok=True)
@@ -285,100 +487,30 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
             errors += 1
             continue
 
-    # Also handle pending docs already in DB (e.g. from prior runs)
-    with Session(eng) as s:
-        pending = s.query(_Doc).filter(_Doc.extraction_status == ExtractionStatus.pending).all()
-        for doc in pending:
-            try:
-                _extract_task_for(cfg)(doc.id, cfg_path=cfg_path)
-            except Exception:
-                logger.warning("Extract task failed for pending doc %s", doc.id, exc_info=True)
-                errors += 1
-            else:
-                if _persisted_extraction_status(eng, doc.id) == ExtractionStatus.failed:
-                    logger.error(
-                        "Extraction did not succeed for pending doc %s; counted as an error",
-                        doc.id,
-                    )
-                    errors += 1
-                    _quarantine_broken_document(doc.id, cfg, eng, None, touched_po_set_ids)
-            try:
-                d = s.get(_Doc, doc.id)
-                if d and d.po_no_normalized:
-                    ps = get_or_create_po_set(
-                        d.po_no_raw or d.po_no_normalized,
-                        cfg,
-                        create=_doc_type_val(d) in _ANCHOR_TYPES,
-                    )
-                    if ps is None:
-                        continue
-                    if d.po_set_id is None:
-                        d.po_set_id = ps.id
-                        s.commit()
-                    touched_po_set_ids.add(ps.id)
-            except Exception:
-                logger.warning("Grouping failed for pending doc %s", doc.id, exc_info=True)
-                errors += 1
+    # Run recovery flow as a Prefect subflow (or directly if outside Prefect context)
+    from prefect.context import FlowRunContext
 
-    # Resolve unattached documents (e.g. Delivery Notes without PO printed on face)
-    from app.services.grouping import attach_unattached_to_open_sets, resolve_unattached_documents
-
-    unattached_touched = resolve_unattached_documents(cfg)
-    touched_po_set_ids.update(unattached_touched)
-
-    # Attach DN/SI/UNKNOWN docs that waited for their PO anchor (BLOCKER-5).
-    # Never mints: keys without an open set keep waiting indefinitely.
-    attached_touched = attach_unattached_to_open_sets(cfg)
-    touched_po_set_ids.update(attached_touched)
-
-    # Phase 1: Reconcile newly touched PO Sets (FR-4.8, FR-14.1)
-    reconciled_count = 0
-    for ps_id in touched_po_set_ids:
-        try:
-            res = reconcile_po_set(ps_id, cfg)
-            reconciled_count += 1
-            if res.get("status") == POSetStatus.merged.value or res.get("status") == "merged":
-                with Session(eng) as s3:
-                    ps_merged = s3.get(_POSet, ps_id)
-                    if ps_merged:
-                        delete_input_files(ps_merged, input_folder)
-        except Exception:
-            logger.warning("Reconciliation failed for PO Set %s", ps_id, exc_info=True)
-            errors += 1
-
-    # Phase 2: Re-reconcile all open (non-merged) sets — catches stale mismatched/pending
-    # sets whose documents were already present before this run started.
-    with Session(eng) as s_sweep:
-        open_sets = (
-            s_sweep.query(_POSet)
-            .filter(_POSet.status != POSetStatus.merged)
-            .with_entities(_POSet.id)
-            .all()
+    if FlowRunContext.get():
+        rec_res = recovery_flow(
+            cfg_path=cfg_path,
+            held_lock=True,
+            initial_touched_po_set_ids=list(touched_po_set_ids),
         )
-    for (ps_id,) in open_sets:
-        if ps_id in touched_po_set_ids:
-            continue  # already reconciled in phase 1
-        try:
-            res = reconcile_po_set(ps_id, cfg)
-            reconciled_count += 1
-            if res.get("status") == POSetStatus.merged.value or res.get("status") == "merged":
-                with Session(eng) as s3:
-                    ps_merged = s3.get(_POSet, ps_id)
-                    if ps_merged:
-                        delete_input_files(ps_merged, input_folder)
-        except Exception:
-            logger.warning("Re-reconcile sweep failed for PO Set %s", ps_id, exc_info=True)
-            errors += 1
+    else:
+        run_recovery_fn = getattr(recovery_flow, "fn", recovery_flow)
+        rec_res = run_recovery_fn(
+            cfg_path=cfg_path,
+            held_lock=True,
+            initial_touched_po_set_ids=list(touched_po_set_ids),
+        )
+
+    total_processed = processed + rec_res.get("processed", 0)
+    total_errors = errors + rec_res.get("errors", 0)
 
     return {
-        "processed": processed,
-        # `processed` counts files that were successfully ingested, while
-        # `errors` counts failures at ANY stage including ingestion itself.
-        # The two are therefore not a partition of the same set, so the
-        # subtraction is clamped — an operator must never be shown a negative
-        # number of extractions.
-        "extracted": max(0, processed - errors),
-        "errors": errors,
-        "touched_po_sets": len(touched_po_set_ids),
-        "reconciled_count": reconciled_count,
+        "processed": total_processed,
+        "extracted": max(0, total_processed - total_errors),
+        "errors": total_errors,
+        "touched_po_sets": rec_res.get("touched_po_sets", len(touched_po_set_ids)),
+        "reconciled_count": rec_res.get("reconciled_count", 0),
     }

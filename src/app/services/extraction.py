@@ -414,7 +414,102 @@ def _handle_combined(doc, s, result: dict, cfg) -> Document:
     return doc
 
 
+def populate_from_raw_dict(doc: Document, result: dict, s: Session, cfg) -> None:
+    """Populate normalized fields and line items from a raw extraction dictionary.
+
+    Decouples raw extraction persistence from normalization/scaling so
+    normalization rules or locales can be re-applied over stored JSON at any time.
+    """
+    doc.extraction_status = ExtractionStatus.valid
+    # update doc_type if VLM classified differently (e.g. UNKNOWN -> DN, or SKIP -> UNKNOWN)
+    # MUST run regardless of po_no_raw — otherwise DN/SI with missed PO stays UNKNOWN (bug SIV-DTS-25-576-2)
+    vtype = result.get("document_type")
+    if vtype and vtype in ("PO", "DN", "SI", "COMBINED", "SKIP", "UNKNOWN"):
+        import contextlib
+
+        from app.models import DocType
+
+        with contextlib.suppress(Exception):
+            effective_type = "UNKNOWN" if vtype == "SKIP" else vtype
+            doc.doc_type = DocType(effective_type)  # type: ignore[arg-type]
+
+    if result and result.get("po_no_raw"):
+        doc.po_no_raw = result["po_no_raw"]
+        # normalize for grouping — same as grouping.normalize_po_no (split revision ", 0")
+        from app.services.grouping import normalize_po_no
+
+        doc.po_no_normalized = normalize_po_no(result["po_no_raw"])
+    if result and result.get("po_reference_ambiguous"):
+        doc.po_reference_ambiguous = True
+
+    # also store DN/SI numbers if present (outside po_no_raw guard)
+    if result.get("document_type") == "SI" and result.get("document_number"):
+        doc.si_no = result["document_number"]
+        doc.invoice_no = result["document_number"]
+    if result.get("document_type") == "DN" and result.get("document_number"):
+        doc.dn_no = result["document_number"]
+    if (
+        result.get("document_type") == "PO"
+        and result.get("document_number")
+        and not doc.po_no_raw
+    ):
+        doc.po_no_raw = result["document_number"]
+        from app.services.grouping import normalize_po_no
+
+        doc.po_no_normalized = normalize_po_no(result["document_number"])
+
+    # persist line items (replace existing for this doc)
+    from app.models import LineItem
+
+    # clear old items for idempotency on retry
+    for li in list(doc.line_items):
+        s.delete(li)
+    s.flush()
+    for li in result.get("line_items", []) or []:
+        qty = li.get("quantity")
+        price = li.get("unit_price")
+        if qty is None or li.get("description") is None:
+            continue
+        locale = getattr(getattr(cfg, "matching", None), "locale", "en_IN") or "en_IN"
+        qty_i = _parse_scaled_int(qty, locale=locale)
+        price_i = _parse_scaled_int(price, locale=locale)
+        s.add(
+            LineItem(
+                document_id=doc.id,
+                line_item_no=str(li.get("line_item_no"))
+                if li.get("line_item_no")
+                else None,
+                description=str(li.get("description")),
+                quantity=qty_i,
+                unit_price=price_i,
+                dn_no=str(li.get("dn_no")) if li.get("dn_no") else None,
+            )
+        )
+
+
+def repopulate_from_raw_json(doc_id: int, cfg) -> Document | None:
+    """Re-derive normalized fields and line items from stored raw JSON without calling VLM."""
+    import json
+
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        doc = s.get(Document, doc_id)
+        if doc is None or not doc.raw_extraction_json:
+            return None
+        try:
+            result = json.loads(doc.raw_extraction_json)
+        except Exception:
+            return None
+        populate_from_raw_dict(doc, result, s, cfg)
+        s.commit()
+        s.refresh(doc)
+        return doc
+
+
 def extract_document(doc_id: int, cfg) -> Document:
+    from sqlalchemy import update as _sa_update
+
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     with Session(eng) as s:
@@ -424,6 +519,31 @@ def extract_document(doc_id: int, cfg) -> Document:
 
         dtype = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
         if is_manual_only(dtype):
+            return doc
+
+        # Compare-and-swap: atomically claim pending → processing so two concurrent
+        # callers (e.g. redo_extract route + recovery sweep running at the same time)
+        # cannot both enter the VLM extraction for the same document.
+        # Uses the same UPDATE…WHERE pattern as locking.acquire_lock — proven for SQLite WAL.
+        cur_status = doc.extraction_status
+        if cur_status == ExtractionStatus.pending:
+            cas_result = s.execute(
+                _sa_update(Document)
+                .where(
+                    Document.id == doc_id,
+                    Document.extraction_status == ExtractionStatus.pending,
+                )
+                .values(extraction_status=ExtractionStatus.processing)
+                .execution_options(synchronize_session=False)
+            )
+            s.commit()
+            if cas_result.rowcount == 0:
+                # Another caller already claimed it — return current persisted state.
+                s.refresh(doc)
+                return doc
+            s.refresh(doc)
+        elif cur_status == ExtractionStatus.processing:
+            # Already claimed by a concurrent caller; leave it.
             return doc
 
         if (doc.extraction_attempt_count or 0) >= 3:
@@ -501,69 +621,7 @@ def extract_document(doc_id: int, cfg) -> Document:
             if result.get("document_type") == "COMBINED":
                 return _handle_combined(doc, s, result, cfg)
 
-            doc.extraction_status = ExtractionStatus.valid
-            # update doc_type if VLM classified differently (e.g. UNKNOWN -> DN, or SKIP -> UNKNOWN)
-            # MUST run regardless of po_no_raw — otherwise DN/SI with missed PO stays UNKNOWN (bug SIV-DTS-25-576-2)
-            vtype = result.get("document_type")
-            if vtype and vtype in ("PO", "DN", "SI", "COMBINED", "SKIP", "UNKNOWN"):
-                import contextlib
-
-                from app.models import DocType
-
-                with contextlib.suppress(Exception):
-                    effective_type = "UNKNOWN" if vtype == "SKIP" else vtype
-                    doc.doc_type = DocType(effective_type)  # type: ignore[arg-type]
-
-            if result and result.get("po_no_raw"):
-                doc.po_no_raw = result["po_no_raw"]
-                # normalize for grouping — same as grouping.normalize_po_no (split revision ", 0")
-                from app.services.grouping import normalize_po_no
-
-                doc.po_no_normalized = normalize_po_no(result["po_no_raw"])
-            if result and result.get("po_reference_ambiguous"):
-                doc.po_reference_ambiguous = True
-            # also store DN/SI numbers if present (outside po_no_raw guard)
-            if result.get("document_type") == "SI" and result.get("document_number"):
-                doc.si_no = result["document_number"]
-                doc.invoice_no = result["document_number"]
-            if result.get("document_type") == "DN" and result.get("document_number"):
-                doc.dn_no = result["document_number"]
-            if (
-                result.get("document_type") == "PO"
-                and result.get("document_number")
-                and not doc.po_no_raw
-            ):
-                doc.po_no_raw = result["document_number"]
-                from app.services.grouping import normalize_po_no
-
-                doc.po_no_normalized = normalize_po_no(result["document_number"])
-            # persist line items (replace existing for this doc)
-            from app.models import LineItem
-
-            # clear old items for idempotency on retry
-            for li in list(doc.line_items):
-                s.delete(li)
-            s.flush()
-            for li in result.get("line_items", []) or []:
-                qty = li.get("quantity")
-                price = li.get("unit_price")
-                if qty is None or li.get("description") is None:
-                    continue
-                locale = getattr(getattr(cfg, "matching", None), "locale", "en_IN") or "en_IN"
-                qty_i = _parse_scaled_int(qty, locale=locale)
-                price_i = _parse_scaled_int(price, locale=locale)
-                s.add(
-                    LineItem(
-                        document_id=doc.id,
-                        line_item_no=str(li.get("line_item_no"))
-                        if li.get("line_item_no")
-                        else None,
-                        description=str(li.get("description")),
-                        quantity=qty_i,
-                        unit_price=price_i,
-                        dn_no=str(li.get("dn_no")) if li.get("dn_no") else None,
-                    )
-                )
+            populate_from_raw_dict(doc, result, s, cfg)
             s.commit()
             s.refresh(doc)
             return doc

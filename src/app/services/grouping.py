@@ -66,7 +66,9 @@ def normalize_po_no(raw: str) -> str:
         return ""
     # SAP revision counter: "PO, Rev # 161538,0" -> "PO, Rev # 161538"
     if "," in s:
-        s = s.rsplit(",", 1)[0]
+        before, after = s.rsplit(",", 1)
+        if re.search(r"\d", before) and re.match(r"^\s*\d{1,3}\s*$", after):
+            s = before
     toks = [t for t in re.split(r"[^A-Za-z0-9]+", s) if t]
     kept: list[str] = []
     for i, t in enumerate(toks):

@@ -21,7 +21,9 @@ depends_on: str | None = None
 def upgrade() -> None:
     op.execute("PRAGMA foreign_keys=OFF")
     with op.batch_alter_table("documents") as batch_op:
-        batch_op.add_column(sa.Column("split_completed_at", sa.DateTime(timezone=True), nullable=True))
+        batch_op.add_column(
+            sa.Column("split_completed_at", sa.DateTime(timezone=True), nullable=True)
+        )
     op.execute("PRAGMA foreign_keys=ON")
 
 

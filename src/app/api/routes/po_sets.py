@@ -16,7 +16,7 @@ from __future__ import annotations
 import html as _html
 import logging
 
-from fastapi import APIRouter, Form, HTTPException
+from fastapi import APIRouter, Form, HTTPException, Response
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
@@ -226,7 +226,7 @@ def force_merge(po_set_id: int, justification: str = Form("")):
     try:
         from app.services.merge import force_merge as svc_force_merge
 
-        result = svc_force_merge(po_set_id, cfg, justification=justification)
+        result = svc_force_merge(po_set_id, cfg, justification=justification, source="operator")
         detail = {"merged_path": str(result) if result else None}
         return {"status": "merged", "po_set_id": po_set_id, "detail": detail}
     except HTTPException:
@@ -269,6 +269,7 @@ def redo_extract(po_set_id: int):
         from app.models import Document, ExtractionStatus
         from app.services.extraction import extract_document, is_manual_only
         from app.services.reconciliation import reconcile_po_set
+        from app.services.retry import with_backoff_retry
 
         eng = get_engine(cfg)
         with Session(eng) as s:
@@ -276,17 +277,39 @@ def redo_extract(po_set_id: int):
             docs_to_extract = []
             for d in docs:
                 dt_val = d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type)
-                if not is_manual_only(dt_val):
-                    # Explicit operator intent: reset attempt count so extraction can re-run
+                if not is_manual_only(dt_val) and not d.is_split_parent:
+                    # Explicit operator intent: reset attempt count so extraction can re-run.
+                    # is_split_parent rows are sterile COMBINED parents — their data lives
+                    # in child rows; resetting them would trigger an unnecessary VLM call
+                    # and could corrupt the split invariant if the model re-classifies.
                     d.extraction_attempt_count = 0
                     d.extraction_status = ExtractionStatus.pending
                     docs_to_extract.append((d.id, dt_val))
             s.commit()
 
+        # If this set was quarantined, the operator's explicit Redo action is the
+        # gate to re-enter reconciliation. Reset status to pending so the quarantine
+        # guard in _reconcile_po_set_inner does not short-circuit and preserve the
+        # old (now-stale) reason.
+        from app.models import POSetStatus as _PSS
+
+        with Session(eng) as s_reset:
+            ps_reset = s_reset.get(POSet, po_set_id)
+            if ps_reset is not None and ps_reset.status == _PSS.quarantined:
+                ps_reset.status = _PSS.pending
+                s_reset.commit()
+
         extraction_results = []
         for doc_id, _dtype in docs_to_extract:
             try:
-                extracted = extract_document(doc_id, cfg)
+                # Use the same retry envelope as the nightly Prefect task so a transient
+                # VLM blip during redo_extract does not permanently burn an attempt (C1).
+                extracted = with_backoff_retry(
+                    lambda d=doc_id: extract_document(d, cfg),
+                    max_retries=cfg.extraction.max_retries,
+                    backoff_seconds=list(cfg.extraction.retry_backoff_seconds),
+                    label=f"redo_extract doc={doc_id}",
+                )
                 extraction_results.append(
                     {
                         "doc_id": doc_id,
@@ -351,7 +374,18 @@ def redo_match(po_set_id: int):
     cfg = load_config()
     _acquire_lock(po_set_id, "redo_match", cfg)
     try:
+        from app.models import POSetStatus as _PSS
         from app.services.reconciliation import reconcile_po_set
+
+        # If the set was quarantined, the operator pressing Redo Matching is the
+        # explicit gate to re-enter reconciliation with fresh eyes. Reset to pending
+        # so the quarantine guard does not short-circuit and preserve stale reason.
+        eng = get_engine(cfg)
+        with Session(eng) as s_reset:
+            ps_reset = s_reset.get(POSet, po_set_id)
+            if ps_reset is not None and ps_reset.status == _PSS.quarantined:
+                ps_reset.status = _PSS.pending
+                s_reset.commit()
 
         rec_res = reconcile_po_set(po_set_id, cfg)
         return {
@@ -364,7 +398,9 @@ def redo_match(po_set_id: int):
 
 
 @router.delete("/{po_set_id}/quarantine")
-def delete_quarantined(po_set_id: int, justification: str = Form("")):
+def delete_quarantined(
+    po_set_id: int, response: Response, justification: str = Form("")
+):
     """Delete quarantined PO Set - per-PO locked (FR-CONC-1).
 
     `justification` is optional; when given it must be >= 20 chars and is
@@ -375,7 +411,8 @@ def delete_quarantined(po_set_id: int, justification: str = Form("")):
     try:
         from app.services.quarantine import delete_quarantined as svc_delete
 
-        audit = svc_delete(po_set_id, cfg, justification=justification)
+        audit = svc_delete(po_set_id, cfg, justification=justification, source="operator")
+        response.headers["HX-Redirect"] = "/quarantine"
         return {"status": "deleted", "audit_id": audit.id}
     except HTTPException:
         raise

@@ -65,7 +65,7 @@ def parse_quantity_scaled(raw_qty_str: str, locale: str = "en_IN") -> int:
     # "5.000" is 5. Normalise first, then judge what is left.
     normalised = d.normalize()
     exponent = normalised.as_tuple().exponent
-    decimals = -exponent if exponent < 0 else 0
+    decimals = -exponent if isinstance(exponent, int) and exponent < 0 else 0
     if decimals > MAX_DECIMAL_PLACES:
         raise ValueError(
             f"Quantity has {decimals} significant decimals (max "

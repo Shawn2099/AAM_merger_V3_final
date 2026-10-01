@@ -1,4 +1,4 @@
-"""Tests for merge â€” order SIâ†’DNâ†’POâ†’(AWBâ†’Customs), filename=invoice_no, merged immutable (FR-14.1-14.7)."""
+"""Tests for merge — order SI->DN->PO->(AWB->Customs), filename=invoice_no, merged immutable (FR-14.1-14.7)."""
 
 from pathlib import Path
 
@@ -85,7 +85,7 @@ def _create_poset_with_docs(tmp_path, cfg, po_no="PO-1234", status=None, docs_in
 
 
 def test_merge_order_si_dn_po(tmp_path):
-    """FR-14.3: order SIâ†’DNâ†’PO, 3 pages."""
+    """FR-14.3: order SI->DN->PO, 3 pages."""
     from pypdf import PdfReader
 
     from app.services.merge import merge_po_set
@@ -108,7 +108,7 @@ def test_merge_order_si_dn_po(tmp_path):
     assert len(reader.pages) == 3
     # verify order by page mediabox widths
     widths = [float(p.mediabox.width) for p in reader.pages]
-    assert widths == [400, 300, 200], f"expected SIâ†’DNâ†’PO order, got {widths}"
+    assert widths == [400, 300, 200], f"expected SI->DN->PO order, got {widths}"
 
 
 def test_merge_filename_is_invoice_no(tmp_path):
@@ -144,7 +144,7 @@ def test_merge_filename_is_invoice_no(tmp_path):
 
 
 def test_merge_order_with_customs(tmp_path):
-    """FR-14.3: SIâ†’DNâ†’POâ†’(SHIPPINGâ†’CUSTOMS) when customs applies."""
+    """FR-14.3: SI->DN->PO->(SHIPPING->CUSTOMS) when customs applies."""
     from pypdf import PdfReader
 
     from app.services.merge import merge_po_set
@@ -167,7 +167,9 @@ def test_merge_order_with_customs(tmp_path):
     reader = PdfReader(str(out))
     assert len(reader.pages) == 5
     widths = [float(p.mediabox.width) for p in reader.pages]
-    assert widths == [400, 300, 200, 500, 600], f"expected SIâ†’DNâ†’POâ†’SHIPPINGâ†’CUSTOMS, got {widths}"
+    assert widths == [400, 300, 200, 500, 600], (
+        f"expected SI->DN->PO->SHIPPING->CUSTOMS, got {widths}"
+    )
 
 
 def test_merge_returns_none_if_mismatched(tmp_path):

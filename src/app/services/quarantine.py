@@ -154,9 +154,7 @@ def _po_line_quantities(po_set) -> dict[str, int]:
 
     out: dict[str, int] = {}
     for doc in po_set.documents or []:
-        if (doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)) != (
-            "PO"
-        ):
+        if (doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)) != ("PO"):
             continue
         for li in doc.line_items or []:
             key = normalize_line_no(li.line_item_no)
@@ -294,7 +292,7 @@ def validate_justification(text: str | None) -> str | None:
     return cleaned
 
 
-def delete_quarantined(po_set_id: int, cfg, justification: str | None = None) -> AuditLog:
+def delete_quarantined(po_set_id: int, cfg, justification: str | None = None, source: str = "system") -> AuditLog:
     """Delete quarantined POSet DB rows only, keep files, write audit_log (FR-13.6-13.7).
 
     Removes po_sets + documents + line_items rows scoped to po_set_id.
@@ -327,7 +325,7 @@ def delete_quarantined(po_set_id: int, cfg, justification: str | None = None) ->
             po_set_id=po_set_id,
             action=AuditAction.quarantine_delete,
             detail=detail,
-            source="system",
+            source=source,
             justification=note,
         )
         s.add(audit)
@@ -338,6 +336,36 @@ def delete_quarantined(po_set_id: int, cfg, justification: str | None = None) ->
         s.delete(ps)
         s.commit()
         s.refresh(audit)
+
+        # Move source files out of input_folder to prevent re-ingestion loop
+        try:
+            import contextlib
+            import hashlib
+            import time
+
+            input_dir = Path(cfg.paths.input_folder)
+            if input_dir.exists():
+                deleted_dir = Path(cfg.paths.quarantine_folder) / "deleted_inputs"
+                deleted_dir.mkdir(parents=True, exist_ok=True)
+                valid_hashes = {d.sha256_hash for d in docs if d.sha256_hash}
+                valid_names = {d.original_filename for d in docs if d.original_filename}
+                for f in list(input_dir.iterdir()):
+                    if not f.is_file() or f.suffix.lower() != ".pdf":
+                        continue
+                    should_move = False
+                    with contextlib.suppress(Exception):
+                        f_hash = hashlib.sha256(f.read_bytes()).hexdigest()
+                        if f_hash in valid_hashes or f.name in valid_names:
+                            should_move = True
+                    if should_move:
+                        dest = deleted_dir / f.name
+                        if dest.exists():
+                            dest = deleted_dir / f"{f.stem}_{int(time.time())}{f.suffix}"
+                        with contextlib.suppress(Exception):
+                            shutil.move(str(f), str(dest))
+        except Exception:
+            pass
+
         return audit
 
 
