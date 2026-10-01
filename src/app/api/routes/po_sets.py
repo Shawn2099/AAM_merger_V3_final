@@ -279,7 +279,7 @@ def redo_extract(po_set_id: int):
                 dt_val = d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type)
                 if not is_manual_only(dt_val) and not d.is_split_parent:
                     # Explicit operator intent: reset attempt count so extraction can re-run.
-                    # is_split_parent rows are sterile COMBINED parents — their data lives
+                    # is_split_parent rows are sterile parent documents — their data lives
                     # in child rows; resetting them would trigger an unnecessary VLM call
                     # and could corrupt the split invariant if the model re-classifies.
                     d.extraction_attempt_count = 0

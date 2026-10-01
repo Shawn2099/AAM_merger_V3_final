@@ -134,11 +134,12 @@ approximation.
 | `quarantined` | `po_line_missing_line_item_no` | a PO line has no line number to compare on |
 | `quarantined` | `multiple_po_documents` | the set holds more than one PO document (config `reconciliation.single_po_document`) |
 | `quarantined` | `unmatched_vendor_line` | a vendor row resolved to no PO line (see 3.2) |
+| `quarantined` | `po_document_has_no_line_items` | the PO document was read but contains no line items |
 | `quarantined` | `packet_naming_failed` | merged packet could not be named unambiguously |
 | `blocked_customs` | *(none)* | customs toggle on, CUSTOMS + SHIPPING not both attached |
 | `merged` | *(none)* | reconciled, customs gate clear, packet written — terminal |
 
-`REASON_TEXT` carries every reason code the reconciler can emit (eleven, in
+`REASON_TEXT` carries every reason code the reconciler can emit (twelve, in
 `services/reconciliation.py`). `mismatched`, `blocked_customs`
 and `merged` pass no reason because the status already says everything a
 reviewer needs.
