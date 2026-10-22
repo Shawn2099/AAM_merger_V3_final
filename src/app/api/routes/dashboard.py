@@ -717,12 +717,18 @@ def unclassified_view(request: Request):
         # The holding area shows untyped documents AND permanently failed ones
         # of any type: a failure is a loss the operator must see, wherever it
         # happened. Failed rows never attach (sweeps only take `valid`).
+        #
+        # It also shows documents that show more than one PO number. Both
+        # attach sweeps refuse those on purpose, so nothing will ever place
+        # them — without this they would wait for a human who cannot see
+        # them. The operator resolves them by entering the PO number here.
         docs = (
             s.query(Document)
             .filter(
                 or_(
                     Document.doc_type == DocType.UNKNOWN,
                     Document.extraction_status == ExtractionStatus.failed,
+                    Document.po_reference_ambiguous.is_(True),
                 )
             )
             .all()
@@ -733,6 +739,7 @@ def unclassified_view(request: Request):
         # separately, or the holding area reports a clean sheet while holding
         # files that will never be read.
         failed_count = sum(1 for d in docs if d.extraction_status == ExtractionStatus.failed)
+        ambiguous_count = sum(1 for d in docs if d.po_reference_ambiguous)
         return _templates.TemplateResponse(
             request,
             "unclassified.html",
@@ -741,6 +748,7 @@ def unclassified_view(request: Request):
                 "documents": docs,
                 "unclassified_count": len(docs),
                 "failed_count": failed_count,
+                "ambiguous_count": ambiguous_count,
             },
         )
 
@@ -787,6 +795,11 @@ def reclassify_document(
             raw = po_no.strip()
             doc.po_no_raw = raw
             doc.po_no_normalized = normalize_po_no(raw)
+            # A human naming the PO number resolves the ambiguity the VLM
+            # reported. Left set, the document would be refused by both
+            # attach sweeps if it were ever detached again, and it would keep
+            # showing in the holding area as unresolved.
+            doc.po_reference_ambiguous = False
             ps = get_or_create_po_set(raw, cfg)
             doc.po_set_id = ps.id
 

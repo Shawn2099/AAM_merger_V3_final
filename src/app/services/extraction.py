@@ -481,11 +481,15 @@ def populate_from_raw_dict(doc: Document, result: dict, s: Session, cfg) -> None
         if description is None:
             description = ""
             without_description += 1
-        if qty is None or str(qty).strip() == "":
-            without_quantity += 1
         locale = getattr(getattr(cfg, "matching", None), "locale", "en_IN") or "en_IN"
         qty_i = _parse_scaled_int(qty, locale=locale)
         price_i = _parse_scaled_int(price, locale=locale)
+        if qty_i == 0:
+            # No usable quantity — unreadable, rejected by the parser, or
+            # printed as zero. Stored as zero on purpose: the set's
+            # `non_positive_quantity` guard then quarantines it, which is the
+            # safe direction, and the reviewer sees the line.
+            without_quantity += 1
         s.add(
             LineItem(
                 document_id=doc.id,
@@ -499,8 +503,8 @@ def populate_from_raw_dict(doc: Document, result: dict, s: Session, cfg) -> None
     if without_description or without_quantity:
         logger.warning(
             "Document %s: kept %d line item(s) the VLM returned without a description and "
-            "%d without a usable quantity. They are stored, not dropped: a line with no "
-            "quantity quarantines the PO Set as non_positive_quantity.",
+            "%d stored with a zero quantity. They are stored, not dropped: a zero quantity "
+            "quarantines the PO Set as non_positive_quantity.",
             doc.id,
             without_description,
             without_quantity,

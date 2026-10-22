@@ -535,6 +535,12 @@ filename prefix, which is the weakest evidence it uses; a filename
 resemblance must not decide what the attach sweep deliberately leaves for a
 human.
 
+**It is visible while it waits.** A document nothing will attach on purpose
+must not wait unseen: it is listed in the Unclassified holding area with a
+"N need a PO number" count, and the operator resolves it by entering the PO
+number there. Naming the PO number clears the ambiguity — a human decision
+supersedes the model's uncertainty — and the document joins the set.
+
 ### M — a broken document is quarantined, and the operator puts it back
 
 **The rule: anything broken, or that cannot be confirmed, is quarantined.**

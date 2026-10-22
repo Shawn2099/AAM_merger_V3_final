@@ -3084,3 +3084,17 @@ did not move, and the response was a plain redirect that looked like success.
 Such a row is now attached to the set and typed as the uploaded manual
 document. A row that already carries pipeline data (a PO, DN or SI, or the
 parent of a split) is refused with a 409 that names the conflict.
+
+### 30.7 A document that waits for a human is visible
+
+Refusing to attach an ambiguous document (30.5) only means anything if the
+operator can see it. The holding area (`GET /unclassified`) listed only
+`doc_type == UNKNOWN` and `failed` documents, so a valid, typed, unattached
+document — exactly what an ambiguous one is — was invisible: it waited for a
+human who could not find it.
+
+The holding area now also lists documents with `po_reference_ambiguous`, with
+a "N need a PO number" count beside the "N failed" count. Entering the PO
+number on the reclassify form attaches the document and **clears the
+ambiguity flag**: a human decision supersedes the model's uncertainty, and
+the document stops being held and stops being reported as unresolved.

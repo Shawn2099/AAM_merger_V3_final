@@ -622,3 +622,284 @@ def test_a_line_item_without_a_description_keeps_its_quantity(tmp_path):
         assert len(po.line_items) == 1, "the row was dropped"
         assert po.line_items[0].quantity == 5000
         assert po.line_items[0].description == ""
+
+
+def test_a_vendor_line_without_a_quantity_is_kept_and_does_not_merge(tmp_path):
+    """Given a delivery note row the VLM could not read a quantity from, when
+    the set is reconciled, then the row is kept and the set is quarantined.
+
+    The row is the vendor's statement about a line. Dropping it would make
+    the delivery look complete and could let the set merge with that line
+    never checked. Kept as a zero-quantity line, the product's existing
+    "zero or negative anywhere quarantines the set" rule fires and the
+    reviewer is shown the line.
+    """
+    from app.services.reconciliation import reconcile_po_set
+
+    cfg = _cfg(tmp_path, "vendor_noqty.db")
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    dn_id = _extracted_doc(
+        cfg,
+        doc_type="DN",
+        po_no="PO-VND",
+        line_items=[
+            {"line_item_no": "1", "description": "WASHER", "quantity": None, "unit_price": "1.00"},
+        ],
+    )
+    with Session(eng) as s:
+        dn = s.get(Document, dn_id)
+        assert len(dn.line_items) == 1, "the row was dropped"
+        assert dn.line_items[0].quantity == 0
+
+        ps_id = _new_set(s, "PO-VND")
+        dn.po_set_id = ps_id
+        dn.po_no_normalized = "PO-VND"
+        _add_doc(s, cfg, ps_id, "PO", "po.pdf", [("1", 10)], po_no="PO-VND")
+        _add_doc(s, cfg, ps_id, "SI", "si.pdf", [("1", 10)], po_no="PO-VND")
+        s.commit()
+
+    res = reconcile_po_set(ps_id, cfg)
+    assert res["status"] == "quarantined", res
+    assert res["reason"] == "non_positive_quantity", res
+    with Session(eng) as s:
+        ps = s.get(POSet, ps_id)
+        assert ps.merged_output_path is None
+
+
+# ---------------------------------------------------------------------------
+# the fixes must not have broken the behaviour they sit next to
+# ---------------------------------------------------------------------------
+
+
+def test_a_quarantine_reason_refreshes_when_a_new_code_exists(tmp_path):
+    """Given a quarantined set, when the operator presses Redo matching and
+    the set quarantines again for a DIFFERENT reason, then the new reason is
+    stored.
+
+    The rule is "a stored reason is never overwritten by a sweep", not "a
+    stored reason is frozen". A verdict that has a code of its own always
+    writes its own text.
+    """
+    from app.services.reconciliation import REASON_TEXT, reconcile_po_set
+
+    cfg = _cfg(tmp_path, "refresh.db")
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps_id = _new_set(s, "PO-REFRESH")
+        _add_doc(s, cfg, ps_id, "PO", "po.pdf", [("1", 100)], po_no="PO-REFRESH")
+        _add_doc(s, cfg, ps_id, "DN", "dn.pdf", [("2", 100)], po_no="PO-REFRESH")
+        _add_doc(s, cfg, ps_id, "SI", "si.pdf", [("1", 100)], po_no="PO-REFRESH")
+        s.commit()
+
+    first = reconcile_po_set(ps_id, cfg)
+    assert first["reason"] == "unmatched_vendor_line", first
+
+    # the PO line is now unreadable -> a different, decisive verdict
+    with Session(eng) as s:
+        li = s.query(LineItem).filter_by(line_item_no="1").first()
+        li.quantity = 0
+        s.commit()
+        ps = s.get(POSet, ps_id)
+        ps.status = POSetStatus.pending  # what the operator's Redo does
+        s.commit()
+
+    second = reconcile_po_set(ps_id, cfg)
+    assert second["reason"] == "non_positive_quantity", second
+    with Session(eng) as s:
+        assert s.get(POSet, ps_id).reconcile_reason == REASON_TEXT["non_positive_quantity"]
+
+
+def test_delete_quarantined_survives_a_missing_input_file(tmp_path):
+    """Given the set's file is no longer in the input folder, when the
+    operator deletes the set, then the delete still succeeds and is audited."""
+    from app.services.quarantine import delete_quarantined
+
+    cfg = _cfg(tmp_path, "missing_input.db")
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps_id = _new_set(s, "PO-NOFILE")
+        _add_doc(s, cfg, ps_id, "PO", "po.pdf", [("1", 100)], po_no="PO-NOFILE")
+        s.commit()
+        ps = s.get(POSet, ps_id)
+        ps.status = POSetStatus.quarantined
+        s.commit()
+
+    audit = delete_quarantined(
+        ps_id, cfg, justification="operator cleared this quarantined set for good"
+    )
+    assert audit.action == AuditAction.quarantine_delete
+    with Session(eng) as s:
+        assert s.get(POSet, ps_id) is None
+
+
+def test_the_reclaim_leaves_finished_documents_alone(tmp_path):
+    """Given documents that were read (or definitively failed), when the
+    re-claim runs, then nothing is touched."""
+    from app.services.extraction import reclaim_stale_processing
+
+    cfg = _cfg(tmp_path, "finished.db")
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    old = datetime.now(UTC) - timedelta(hours=2)
+    with Session(eng) as s:
+        for name, status in (
+            ("valid", ExtractionStatus.valid),
+            ("failed", ExtractionStatus.failed),
+            ("pending", ExtractionStatus.pending),
+        ):
+            s.add(
+                Document(
+                    sha256_hash=name,
+                    original_filename=f"{name}.pdf",
+                    stored_path=str(Path(cfg.paths.stored_documents_folder) / f"{name}.pdf"),
+                    doc_type=DocType.UNKNOWN,
+                    extraction_status=status,
+                    updated_at=old,
+                )
+            )
+        s.commit()
+
+    assert reclaim_stale_processing(cfg) == 0
+    with Session(eng) as s:
+        for name, status in (
+            ("valid", ExtractionStatus.valid),
+            ("failed", ExtractionStatus.failed),
+            ("pending", ExtractionStatus.pending),
+        ):
+            assert s.query(Document).filter_by(sha256_hash=name).one().extraction_status == status
+
+
+def test_an_unambiguous_document_is_still_attached_by_the_resolution_sweep(tmp_path):
+    """Given a document with ONE PO number, when the resolution sweep runs,
+    then it is still attached by the sibling filename prefix.
+
+    The ambiguity guard must not turn the sweep off for every document.
+    """
+    from app.services.grouping import resolve_unattached_documents
+
+    cfg = _cfg(tmp_path, "unambiguous.db")
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps_id = _new_set(s, "PO-UNAMB")
+        _add_doc(s, cfg, ps_id, "PO", "SIV-DTS-25-477-PO.pdf", [("1", 100)], po_no="PO-UNAMB")
+        sibling = _add_doc(
+            s, cfg, None, "DN", "SIV-DTS-25-477-DN.pdf", [("1", 100)], po_reference_ambiguous=False
+        )
+        s.commit()
+        sibling_id = sibling.id
+
+    resolve_unattached_documents(cfg)
+
+    with Session(eng) as s:
+        assert s.get(Document, sibling_id).po_set_id is not None
+
+
+def test_an_ambiguous_document_is_visible_in_the_holding_area(client):
+    """Given a document that shows more than one PO number, when the operator
+    opens the holding area, then the document is there.
+
+    Both attach sweeps refuse it on purpose, so nothing will ever place it.
+    A document that waits for a human who cannot see it waits forever.
+    """
+    c, cfg = client
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        _add_doc(
+            s,
+            cfg,
+            None,
+            "DN",
+            "multi-po.pdf",
+            [("1", 100)],
+            po_reference_ambiguous=True,
+        )
+        s.commit()
+
+    resp = c.get("/unclassified")
+    assert resp.status_code == 200, resp.text
+    assert "multi-po.pdf" in resp.text, "the ambiguous document is invisible"
+    assert "need a PO number" in resp.text, resp.text
+
+
+def test_naming_the_po_number_resolves_an_ambiguous_document(client):
+    """Given a document the operator names a PO number for, when it is
+    reclassified, then it is attached and the ambiguity is cleared.
+
+    A human decision supersedes the model's uncertainty: the document stops
+    being held and stops being reported as unresolved.
+    """
+    c, cfg = client
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        doc = _add_doc(
+            s,
+            cfg,
+            None,
+            "DN",
+            "multi-po.pdf",
+            [("1", 100)],
+            po_reference_ambiguous=True,
+        )
+        s.commit()
+        doc_id = doc.id
+
+    resp = c.post(
+        f"/unclassified/{doc_id}/reclassify",
+        data={"doc_type": "DN", "po_no": "4500043712"},
+        follow_redirects=False,
+    )
+    assert resp.status_code in (200, 302), resp.text
+
+    with Session(eng) as s:
+        doc = s.get(Document, doc_id)
+        assert doc.po_set_id is not None, "the document was not attached"
+        assert doc.po_no_normalized == "4500043712"
+        assert doc.po_reference_ambiguous is False, "the ambiguity was not resolved"
+
+    # and it no longer waits in the holding area
+    resp = c.get("/unclassified")
+    assert "multi-po.pdf" not in resp.text, "the resolved document is still held"
+
+
+def test_upload_of_a_new_file_still_creates_the_document(client):
+    """Given a file the system has never seen, when the operator uploads it,
+    then a document is created and attached."""
+    from app.models import DocType, Document, ExtractionStatus
+
+    c, cfg = client
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+
+    pdf_path = Path(cfg.paths.stored_documents_folder) / "brand-new.pdf"
+    _pdf(pdf_path)
+    import hashlib
+
+    sha = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+
+    with Session(eng) as s:
+        ps_id = _new_set(s, "PO-NEW")
+        ps = s.get(POSet, ps_id)
+        ps.has_customs_toggle = True
+        s.commit()
+
+    with open(pdf_path, "rb") as fh:
+        resp = c.post(
+            f"/po_sets/{ps_id}/upload",
+            files={"file": ("brand-new.pdf", fh, "application/pdf")},
+            data={"doc_type": "CUSTOMS"},
+            follow_redirects=False,
+        )
+
+    assert resp.status_code == 302, resp.text
+    with Session(eng) as s:
+        doc = s.query(Document).filter_by(sha256_hash=sha).one()
+        assert doc.po_set_id == ps_id
+        assert doc.doc_type == DocType.CUSTOMS
+        assert doc.extraction_status == ExtractionStatus.valid
+        assert s.get(POSet, ps_id).customs_doc_count == 1
