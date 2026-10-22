@@ -1,0 +1,187 @@
+# Delivery Runbook — one PC in the client's office
+
+This is the short version for handing the MVP to the client. The full technical
+detail is in [`DEPLOY.md`](../DEPLOY.md); this page is what to follow on the day.
+
+**Target setup:** one Windows PC (the "server") runs the web app, the database,
+the file folders and the nightly sync. Other people in the office open the
+dashboard in a browser at `http://<server-ip>:8000/dashboard`. They all see the
+same data — there is no per-user login.
+
+---
+
+## 1. What the server PC needs
+
+| Item | Requirement |
+|---|---|
+| OS | Windows 10/11 or Windows Server 2016+ |
+| CPU / RAM | 2 cores, 4 GB free (2-core is the design target) |
+| Disk | Local disk only. **Never put the database on an SMB share** — SQLite WAL needs shared memory |
+| Network | Static LAN IP (or a DHCP reservation). Internet access for OpenRouter |
+| Rights | Administrator for the install (services, firewall, backup task) |
+| Python | Python 3.11+ **or** `uv` on `PATH` (the installer prefers `uv`) |
+| Key | An OpenRouter API key with its own quota, in `.env` — never in `config.yaml` |
+
+---
+
+## 2. Put the code and the key in place
+
+Copy the repository to the server (for example `C:\AAM_Merger`) and open
+**PowerShell as Administrator** in that folder.
+
+```powershell
+# One-time: the secret. Use the tester key, not a personal one.
+notepad .env
+#   OPENROUTER_API_KEY=sk-or-v1-...
+```
+
+`config.yaml` is created for you from `config.example.yaml`. The default paths
+are `./data/...`, relative to the project folder — that is correct for a
+single-PC install. Edit only if you are moving the data to another local disk,
+and keep the SQLite file on a local drive.
+
+---
+
+## 3. Install
+
+```powershell
+.\scripts\setup_test_rig.ps1 -OpenFirewall -ScheduleBackup -WithPrefectServer
+```
+
+What it does, in order:
+
+1. syncs the Python environment (`uv sync --no-dev`, or `pip install -e .`);
+2. creates `config.yaml` if missing and the data folders;
+3. applies the database schema (`alembic upgrade head`);
+4. adds the inbound firewall rule for TCP 8000 (`-OpenFirewall`);
+5. registers the daily 01:00 database backup (`-ScheduleBackup`);
+6. installs and starts three Windows services:
+   `AAMMerger-PrefectServer`, `AAMMerger-Worker`, `AAMMerger-Web`;
+7. waits for the Prefect API, creates the `aam-merger-process-pool` work pool,
+   registers the **midnight sync** deployment, and restarts the worker;
+8. performs an HTTP health check.
+
+It prints the dashboard URL using this machine's LAN IP. Services start on boot.
+
+**Re-running the installer is safe** — it updates the environment, services and
+scheduled sync without touching data. That is also the upgrade path (section 8).
+
+> Assembling the pieces by hand? Then you must do step 7 yourself:
+> `python -m prefect work-pool create aam-merger-process-pool --type process`
+> before `python scripts/deploy_prefect.py`. Without a work pool the nightly
+> sync is never registered.
+
+---
+
+## 4. Verify before you hand it over
+
+1. On the server: `http://127.0.0.1:8000/health` returns `{"status":"ok",...}`.
+2. On **another PC** in the office: open `http://<server-ip>:8000/dashboard`.
+   If that fails, the firewall rule is missing — re-run with `-OpenFirewall`.
+3. Drop one complete real set (one PO, one DN, one SI) into `data\input`, press
+   **Scan Input Folder**, and confirm it reaches **Merged & Ready** and the
+   packet appears in `data\output`.
+4. `.\scripts\manage_services.ps1 -Action status` shows all three services
+   `Running`.
+5. `.\scripts\backup_db.ps1` creates a file in `data\backup`.
+
+---
+
+## 5. Let the office submit documents
+
+The product reads PDFs from the server's `data\input` folder. Users on other
+PCs cannot see that folder unless you share it:
+
+```powershell
+# Example only — choose the security group that matches the office.
+New-SmbShare -Name "AAM-Input" -Path "C:\AAM_Merger\data\input" -FullAccess "Domain Users"
+```
+
+Users then copy PDFs to `\\<server-name>\AAM-Input`, and anyone can press
+**Scan Input Folder**. Share **only `data\input`** — not `data\`, which contains
+the database, the quarantine and the merged packets.
+
+Keep the input folder local-disk backed. A mapped SMB path in `config.yaml`
+would put the document reads on the network; sharing the folder to clients is
+fine, pointing the app at a UNC path is not required and adds failure modes.
+
+---
+
+## 6. Daily operation
+
+- **Nightly sync** runs at 00:00 (Prefect deployment `aam-midnight-sync`).
+  Prefect's default is **00:00 UTC**. To make "midnight" mean the office's
+  midnight, set `prefect.schedule_timezone` in `config.yaml`
+  (e.g. `"Asia/Kolkata"`) and re-run the installer to re-register the schedule.
+- **Backups** run at 01:00 via the `AAMMerger-DailyBackup` scheduled task, keep
+  30 days, and live in `data\backup\`.
+- **Logs** are in `data\logs\` (`aam_merger.log` plus NSSM stdout/stderr).
+- **Manual scan** is the same button users press: it is safe to run at any time;
+  a second request while one is running is refused with 409.
+
+Restore a backup: stop the services, replace `data\aam_merger.db` with a file
+from `data\backup`, delete any `-wal`/`-shm` beside it, start the services.
+
+---
+
+## 7. Clearing data between test rounds
+
+```powershell
+.\scripts\reset_data.ps1          # asks you to type RESET
+```
+
+It refuses while port 8000 is in use, backs the database up first, deletes the
+database and every ingested/generated file, then recreates the schema. It keeps
+`config.yaml`, `.env`, `data\backup` and the logs.
+
+---
+
+## 8. Updating the code
+
+```powershell
+.\scripts\manage_services.ps1 -Action stop
+git pull
+.\scripts\setup_test_rig.ps1 -OpenFirewall -ScheduleBackup -WithPrefectServer
+```
+
+The installer re-applies migrations and re-registers the deployment. If you
+skipped `git pull` because the client has no git, copy the new files over and
+run the same command.
+
+---
+
+## 9. Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| Other PCs cannot open the dashboard | No inbound rule for TCP 8000. Re-run with `-OpenFirewall`. Check the office network/VLAN. |
+| Dashboard opens, buttons do nothing | The browser is loading stale HTML. HTMX/Alpine are served by the app itself now; hard-refresh (Ctrl+F5). |
+| "Sync already running" (409) | Someone else pressed scan. Wait for the spinner to finish. Clicking twice does not duplicate work. |
+| `OPENROUTER_API_KEY not set` in the log | `.env` missing or not in the project folder. Fix it and restart `AAMMerger-Web`; no restart is needed for extraction runs, but the startup warning is the tell. |
+| Nightly sync does not run | `PREFECT_API_URL` and the pool must exist. Check `AAMMerger-PrefectServer` is Running, then re-run the installer (step 7). |
+| Documents stay "Not read" | The server has no internet, or the key is out of quota. Check `data\logs\aam_merger.log`. |
+| Database errors on a network drive | Move the database back to a local disk. SQLite WAL does not work over SMB. |
+| Port 8000 already in use | Stop whatever owns it (`Get-NetTCPConnection -LocalPort 8000`), or change `server.port` in `config.yaml` and re-run the installer. |
+
+---
+
+## 10. Handover checklist
+
+- [ ] `.env` holds the **tester** key (not a personal one)
+- [ ] Services installed and Running; they survive a reboot
+- [ ] Firewall rule present; dashboard opens from a second PC
+- [ ] One real PO/DN/SI set merged end-to-end; packet in `data\output`
+- [ ] Intake folder shared (or an agreed way to deliver PDFs)
+- [ ] Daily backup task registered; one backup exists
+- [ ] Dashboard URL written down for users
+- [ ] `docs/TESTER_GUIDE.md` given to the testers
+- [ ] Known limitations explained (guessed merge risk, quantities only, one PO per set)
+
+---
+
+## Security note (accepted for this MVP)
+
+There is **no authentication**. Anyone who can reach port 8000 can see every
+document and press every button. That is acceptable only on the client's
+private office LAN. Do not expose it to the internet, and keep the firewall rule
+scoped to the office subnet rather than "Any".

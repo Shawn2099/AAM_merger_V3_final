@@ -1,5 +1,9 @@
 # Deployment Runbook — Windows Server 2016 / Test Rig
 
+> For a client-office handover, start with
+> [`docs/DELIVERY.md`](./docs/DELIVERY.md) — it is the checklist version of
+> this page. This file keeps the technical detail.
+
 This guide details the single-host production and test rig setup for **AAM Merger V3** (FastAPI, SQLite WAL, Prefect 3.x, NSSM Windows Services).
 
 ---
@@ -24,6 +28,14 @@ Run PowerShell as **Administrator** from the project directory:
 9. **Health Verification**: Performs an automated HTTP smoke check against `http://127.0.0.1:8000/health`.
 
 > **Note on Prefect Server:** If you are running a self-hosted Prefect server on the test rig rather than Prefect Cloud, pass `-WithPrefectServer` to also run the orchestration server as a Windows Service.
+
+> **Work pool + API URL:** on a fresh host the services are installed and
+> started first, then the installer waits for the Prefect API, creates the
+> `aam-merger-process-pool` work pool (nothing else created it, so the midnight
+> deployment used to fail with "Work pool not found"), registers the midnight
+> sync, and restarts the worker. Every service receives the same
+> `PREFECT_API_URL`; pass `-PrefectApiUrl` to target an external server or
+> Prefect Cloud.
 
 ---
 

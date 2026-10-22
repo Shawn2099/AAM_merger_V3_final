@@ -38,6 +38,14 @@ uv run ruff check . && uv run ruff format --check .
 uv run pytest -q
 ```
 
+## Delivering it to users
+
+- [`docs/DELIVERY.md`](./docs/DELIVERY.md) — install on the client's single PC
+  (firewall, Windows services, Prefect pool + midnight schedule, backups,
+  reset, handover checklist).
+- [`docs/TESTER_GUIDE.md`](./docs/TESTER_GUIDE.md) — the one-page guide for the
+  people who will use the dashboard.
+
 Note: use **forward slashes** in `config.yaml` paths. A double-quoted
 `C:\AAM\input` is a YAML escape error and the app will refuse to start.
 
