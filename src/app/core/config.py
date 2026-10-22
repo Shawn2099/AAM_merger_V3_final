@@ -112,6 +112,23 @@ class IngestionConfig(BaseModel):
 class PrefectConfig(BaseModel):
     work_pool_name: str = "aam-merger-process-pool"
     max_concurrent_extraction_tasks: int = Field(default=3, ge=1, le=10)
+    # IANA zone for the midnight sync (e.g. "Asia/Kolkata"). Unset means
+    # Prefect's default, which is UTC — the deploy script says so rather than
+    # letting an operator assume "midnight" means local midnight.
+    schedule_timezone: str | None = None
+
+    @field_validator("schedule_timezone", mode="after")
+    @classmethod
+    def validate_schedule_timezone(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        try:
+            from zoneinfo import ZoneInfo
+
+            ZoneInfo(v)
+        except Exception as e:
+            raise ValueError(f"Unknown timezone for prefect.schedule_timezone: {v!r}") from e
+        return v
 
 
 class ConcurrencyConfig(BaseModel):

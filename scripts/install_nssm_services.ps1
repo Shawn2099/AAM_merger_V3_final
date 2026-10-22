@@ -25,6 +25,10 @@
     Bind address for Uvicorn (default: 0.0.0.0 for LAN access).
 .PARAMETER WithPrefectServer
     Switch to also install and run a local self-hosted Prefect server as a Windows Service.
+.PARAMETER PrefectApiUrl
+    Prefect API the web app, worker and CLI talk to. Defaults to
+    http://127.0.0.1:4200/api when -WithPrefectServer is used, otherwise the
+    value is left to the machine's own PREFECT_API_URL.
 .PARAMETER StartServices
     Switch to immediately start the services after installation.
 
@@ -40,6 +44,7 @@ param(
     [string]$Port = "8000",
     [string]$HostAddress = "0.0.0.0",
     [switch]$WithPrefectServer,
+    [string]$PrefectApiUrl = "",
     [switch]$StartServices
 )
 
@@ -119,6 +124,7 @@ Write-Host "Python Executable : $PythonExe"
 Write-Host "NSSM Executable   : $NssmPath"
 Write-Host "Binding           : ${HostAddress}:${Port}"
 Write-Host "Prefect Server    : $(if ($WithPrefectServer) { 'Yes (Local Service)' } else { 'No (External or Worker-only)' })"
+Write-Host "Prefect API URL   : $(if ($prefectApi) { $prefectApi } else { '(machine default)' })"
 
 # 4. Ensure Data & Log Directories
 $logsDir = Join-Path $ProjectDir "data\logs"
@@ -127,6 +133,18 @@ if (-not (Test-Path $logsDir)) {
 }
 
 $srcDir = Join-Path $ProjectDir "src"
+
+# Every process must talk to the same Prefect API. Without PREFECT_API_URL each
+# one starts its own ephemeral server, so the worker never sees the scheduled
+# deployment and the midnight sync silently never runs.
+$prefectApi = $PrefectApiUrl
+if ([string]::IsNullOrWhiteSpace($prefectApi) -and $WithPrefectServer) {
+    $prefectApi = "http://127.0.0.1:4200/api"
+}
+$extraEnv = "PYTHONPATH=$srcDir`nNO_PROXY=127.0.0.1,localhost,::1`nPYTHONUTF8=1`nPYTHONIOENCODING=utf-8"
+if (-not [string]::IsNullOrWhiteSpace($prefectApi)) {
+    $extraEnv = "$extraEnv`nPREFECT_API_URL=$prefectApi"
+}
 
 function Install-Or-Update-NssmService {
     param(
@@ -152,7 +170,7 @@ function Install-Or-Update-NssmService {
     Write-Host "Installing service $ServiceName..." -ForegroundColor Cyan
     & $NssmPath install $ServiceName "$AppPath" "$AppArgs"
     & $NssmPath set $ServiceName AppDirectory "$AppDir"
-    & $NssmPath set $ServiceName AppEnvironmentExtra "PYTHONPATH=$srcDir`nNO_PROXY=127.0.0.1,localhost,::1"
+    & $NssmPath set $ServiceName AppEnvironmentExtra "$extraEnv"
     & $NssmPath set $ServiceName AppStdout "$StdoutLog"
     & $NssmPath set $ServiceName AppStderr "$StderrLog"
     & $NssmPath set $ServiceName AppRotateFiles 1

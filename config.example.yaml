@@ -48,6 +48,9 @@ ingestion:
 prefect:
   work_pool_name: "aam-merger-process-pool"
   max_concurrent_extraction_tasks: 3
+  # The midnight sync runs at 00:00 UTC unless this is set. Use the IANA zone
+  # of the office so "midnight" means local midnight (e.g. "Asia/Kolkata").
+  # schedule_timezone: "Asia/Kolkata"
 
 concurrency:
   po_set_lock_timeout_seconds: 300

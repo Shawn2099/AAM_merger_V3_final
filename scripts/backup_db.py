@@ -2,6 +2,11 @@
 
 Usage:
     python scripts/backup_db.py [--retention-days 30] [--backup-dir ./data/backup]
+
+The Windows Scheduled Task that runs this has no working directory, so every
+relative path in `config.yaml` is resolved against the project root — never
+against the process cwd. A missing `config.yaml` is an error: backing up a
+guessed path would report success while saving the wrong data.
 """
 
 from __future__ import annotations
@@ -12,31 +17,37 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-# Ensure src is in python path
+import yaml
+
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "src"))
-
-try:
-    from app.core.config import load_config
-except ImportError:
-    load_config = None
 
 
-def run_backup(retention_days: int = 30, backup_dir: Path | None = None) -> Path:
-    if load_config:
-        try:
-            cfg = load_config()
-            db_path = Path(cfg.paths.database_path).resolve()
-        except Exception:
-            db_path = (ROOT / "data" / "aam_merger.db").resolve()
-    else:
-        db_path = (ROOT / "data" / "aam_merger.db").resolve()
+def database_path_from_config(cfg_path: Path, root: Path) -> Path:
+    """Read `paths.database_path`, resolving a relative path against `root`."""
+    if not cfg_path.exists():
+        raise FileNotFoundError(
+            f"Config not found: {cfg_path} — cannot locate the database to back up"
+        )
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    raw = (data.get("paths") or {}).get("database_path")
+    if not raw:
+        raise KeyError(f"{cfg_path} has no paths.database_path")
+    path = Path(raw)
+    return path.resolve() if path.is_absolute() else (root / path).resolve()
+
+
+def run_backup(
+    retention_days: int = 30,
+    backup_dir: Path | None = None,
+    project_root: Path | None = None,
+) -> Path:
+    root = Path(project_root).resolve() if project_root is not None else ROOT
+    db_path = database_path_from_config(root / "config.yaml", root)
 
     if not db_path.exists():
         raise FileNotFoundError(f"Database file not found at {db_path}")
 
-    if backup_dir is None:
-        backup_dir = ROOT / "data" / "backup"
+    backup_dir = root / "data" / "backup" if backup_dir is None else Path(backup_dir).resolve()
     backup_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")

@@ -555,6 +555,11 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
             try:
                 with Session(eng) as s2:
                     d2 = s2.get(_Doc, doc.id)
+                    if d2 is None:
+                        # The row was removed between extraction and grouping
+                        # (a concurrent delete or quarantine). Nothing to place.
+                        logger.warning("Document %s disappeared before grouping", doc.id)
+                        continue
                     ps_id, problem = group_document(d2, cfg)
                     if problem == "missing_po_number":
                         # Read successfully, but no PO reference on the face
