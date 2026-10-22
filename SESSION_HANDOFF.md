@@ -1,7 +1,7 @@
 # Session Handover — AAM Merger V3
 
 **Branch:** `fix/mvp-high-priority` (local commits; not merged into main/dev-simplified).
-**Last commit:** `c685444` (record the core contract and pin it with tests).
+**Last commit:** `01f51f9` (description keys a PO line that has no number).
 **Tests:** full suite green (4 full runs today). `ruff check` / `ruff format --check` clean. `ty check src` clean. `make business-logic` = 26 scenario tests.
 **Delivery goal:** one Windows PC in the client's office is the server; office
 users open `http://<server-ip>:8000/dashboard`. See `docs/DELIVERY.md`.
@@ -79,13 +79,24 @@ produce and asserts both the engine result and the page an operator reads:
 merge, needs review, all six quarantine reasons, PO reference mismatch, packet
 name collision, partial delivery, duplicate bytes vs duplicate content,
 one-PO-many-DN/SI, customs before/after merge, the holding area, and quarantine
-delete. Run it with `make business-logic` (or the file directly; 28 tests).
+delete. Run it with `make business-logic` (or the file directly; 29 tests).
 
 The one-page contract is [`docs/CORE_LOGIC.md`](docs/CORE_LOGIC.md): one PO +
 n DN + n SI, per-line quantity aggregates, line number first / description only
 as a fallback, quantities only, customs append. Two tests pin the "only
 quantities" clause directly (`test_only_quantities_decide_the_verdict`) and the
 description fallback (`test_a_numberless_vendor_row_falls_back_to_description`).
+
+**Description now keys a PO row that has no number.** The operator clarified
+that the table content identifies an item on either side. `matching.po_item_key`
+uses the printed number, else `@desc:<normalised description>`; a numbered
+vendor row may match a numberless PO row by description, but a number the PO
+carries stays authoritative. A PO row with **neither** a number nor a
+description still quarantines. The dashboard matrix uses the same keys.
+Tests: `test_a_numberless_po_line_reconciles_by_description`,
+`test_a_numberless_po_line_is_matched_by_its_description`,
+`test_a_numbered_vendor_row_can_match_a_numberless_po_line_by_description`.
+PRODUCT §2/§3, CORE_LOGIC §3 and `real arch` §33 updated.
 
 ### Defects found and fixed
 
