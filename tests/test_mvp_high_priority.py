@@ -292,6 +292,81 @@ def test_a_document_being_read_now_is_not_reclaimed(tmp_path):
         assert s.get(Document, doc_id).extraction_status == ExtractionStatus.processing
 
 
+def test_the_recovery_flow_reads_a_document_a_dead_worker_left_behind(tmp_path, monkeypatch):
+    """Given a document left in `processing` by a worker that died, when the
+    recovery flow runs, then the document is claimed again and read.
+
+    This is the end-to-end proof that the re-claim is wired into the flow
+    and not merely available as a helper: the document ends up `valid`, the
+    way a document that was never claimed ends up.
+    """
+    from app.services import extraction as ext
+
+    cfg = _cfg(tmp_path, "flow.db")
+    monkeypatch.setattr("app.flows.sync.load_config", lambda *a, **kw: cfg)
+    monkeypatch.setattr("app.services.sync_lock.load_config", lambda *a, **kw: cfg)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-not-real")
+
+    read = ext._VLMPageExtraction(
+        document_type="PO",
+        document_number="PO-STUCK",
+        po_reference=None,
+        po_reference_ambiguous=False,
+        vendor_name="ACME TRADING EST.",
+        line_items=[
+            ext._VLMLineItem(
+                line_item_no="1",
+                description="NUT, HEX 9/16",
+                quantity="50.00",
+                unit_price="350.00",
+                dn_no=None,
+            )
+        ],
+    )
+
+    class _Completions:
+        def create(self, **kwargs):
+            return read
+
+    class _Chat:
+        completions = _Completions()
+
+    class _Client:
+        chat = _Chat()
+
+    monkeypatch.setattr(ext.instructor, "from_openai", lambda *a, **kw: _Client())
+
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    stored = Path(cfg.paths.stored_documents_folder) / "stuck.pdf"
+    _pdf(stored)
+    old = datetime.now(UTC) - timedelta(hours=2)
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="stuck-in-flow",
+            original_filename="stuck.pdf",
+            stored_path=str(stored),
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.processing,
+            updated_at=old,
+        )
+        s.add(doc)
+        s.commit()
+        doc_id = doc.id
+
+    from app.flows.sync import recovery_flow
+
+    run_fn = getattr(recovery_flow, "fn", recovery_flow)
+    res = run_fn()
+
+    assert res.get("status") != "skipped", res
+    with Session(eng) as s:
+        doc = s.get(Document, doc_id)
+        assert doc.extraction_status == ExtractionStatus.valid, (
+            f"the document was not read again (status={doc.extraction_status})"
+        )
+
+
 # ---------------------------------------------------------------------------
 # 5 — uploading a file that already exists, unattached
 # ---------------------------------------------------------------------------
