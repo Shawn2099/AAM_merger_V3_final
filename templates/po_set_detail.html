@@ -379,9 +379,19 @@
 <div id="force-merge-modal" class="modal-backdrop">
   <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="fm-title">
     <h3 id="fm-title" style="margin-bottom:8px; color:#b91c1c;">⚠️ Confirm Force Merge</h3>
-    <p class="muted" style="margin-bottom:16px;">
+    <p class="muted" style="margin-bottom:12px;">
       Force Merge bypasses all reconciliation matching checks and customs requirements. It compiles whatever files currently exist into the final merged PDF and creates an immutable audit record.
     </p>
+    <label for="force-merge-justification" class="muted" style="display:block; font-size:0.85rem; margin-bottom:4px;">
+      Reason (written to the audit log; at least 20 characters if given)
+    </label>
+    <textarea
+      id="force-merge-justification"
+      name="justification"
+      rows="3"
+      placeholder="Why is this override justified?"
+      style="width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); font-family:inherit; font-size:0.9rem; margin-bottom:16px;"
+    ></textarea>
     <div style="display:flex; gap:10px; justify-content:flex-end;">
       <button class="btn btn-secondary" onclick="document.getElementById('force-merge-modal').classList.remove('open')">
         Cancel
@@ -389,6 +399,7 @@
       <button
         class="btn btn-danger"
         hx-post="/po_sets/{{ po_set.id }}/force_merge"
+        hx-include="#force-merge-justification"
         hx-swap="none"
         onclick="document.getElementById('force-merge-modal').classList.remove('open')"
       >

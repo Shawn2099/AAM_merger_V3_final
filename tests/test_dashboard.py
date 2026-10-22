@@ -299,6 +299,10 @@ def test_force_merge_modal_and_audit(tmp_cfg, client):
     html = r.text
     # modal must have confirmation text and HTMX post to force_merge
     assert "hx-post" in html and "force_merge" in html
+    # the operator's reason must actually reach the audit row: the modal needs
+    # a named field and the button must include it in the request
+    assert 'name="justification"' in html
+    assert 'hx-include="#force-merge-justification"' in html
     # execute force merge
     r2 = client.post(f"/po_sets/{pid}/force_merge")
     assert r2.status_code == 200
