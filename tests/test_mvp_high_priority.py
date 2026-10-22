@@ -1221,14 +1221,14 @@ def test_a_normal_po_still_mints_its_set(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_the_customs_toggle_is_refused_on_a_merged_set(client):
+def test_the_customs_toggle_is_allowed_on_a_merged_set(client):
     """Given a PO Set whose packet has been written, when the operator
-    toggles the customs gate, then it is refused with a 409 and the set
-    stays merged.
+    toggles the customs gate, then the toggle is accepted and the set stays
+    merged.
 
-    The packet is final. Toggling the gate used to overwrite the terminal
-    status, so the dashboard showed a packet that had already been
-    delivered as "Awaiting Customs".
+    The requirement can be turned on after delivery. The packet is rebuilt
+    once both documents are attached; the status never regresses, so a
+    delivered packet is never shown as "Awaiting Customs".
     """
     c, cfg = client
     eng = get_engine(cfg)
@@ -1243,12 +1243,12 @@ def test_the_customs_toggle_is_refused_on_a_merged_set(client):
 
     resp = c.post(f"/po_sets/{ps_id}/toggle_customs", follow_redirects=False)
 
-    assert resp.status_code == 409, resp.text
-    assert "already merged" in resp.json()["detail"], resp.json()
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["has_customs_toggle"] is True
     with Session(eng) as s:
         ps = s.get(POSet, ps_id)
         assert ps.status == POSetStatus.merged, "a delivered packet must stay merged"
-        assert ps.has_customs_toggle is False
+        assert ps.has_customs_toggle is True
 
 
 # ---------------------------------------------------------------------------

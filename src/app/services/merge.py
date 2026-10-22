@@ -150,8 +150,12 @@ def _write_merged(ordered: list, out: Path, allow_missing: bool = False) -> Path
     writer = PdfWriter()
     missing: list[str] = []
     for doc in ordered:
-        p = Path(doc.stored_path)
-        if not p.exists():
+        raw_path = getattr(doc, "stored_path", None)
+        p = Path(raw_path) if raw_path else None
+        # An empty stored_path becomes Path("."), which "exists" and then
+        # makes PdfReader open the cwd. A malformed row must be treated as a
+        # missing file, not crash the merge and abort the sweep.
+        if p is None or not p.is_file():
             doc_id = getattr(doc, "id", "?")
             doc_name = getattr(doc, "original_filename", "unknown")
             missing.append(f"Doc {doc_id} ({doc_name}): {p}")
@@ -352,3 +356,107 @@ def force_merge(
         s.refresh(ps)
         assert ps.merged_output_path is not None
         return Path(ps.merged_output_path)
+
+
+def append_customs_to_merged_packet(po_set_id: int, cfg, source: str = "operator") -> Path:
+    """Rebuild an already-merged packet so it contains CUSTOMS and SHIPPING.
+
+    The set was merged before the customs requirement was switched on. The
+    operator uploaded both documents afterwards. The packet is regenerated
+    from every attached document in the legal order (SHIPPING and CUSTOMS are
+    last), written to a temporary file and atomically swapped in, so a failed
+    rebuild never truncates the delivered packet.
+
+    The set stays `merged` and `merged_at` is untouched: the first merge is
+    still the moment the packet became deliverable. The append is recorded as
+    its own audit row.
+
+    Idempotent: rebuilding from the same documents produces the same packet.
+    Raises ValueError when the preconditions are not met, so a caller cannot
+    silently append a customs document that is not there.
+    """
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = s.get(POSet, po_set_id)
+        if ps is None:
+            raise ValueError(f"POSet {po_set_id} not found")
+        if ps.status != POSetStatus.merged:
+            raise ValueError(f"POSet {po_set_id} is not merged (status={ps.status})")
+        if not ps.merged_output_path:
+            raise ValueError(f"POSet {po_set_id} has no merged packet path")
+        if not ps.has_customs_toggle:
+            raise ValueError(f"POSet {po_set_id} does not require customs documents")
+
+        docs = list(ps.documents or [])
+        present = {_doc_type_val(d) for d in docs}
+        if not {DocType.CUSTOMS.value, DocType.SHIPPING.value} <= present:
+            raise ValueError(
+                f"POSet {po_set_id} needs both a CUSTOMS and a SHIPPING document "
+                "before the packet can be rebuilt"
+            )
+
+        ordered = _ordered_docs(ps, cfg)
+        if not ordered:
+            raise ValueError(f"POSet {po_set_id} has no documents to merge")
+
+        # Verify every page source before touching the delivered file.
+        for d in ordered:
+            raw = getattr(d, "stored_path", None)
+            p = Path(raw) if raw else None
+            if p is None or not p.is_file():
+                raise FileNotFoundError(
+                    f"Doc {getattr(d, 'id', '?')} ({getattr(d, 'original_filename', '?')}) "
+                    f"is missing: {p}"
+                )
+
+        out = Path(ps.merged_output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_name(f"{out.stem}.appending{out.suffix}")
+        try:
+            _write_merged(ordered, tmp, allow_missing=False)
+            tmp.replace(out)
+        finally:
+            if tmp.exists():
+                tmp.unlink(missing_ok=True)
+
+        detail = json.dumps(
+            {
+                "action": "customs_append",
+                "output_name": out.name,
+                "appended": sorted(
+                    d.original_filename or "?"
+                    for d in docs
+                    if _doc_type_val(d) in (DocType.CUSTOMS.value, DocType.SHIPPING.value)
+                ),
+            }
+        )
+        s.add(
+            AuditLog(
+                po_set_id=ps.id,
+                action=AuditAction.customs_append,
+                detail=detail,
+                source=source,
+            )
+        )
+        s.commit()
+        logger.info(
+            "Rebuilt merged packet for PO Set %s with customs/shipping documents: %s",
+            po_set_id,
+            out.name,
+        )
+        return out
+
+
+def append_customs_if_complete(po_set_id: int, cfg, source: str = "operator") -> Path | None:
+    """Rebuild a merged packet only when the append actually applies.
+
+    Returns None when the set is not merged, does not require customs, or does
+    not yet have both documents. Lets the placement paths (upload, toggle,
+    holding-area reclassify) call one function without duplicating the guard.
+    Real failures (missing stored file, unwritable packet) still raise.
+    """
+    try:
+        return append_customs_to_merged_packet(po_set_id, cfg, source=source)
+    except ValueError:
+        return None

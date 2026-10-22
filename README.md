@@ -36,7 +36,14 @@ Checks:
 ```bash
 uv run ruff check . && uv run ruff format --check .
 uv run pytest -q
+make business-logic   # engine verdicts + the pages an operator reads
 ```
+
+`tests/test_business_scenarios_ui.py` builds every verdict the product can
+produce (merge, needs review, each quarantine reason, customs before/after the
+merge, the holding area) and asserts both the engine result and what the
+dashboard, quarantine page and set page display. Run it after touching
+reconciliation, grouping or the reporting routes.
 
 ## Delivering it to users
 

@@ -109,8 +109,8 @@ Exactly five states, unchanged:
 | `pending` | not evaluated yet, or awaiting a delivery | next sync, or Redo matching |
 | `mismatched` | both sides reported a line and the quantities disagree | a human, or new data |
 | `quarantined` | a line could not be identified, a quantity is non-positive, the documents disagree on the PO number, or the packet could not be named | a human |
-| `blocked_customs` | customs toggle on, CUSTOMS + SHIPPING not both attached | uploading the missing document |
-| `merged` | packet written; permanently closed | nothing — terminal |
+| `blocked_customs` | customs toggle on, CUSTOMS + SHIPPING not both attached | uploading the second document, then Merge Now (or the next sync) |
+| `merged` | packet written; closed to reconciliation | nothing — terminal, except a customs append (§6) |
 
 The complete status-to-reason mapping is in **§3.1**.
 
@@ -159,7 +159,7 @@ approximation.
 | `quarantined` | `po_document_has_no_line_items` | the PO document was read but contains no line items |
 | `quarantined` | `packet_naming_failed` | merged packet could not be named unambiguously |
 | `blocked_customs` | *(none)* | customs toggle on, CUSTOMS + SHIPPING not both attached |
-| `merged` | *(none)* | reconciled, customs gate clear, packet written — terminal |
+| `merged` | *(none)* | reconciled, customs gate clear, packet written - terminal except a customs append (§6) |
 
 `REASON_TEXT` carries every reason code the reconciler can emit (twelve, in
 `services/reconciliation.py`). `mismatched`, `blocked_customs`
@@ -347,17 +347,26 @@ Sets — the second quarantines instead of overwriting the first.
 is taken, or when the set has **zero line-item evidence**. Force Merge bypasses
 the gates by design but still refuses to write a 0-page PDF.
 
-**Immutability.** Once `merged`, the set is closed. Re-merging returns the
-existing path. A later document with the same PO number starts a new PO Set.
+**Immutability.** Once `merged`, the set is closed to reconciliation. Re-merging
+returns the existing path. A later document with the same PO number starts a
+new PO Set. The one exception is the customs append described next.
 
-**The customs gate cannot be turned on after the merge.** A merged packet is
-final: toggling the gate on a merged set is refused (409), so a packet that
-has already been delivered is never re-opened or shown as "Awaiting
-Customs". The customs requirement is set **before** the merge: the set then
-waits in `blocked_customs` until both customs documents are uploaded, and the
-packet is written with them — `SI → DN → PO → SHIPPING → CUSTOMS`, in
-`merge.legal_order` — into `paths.output_folder` under the invoice number
-(or the PO number when no invoice number was extracted).
+**Customs can be turned on and appended after the merge.** The requirement
+defaults **off**, so a set can deliver before anyone considers customs. Turning
+it on for a merged set is allowed and the status stays `merged` — a packet that
+has already been delivered is never re-opened or shown as "Awaiting Customs"
+(the old implementation wrote `blocked_customs` and did exactly that).
+Uploading both a CUSTOMS and a SHIPPING document to a merged set rebuilds the
+packet from every attached document in `merge.legal_order`
+(`SI → DN → PO → SHIPPING → CUSTOMS`) and atomically replaces the same file;
+the first merge's `merged_at` is unchanged and a `customs_append` audit row
+records the documents. The rebuild is idempotent, and toggling the requirement
+off later cannot remove pages.
+
+With the requirement on **before** the merge, the older path still applies: the
+set waits in `blocked_customs` until both documents are uploaded, then merges
+with them in the same order, under the invoice number (or the PO number when no
+invoice number was extracted).
 
 **Force Merge writes an audit row on every path**, carrying the customs
 document count, the output filename, and the operator's written justification.
@@ -368,11 +377,13 @@ The justification must be ≥ 20 characters when supplied.
 `POST /po_sets/{id}/merge` (button: **📦 Merge Now** on the PO Set detail page)
 re-runs the comparison and merges **if** the set is now eligible.
 
-It exists because uploading the two customs documents does **not** itself
-trigger anything: the upload route only updates `customs_doc_count`, so a
-customs-blocked set sits at `blocked_customs` until the midnight sync or a
-manual re-check. Without this button an operator who has just finished the
-manual step sees nothing happen.
+It exists because, on a set that has **not** merged, uploading the two customs
+documents does **not** itself merge anything: the upload route only updates
+`customs_doc_count` and lifts the set from `blocked_customs` to `pending`, so
+it otherwise sits there until the midnight sync or a manual re-check. Without
+this button an operator who has just finished the manual step sees nothing
+happen. (On a **merged** set the upload does rebuild the packet once both
+documents are present — see §6.)
 
 **Merge Now is not Force Merge.** Every gate still applies — quantities must
 reconcile, the customs toggle must be satisfied, the packet must be nameable.

@@ -44,6 +44,13 @@
             <span class="badge badge-gray">{{ status_str }}</span>
           {% endif %}
 
+          {% if status_str == 'merged' and ps.has_customs_toggle and ps.customs_doc_count < 2 %}
+            <span class="badge badge-blocked" style="font-size:0.72rem; margin-left:4px;"
+                  title="This set is delivered, but the customs requirement is on and one or more of the two documents is missing. Upload them on the set page; the packet is rebuilt.">
+              🛃 Customs append pending
+            </span>
+          {% endif %}
+
           {% if ps.is_locked %}
             <span class="badge badge-gray" style="font-size:0.72rem; margin-left:4px;" title="Action in progress by background task">
               🔒 Locked ({{ ps.locked_by_action }})

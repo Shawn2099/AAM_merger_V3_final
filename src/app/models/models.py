@@ -49,6 +49,10 @@ class AuditAction(enum.StrEnum):
     force_merge = "force_merge"
     quarantine_delete = "quarantine_delete"
     manual_status_change = "manual_status_change"
+    # The customs/shipping documents were added after the packet was written,
+    # and the packet was rebuilt to include them. The set stays `merged`; the
+    # audit row records the append and the documents involved.
+    customs_append = "customs_append"
 
 
 class Document(Base):

@@ -110,9 +110,9 @@ fine, pointing the app at a UNC path is not required and adds failure modes.
 ## 6. Daily operation
 
 - **Nightly sync** runs at 00:00 (Prefect deployment `aam-midnight-sync`).
-  Prefect's default is **00:00 UTC**. To make "midnight" mean the office's
-  midnight, set `prefect.schedule_timezone` in `config.yaml`
-  (e.g. `"Asia/Kolkata"`) and re-run the installer to re-register the schedule.
+  `config.example.yaml` sets `prefect.schedule_timezone: "Asia/Kolkata"`, so
+  this is **IST midnight**. Change it to the office's IANA zone if the client
+  is elsewhere, and re-run the installer to re-register the schedule.
 - **Backups** run at 01:00 via the `AAMMerger-DailyBackup` scheduled task, keep
   30 days, and live in `data\backup\`.
 - **Logs** are in `data\logs\` (`aam_merger.log` plus NSSM stdout/stderr).

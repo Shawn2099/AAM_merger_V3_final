@@ -79,7 +79,9 @@ The buttons on a set:
 - **⚡ Re-Extract with AI** — sends the documents to the AI again. Costs one
   model call per document. Use only when the extracted lines look wrong.
 - **🛡️ Customs Check** — turns the customs + shipping requirement on or off for
-  this set. It cannot be changed after the set is merged.
+  this set. It can also be switched on **after** the set is merged: upload both
+  documents and the delivered packet is rebuilt so they are included. The set
+  stays "Merged & Ready" throughout.
 - **⚠️ Force Merge** — overrides the quantity and customs checks and merges
   anyway. Add the reason in the confirmation box (at least 20 characters); it
   is written to the audit log. **Use it only when you are sure the paperwork is

@@ -132,6 +132,12 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
     return result
 
 
+# Reasons whose detail names the offending files. Persisting the generic
+# REASON_TEXT sentence for these throws away the one thing the operator needs:
+# which document to look at.
+_DETAILED_REASONS = {"multiple_po_documents", "po_reference_mismatch", "packet_naming_failed"}
+
+
 def _persist_reason(po_set_id: int, result: dict, cfg: AppConfig) -> None:
     """Write the plain-language reason for a verdict — but only when the
     engine has one to write.
@@ -163,7 +169,14 @@ def _persist_reason(po_set_id: int, result: dict, cfg: AppConfig) -> None:
                 "generic message. Add the text in the same change that adds the code.",
                 reason_code,
             )
-        note = explain(reason_code, flags)
+        detail = result.get("detail")
+        if reason_code in _DETAILED_REASONS and detail:
+            # The detail names the files ("this set holds 2 PO documents
+            # (A.pdf, B.pdf)"). A generic "more than one PO" sentence makes the
+            # operator open the set and guess which file is the duplicate.
+            note = detail
+        else:
+            note = explain(reason_code, flags)
     elif has_quantity_evidence:
         # A mismatch is described by its numbers, not by a code.
         note = explain(None, flags)
@@ -342,6 +355,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 return {
                     "status": "quarantined",
                     "reason": "po_reference_mismatch",
+                    "detail": msg,
                     "po_set_id": po_set_id,
                     "flags": [
                         {

@@ -141,10 +141,9 @@ def test_only_customs_and_shipping_satisfy_the_gate(tmp_path):
 
 
 def test_toggle_any_status(tmp_path):
-    """FR-12.1: toggle allowed regardless of current status — except a set
-    that has already merged. Its packet is written and final (FR-14.6), so
-    the toggle is refused rather than overwriting a terminal status and
-    showing a delivered packet as "Awaiting Customs"."""
+    """FR-12.1: toggle allowed regardless of current status. On a merged set
+    the status stays merged — the packet is rebuilt by the caller when both
+    documents are present; it is never shown as awaiting customs."""
     from app.models import POSetStatus
     from app.services.customs import is_blocked, toggle_customs
 
@@ -165,18 +164,29 @@ def test_toggle_any_status(tmp_path):
         assert is_blocked(ps2) is False
 
 
-def test_toggle_refused_on_a_merged_set(tmp_path):
-    """A merged packet is final: the customs gate cannot be turned on after
-    the fact, and the delivered packet must not be shown as awaiting
-    customs."""
-    import pytest
+def test_toggle_allowed_on_a_merged_set_and_status_stays_merged(tmp_path):
+    """The customs requirement can be switched on after delivery. The status
+    must not regress to blocked_customs: the packet is already delivered, and
+    the append path rebuilds it when both documents are attached."""
+    from sqlalchemy.orm import Session
 
-    from app.models import POSetStatus
+    from app.core.database import get_engine
+    from app.models import POSet, POSetStatus
     from app.services.customs import toggle_customs
 
     po_set_id, cfg = _create_po_set(tmp_path, "PO-MERGED", status=POSetStatus.merged)
-    with pytest.raises(ValueError, match="already merged"):
-        toggle_customs(po_set_id, cfg)
+    ps = toggle_customs(po_set_id, cfg)
+
+    assert ps.has_customs_toggle is True
+    assert ps.status == POSetStatus.merged
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        assert s.get(POSet, po_set_id).status == POSetStatus.merged
+
+    # Turning it back off also leaves the delivered status alone.
+    ps2 = toggle_customs(po_set_id, cfg)
+    assert ps2.has_customs_toggle is False
+    assert ps2.status == POSetStatus.merged
 
 
 def test_is_blocked_without_toggle_false(tmp_path):

@@ -37,6 +37,8 @@
               <span class="badge badge-merged">⚡ Force Merge</span>
             {% elif act == 'quarantine_delete' %}
               <span class="badge badge-quarantined">🚨 Quarantine Delete</span>
+            {% elif act == 'customs_append' %}
+              <span class="badge badge-blocked">🛃 Customs Appended</span>
             {% else %}
               <span class="badge badge-pending">{{ act }}</span>
             {% endif %}

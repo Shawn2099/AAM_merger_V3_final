@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from sqlalchemy.orm import Session
 
 from app.core.database import get_engine
@@ -37,18 +35,20 @@ def toggle_customs(po_set_id: int, cfg) -> POSet:
     """Flip has_customs_toggle regardless of current status (FR-12.1) and update status.
 
     - Flips has_customs_toggle.
-    - If now True and NOT yet satisfied (is_blocked) → status = blocked_customs (FR-12.2).
+    - If now True and NOT yet satisfied (is_blocked) → status = blocked_customs
+      (FR-12.2) — except on a merged set, which stays `merged`.
     - If now True and already satisfied (both CUSTOMS + SHIPPING present, is_blocked is
       False) → status is unchanged. Forcing blocked_customs would immediately unblock on
       the next reconcile pass, so the net effect is always a no-op — leave it alone.
     - If now False and status was blocked_customs → status = pending (gate lifted).
     - Also maintains customs_doc_count (count of CUSTOMS + SHIPPING docs attached).
 
-    A merged set is refused. The packet has been written and is final
-    (FR-14.6/14.7: first-completed wins); toggling the gate here would
-    overwrite a terminal status, and the dashboard would show a packet
-    that has already been delivered as "Awaiting Customs". The customs
-    requirement is set before the merge, or not at all.
+    A merged set may be toggled ON. Its packet was written before the customs
+    requirement existed; the caller (`web route`) then rebuilds the packet once
+    both documents are attached. The status must stay `merged` either way: the
+    old implementation wrote `blocked_customs`, which showed a delivered packet
+    as "Awaiting Customs" and lost its terminal state. The append itself is
+    `merge.append_customs_to_merged_packet`, audited as `customs_append`.
     """
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
@@ -56,13 +56,6 @@ def toggle_customs(po_set_id: int, cfg) -> POSet:
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise ValueError(f"POSet {po_set_id} not found")
-        if ps.status == POSetStatus.merged:
-            packet = Path(ps.merged_output_path).name if ps.merged_output_path else "written"
-            raise ValueError(
-                f"PO Set {po_set_id} is already merged (packet: {packet}). A merged packet "
-                "is final: customs and shipping documents cannot be added to it. Turn the "
-                "customs requirement on before the merge, or re-issue the packet manually."
-            )
         # flip
         ps.has_customs_toggle = not ps.has_customs_toggle
 
@@ -79,7 +72,11 @@ def toggle_customs(po_set_id: int, cfg) -> POSet:
 
         if ps.has_customs_toggle:
             # FR-12.1: if blocked, force into blocked_customs; if gate already satisfied, ensure not blocked
-            if is_blocked(ps):
+            if ps.status == POSetStatus.merged:
+                # Delivered is terminal. The packet is rebuilt by the caller if
+                # both documents are present; the status never regresses.
+                pass
+            elif is_blocked(ps):
                 ps.status = POSetStatus.blocked_customs
             elif ps.status == POSetStatus.blocked_customs:
                 ps.status = POSetStatus.pending

@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import load_config
 from app.core.database import get_engine
-from app.models import ExtractionStatus, POSet
+from app.models import ExtractionStatus, POSet, POSetStatus
 from app.models.base import Base
 from app.services.locking import acquire_lock, is_locked, release_lock
 
@@ -247,10 +247,31 @@ def toggle_customs(po_set_id: int):
         from app.services.customs import toggle_customs as svc_toggle
 
         updated = svc_toggle(po_set_id, cfg)
+        rebuilt = None
+        # A merged set whose customs requirement has just been switched on,
+        # with both documents already attached: the packet is regenerated so
+        # the delivered file contains them. Status stays `merged`.
+        if (
+            updated.status == POSetStatus.merged
+            and updated.has_customs_toggle
+            and (updated.customs_doc_count or 0) == 2
+        ):
+            try:
+                from app.services.merge import append_customs_to_merged_packet
+
+                rebuilt = str(append_customs_to_merged_packet(po_set_id, cfg))
+            except Exception:
+                logger.warning(
+                    "Customs toggled on PO Set %s but the packet could not be rebuilt",
+                    po_set_id,
+                    exc_info=True,
+                )
         return {
             "status": "toggled",
             "po_set_id": po_set_id,
             "has_customs_toggle": updated.has_customs_toggle,
+            "packet_rebuilt": rebuilt is not None,
+            "merged_output_path": rebuilt or updated.merged_output_path,
         }
     except HTTPException:
         raise

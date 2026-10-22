@@ -3221,3 +3221,33 @@ the operator decides. That is the honest outcome.
 | `test_an_unplaced_document_is_visible_in_the_holding_area` | the operator can see it |
 | `test_quarantine_si_dn_missing_po_reference` | the input copy is **not** removed, nothing is quarantined, the line item survives |
 | `test_an_unambiguous_document_is_still_attached_by_the_resolution_sweep` | the content-based path still works |
+
+---
+
+## 32. Correction (2026-10-22): customs can be appended after the merge
+
+§30.8 and §31 record the earlier rule: "a merged set refuses the customs
+toggle (409), so a delivered packet is never shown as Awaiting Customs." The
+client has since decided the requirement is **off by default**, and that it
+must be possible to switch customs on **after delivery** and add the two
+documents to the packet that was already written.
+
+The current contract (also in PRODUCT §6):
+
+- `toggle_customs` accepts a merged set. The status **stays `merged`**; it is
+  never rewritten to `blocked_customs` (that was the original defect, not the
+  refusal).
+- Uploading both CUSTOMS and SHIPPING to a merged set calls
+  `merge.append_customs_to_merged_packet`. It rebuilds the packet from every
+  attached document in `merge.legal_order`, writes a temp file and atomically
+  replaces the same path. `merged_at` is unchanged.
+- The append is idempotent and writes an `audit_log` row with
+  `action = customs_append` (detail names the appended documents).
+- With the requirement on before the merge, the old path still applies:
+  `blocked_customs` until both documents arrive, then merge.
+- An upload on a set that has **not** merged still does not merge anything by
+  itself; Merge Now (or the sync) does.
+
+Tests: `tests/test_business_scenarios_ui.py` (append, idempotency,
+upload-before-toggle, status stays merged), `tests/test_customs.py`,
+`tests/test_mvp_high_priority.py`.

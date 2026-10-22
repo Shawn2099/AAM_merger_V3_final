@@ -5,6 +5,7 @@
       <tr>
         <th>PO Number</th>
         <th>Status</th>
+        <th>Why</th>
         <th>Attached Documents</th>
         <th style="text-align:right;">Actions</th>
       </tr>
@@ -19,6 +20,13 @@
         </td>
         <td>
           <span class="badge badge-quarantined">🚨 Quarantined</span>
+        </td>
+        <td class="reason-cell" style="max-width:420px;">
+          {% if ps.reconcile_reason %}
+            {{ ps.reconcile_reason }}
+          {% else %}
+            <span class="muted">Reason not recorded — open the set to inspect it</span>
+          {% endif %}
         </td>
         <td>
           <span style="font-weight:600;">{{ ps.doc_count }}</span>

@@ -4,6 +4,7 @@ Cross-platform via pathlib. No hardcoded paths. Sync def handlers."""
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -30,6 +31,8 @@ from app.services.locking import acquire_lock, is_locked, release_lock
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
+
 #: Document types an operator may assign by hand on the unclassified page.
 #: Mirrors the `<select>` in `templates/unclassified.html`. The multi-document
 #: packaging type is intentionally absent: Layer 1's split decides it, and it is
@@ -49,6 +52,25 @@ _templates = Jinja2Templates(directory="templates")
 
 # 5 statuses as defined in SPEC §6.3 — enum values are the source of truth
 _ALLOWED_STATUSES = {s.value for s in POSetStatus}
+
+
+def _holding_area_query(session: Session):
+    """Every document waiting for a human, in one place.
+
+    The holding area is more than "UNKNOWN documents": it also holds documents
+    that failed permanently, documents showing more than one PO number, and
+    documents read successfully but attached to no set. The dashboard badge
+    used to count only UNKNOWN, so it said "2" while the page held 37 — the
+    exact way work goes unseen. Every count must use this query.
+    """
+    return session.query(Document).filter(
+        or_(
+            Document.doc_type == DocType.UNKNOWN,
+            Document.extraction_status == ExtractionStatus.failed,
+            Document.po_reference_ambiguous.is_(True),
+            Document.po_set_id.is_(None),
+        )
+    )
 
 
 def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) -> list[dict]:
@@ -91,6 +113,8 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
                 "reconcile_reason": ps.reconcile_reason,
                 "locked_by_action": ps.locked_by_action,
                 "is_locked": is_locked(ps, cfg),
+                "has_customs_toggle": ps.has_customs_toggle,
+                "customs_doc_count": ps.customs_doc_count or 0,
             }
         )
 
@@ -133,9 +157,7 @@ def _get_stats(session: Session) -> dict:
     total_c = sum(counts.values())
     merged_c = counts.get("merged", 0)
     pct = round(merged_c / total_c * 100) if total_c > 0 else 0
-    unclassified_count = (
-        session.query(Document).filter(Document.doc_type == DocType.UNKNOWN).count()
-    )
+    unclassified_count = _holding_area_query(session).count()
 
     return {
         "total": total_c,
@@ -349,7 +371,7 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
             flags.sort(key=lambda f: f["priority"])
 
         has_merged_file = bool(ps.merged_output_path and Path(ps.merged_output_path).exists())
-        unclassified_count = s.query(Document).filter(Document.doc_type == DocType.UNKNOWN).count()
+        unclassified_count = _holding_area_query(s).count()
 
         return _templates.TemplateResponse(
             request,
@@ -418,6 +440,7 @@ def upload_manual_doc(
     cfg = load_config()
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
+    should_rebuild = False
     # validate doc_type
     if doc_type not in (
         DocType.CUSTOMS.value,
@@ -570,10 +593,14 @@ def upload_manual_doc(
             ps.customs_doc_count = cnt
             if ps.has_customs_toggle and cnt == 2 and ps.status == POSetStatus.blocked_customs:
                 ps.status = POSetStatus.pending
+            # A merged packet can still receive customs/shipping documents.
+            # The rebuild happens after this session closes (SQLite cannot take
+            # a second writer while this one is open); status stays `merged`.
+            should_rebuild = ps.status == POSetStatus.merged and ps.has_customs_toggle and cnt == 2
             s.commit()
-            if already_attached:
-                # Same file, same set: nothing changed. Say so rather than
-                # redirecting as if a document had been added. No session
+            if already_attached and not should_rebuild:
+                # Same file, same set, and nothing to rebuild: say so rather
+                # than redirecting as if a document had been added. No session
                 # middleware exists, so this rides the query string the way
                 # the other POST routes report outcomes.
                 return RedirectResponse(
@@ -592,6 +619,32 @@ def upload_manual_doc(
             raise HTTPException(status_code=422, detail=str(e)) from e
         finally:
             release_lock(ps, s, "manual_upload")
+
+    if should_rebuild:
+        try:
+            from app.services.merge import append_customs_to_merged_packet
+
+            append_customs_to_merged_packet(po_set_id, cfg)
+            return RedirectResponse(
+                url=(
+                    f"/po_sets/{po_set_id}/view?notice="
+                    + quote("Customs and shipping were appended to the merged packet.")
+                ),
+                status_code=302,
+            )
+        except Exception as e:
+            logger.warning(
+                "Customs documents attached to PO Set %s but the packet could not be rebuilt",
+                po_set_id,
+                exc_info=True,
+            )
+            return RedirectResponse(
+                url=(
+                    f"/po_sets/{po_set_id}/view?notice="
+                    + quote(f"Documents attached, but the merged packet was not rebuilt: {e}")
+                ),
+                status_code=302,
+            )
     return RedirectResponse(url=f"/po_sets/{po_set_id}/view", status_code=302)
 
 
@@ -607,7 +660,7 @@ def audit_log(request: Request):
     Base.metadata.create_all(eng)
     with Session(eng) as s:
         entries = s.query(AuditLog).order_by(AuditLog.timestamp.desc()).all()
-        unclassified_count = s.query(Document).filter(Document.doc_type == DocType.UNKNOWN).count()
+        unclassified_count = _holding_area_query(s).count()
         return _templates.TemplateResponse(
             request,
             "audit.html",
@@ -651,10 +704,12 @@ def quarantine_view(request: Request):
                 "id": ps.id,
                 "po_no_normalized": ps.po_no_normalized,
                 "doc_count": doc_counts.get(ps.id, 0),
+                "reconcile_reason": ps.reconcile_reason,
+                "updated_at": ps.updated_at,
             }
             for ps in qs
         ]
-        unclassified_count = s.query(Document).filter(Document.doc_type == DocType.UNKNOWN).count()
+        unclassified_count = _holding_area_query(s).count()
         return _templates.TemplateResponse(
             request,
             "quarantine.html",
@@ -662,6 +717,7 @@ def quarantine_view(request: Request):
                 "request": request,
                 "po_sets": enriched,
                 "unclassified_count": unclassified_count,
+                "now_ts": _now_ts(),
             },
         )
 
@@ -693,13 +749,15 @@ def quarantine_table(request: Request):
                 "id": ps.id,
                 "po_no_normalized": ps.po_no_normalized,
                 "doc_count": doc_counts.get(ps.id, 0),
+                "reconcile_reason": ps.reconcile_reason,
+                "updated_at": ps.updated_at,
             }
             for ps in qs
         ]
         return _templates.TemplateResponse(
             request,
             "_quarantine_table.html",
-            {"request": request, "po_sets": enriched},
+            {"request": request, "po_sets": enriched, "now_ts": _now_ts()},
         )
 
 
@@ -729,18 +787,7 @@ def unclassified_view(request: Request):
         #
         # A document nothing can place must not wait unseen: a document
         # waiting for a human the human cannot see waits forever.
-        docs = (
-            s.query(Document)
-            .filter(
-                or_(
-                    Document.doc_type == DocType.UNKNOWN,
-                    Document.extraction_status == ExtractionStatus.failed,
-                    Document.po_reference_ambiguous.is_(True),
-                    Document.po_set_id.is_(None),
-                )
-            )
-            .all()
-        )
+        docs = _holding_area_query(s).all()
         # A document whose extraction has permanently failed is NOT waiting for
         # a human to classify it — it is a loss. It stays in this view (its
         # doc_type was never advanced off UNKNOWN) and must be countable
@@ -777,6 +824,8 @@ def reclassify_document(
     Base.metadata.create_all(eng)
     from app.services.grouping import get_or_create_po_set
 
+    attached_ps_id: int | None = None
+
     try:
         new_doc_type = DocType(doc_type)
     except Exception as err:
@@ -805,18 +854,53 @@ def reclassify_document(
             from app.services.grouping import normalize_po_no
 
             raw = po_no.strip()
+            norm = normalize_po_no(raw)
             doc.po_no_raw = raw
-            doc.po_no_normalized = normalize_po_no(raw)
+            doc.po_no_normalized = norm
             # A human naming the PO number resolves the ambiguity the VLM
             # reported. Left set, the document would be refused by both
             # attach sweeps if it were ever detached again, and it would keep
             # showing in the holding area as unresolved.
             doc.po_reference_ambiguous = False
-            ps = get_or_create_po_set(raw, cfg)
-            doc.po_set_id = ps.id
+
+            if new_doc_type in (DocType.CUSTOMS, DocType.SHIPPING):
+                # Customs/shipping documents may join a packet that has
+                # already been delivered; that is the append workflow. The
+                # generic lookup excludes merged sets, which would strand the
+                # document in a new empty set that can never merge.
+                merged = (
+                    s.query(POSet)
+                    .filter(
+                        POSet.po_no_normalized == norm,
+                        POSet.status == POSetStatus.merged,
+                    )
+                    .order_by(POSet.id.desc())
+                    .all()
+                )
+                if len(merged) > 1:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"{len(merged)} merged packets exist for {norm}. "
+                            "Open the intended PO Set and attach the document "
+                            "there, so it is appended to the right packet."
+                        ),
+                    )
+                if merged:
+                    doc.po_set_id = merged[0].id
+                else:
+                    # No delivered packet yet: attach to an open set if one
+                    # exists, otherwise leave it waiting for a human.
+                    open_ps = get_or_create_po_set(raw, cfg, create=False)
+                    if open_ps is not None:
+                        doc.po_set_id = open_ps.id
+            else:
+                ps = get_or_create_po_set(raw, cfg)
+                doc.po_set_id = ps.id
 
         # Update customs_doc_count and status transition if attached to a PO Set
         if doc.po_set_id is not None:
+            attached_ps_id = doc.po_set_id
             ps_target = s.get(POSet, doc.po_set_id)
             if ps_target is not None:
                 docs = s.query(Document).filter_by(po_set_id=ps_target.id).all()
@@ -836,12 +920,43 @@ def reclassify_document(
                     ps_target.status = POSetStatus.pending
         s.commit()
 
-        if request.headers.get("HX-Request") == "true":
-            msg = f"Reclassified document #{doc_id} as {new_doc_type.value}"
-            html = (
-                f'<tr id="doc-row-{doc_id}">'
-                f'<td colspan="7" style="color: #166534; background: #dcfce7; padding: 8px;">'
-                f"{msg}</td></tr>"
+    # A document the operator has just placed must not wait for the next
+    # nightly scan to affect its set: attaching it is the trigger. This runs
+    # after the session closes — the reconcile opens its own, and SQLite
+    # writes cannot overlap two writer sessions on one file.
+    if attached_ps_id is not None:
+        try:
+            from app.services.reconciliation import reconcile_po_set
+
+            reconcile_po_set(attached_ps_id, cfg)
+        except Exception:
+            logger.warning(
+                "Placed document %s but could not reconcile PO Set %s",
+                doc_id,
+                attached_ps_id,
+                exc_info=True,
             )
-            return HTMLResponse(content=html)
-        return RedirectResponse(url="/unclassified", status_code=302)
+        # A customs/shipping document placed from the holding area on an
+        # already-merged set must reach the packet too, exactly as an upload
+        # does.
+        try:
+            from app.services.merge import append_customs_if_complete
+
+            append_customs_if_complete(attached_ps_id, cfg)
+        except Exception:
+            logger.warning(
+                "Placed document %s but could not rebuild the packet for PO Set %s",
+                doc_id,
+                attached_ps_id,
+                exc_info=True,
+            )
+
+    if request.headers.get("HX-Request") == "true":
+        msg = f"Reclassified document #{doc_id} as {new_doc_type.value}"
+        html = (
+            f'<tr id="doc-row-{doc_id}">'
+            f'<td colspan="7" style="color: #166534; background: #dcfce7; padding: 8px;">'
+            f"{msg}</td></tr>"
+        )
+        return HTMLResponse(content=html)
+    return RedirectResponse(url="/unclassified", status_code=302)

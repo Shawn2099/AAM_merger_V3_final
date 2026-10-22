@@ -130,6 +130,38 @@
   </div>
 </div>
 
+{# The engine's verdict, in the engine's own words. The matrix below only
+   re-runs the line comparison; it does not reproduce the guards that stop a
+   set before comparison (two PO documents, a PO reference mismatch, a packet
+   that cannot be named). Without this, such a set shows a green matrix and no
+   explanation while sitting in quarantine. #}
+{% if po_set.reconcile_reason and status_str != 'merged' %}
+{% if status_str == 'quarantined' %}
+  {% set reason_color = '#b91c1c' %}
+{% elif status_str == 'mismatched' %}
+  {% set reason_color = '#b45309' %}
+{% elif status_str == 'blocked_customs' %}
+  {% set reason_color = '#1d4ed8' %}
+{% else %}
+  {% set reason_color = '#64748b' %}
+{% endif %}
+<div class="card" style="border-left:4px solid {{ reason_color }}; margin-bottom:16px;">
+  <div style="font-weight:700; font-size:0.95rem; margin-bottom:4px;">
+    {% if status_str == 'quarantined' %}Why this set is quarantined
+    {% elif status_str == 'mismatched' %}Why this set needs review
+    {% elif status_str == 'blocked_customs' %}Why this set is blocked
+    {% else %}Why this set is waiting{% endif %}
+  </div>
+  <div style="font-size:0.92rem;">{{ po_set.reconcile_reason }}</div>
+  {% if status_str == 'quarantined' %}
+  <div class="muted" style="font-size:0.8rem; margin-top:6px;">
+    The matrix below compares line quantities only. A quarantined set does not
+    merge even when every line matches — the check above stopped it first.
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
 <!-- 3-Way Reconciliation Comparison Matrix Card -->
 <div class="card">
   <div class="card-header" style="margin-bottom:8px;">
@@ -301,6 +333,9 @@
     </h3>
     <p class="muted" style="font-size:0.82rem; margin-bottom:12px;">
       Attached as-is without AI extraction. To clear the <strong>Awaiting Customs</strong> gate, upload both a <strong>CUSTOMS</strong> and a <strong>SHIPPING</strong> document.
+      {% if status_str == 'merged' %}
+        This set is already merged: uploading both documents rebuilds the packet so they are included (the set stays merged).
+      {% endif %}
     </p>
 
     <form 
