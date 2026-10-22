@@ -1,69 +1,103 @@
 # Session Handover — AAM Merger V3
 
-**Branch:** `fix/mvp-high-priority` (pushed to origin; do not merge to main/dev-simplified).
-**Last commit:** `9b261dc` (pushed).
-**Tests:** ~680, full suite green. `ruff check` + `ruff format --check` clean.
-**App:** running on http://localhost:8000 and http://10.10.151.53:8000/dashboard (PID 17328... see below).
+**Branch:** `fix/mvp-high-priority` (local commits; not merged into main/dev-simplified).
+**Last commit:** `2719748` (docs: client delivery runbook and tester guide).
+**Tests:** full suite green (exit 0, run twice today). `ruff check` / `ruff format --check` clean. `ty check src` clean.
+**Delivery goal:** one Windows PC in the client's office is the server; office
+users open `http://<server-ip>:8000/dashboard`. See `docs/DELIVERY.md`.
 
 Read `AAM_merger_V3_PRODUCT.md` first, then `real arch v3.md` §30-§31.
 
 ---
 
-## What was done
+## What was done (2026-10-22, second session — delivery readiness)
 
-### MVP defect fixes (6 commits)
+### Verified the real delivery path, not just the dev box
 
-1. **Quarantine reason clobbered by a later sweep** — `_persist_reason` now carries a code (or None), never a sentence; stored reason never overwritten. New tests.
-2. **`delete_quarantined` left the input file** — `ObjectDeletedError` was swallowed; now snapshots hashes/names before delete. New tests.
-3. **Doc stuck in `processing`** — `reclaim_stale_processing` re-claims; CAS claim in `extract_document`. New tests.
-4. **Upload of an existing unattached file was a silent no-op** — now attaches. New tests.
-5. **`po_reference_ambiguous` honoured in only one sweep** — now blocks every attach path. New tests.
-6. **Line items silently dropped** — `populate_from_raw_dict` keeps rows (no qty → qty 0 → quarantines `non_positive_quantity`; missing description → empty, qty kept). New tests.
-7. **Customs toggle refused on merged set** (409) — FR-12.1 amended. `test_customs.py` updated.
-8. **PO with no number vanished** — `group_document(doc, cfg) -> (po_set_id, problem)` unifies grouping; problems: `missing_po_number` (PO/DN/SI), `ambiguous_po_number` (PO only, mints no set).
-9. **Already-read docs re-read nightly** — `extract_document` returns valid docs unchanged (except split parents with incomplete split).
-10. **Test suite wrote into repo `data/` and failed on fresh clone** — `tests/conftest.py` added: redirects placeholder paths to a temp session dir, writes a temp config, blocks the real `.env`.
-11. **A document that waits for a human is visible** — `unclassified_view` lists ambiguous + failed + unplaced docs; badges on the page.
+Cloned HEAD into a clean temp folder (`git archive` → `uv sync --no-dev` →
+`config.example.yaml` → `alembic upgrade head` → boot on port 8010). Then ran a
+real set (SIV-RHO-26-854 PO/DN/SI) through it: 3 documents read, 3 line items,
+set `merged`, 1.1 MB packet written. This is the path the client machine takes.
 
-### This session (new commits)
+### Fixes found by that exercise
 
-- **A filename is never evidence.** Removed the filename-prefix strategy from `resolve_unattached_documents` (strategy 3). Only content-based methods place a document: DN-number cross-reference, and PO per-line DN reference.
-- **A readable document with no PO reference is held, not quarantined.** It stays `valid`, unattached, visible in the holding area. The old rule marked it `failed` (a loss it isn't) and hid it from the sweeps that could have placed it.
-- **Holding area lists unplaced documents** (`Document.po_set_id.is_(None)`), with a "N waiting to be placed" badge.
-- **`.env` loaded once, in `load_config`** (`load_env()`). The fail-closed check now sees the key; the noisy false warning is gone (was printed once per file per sync — hundreds of times per run).
-- **Sync no longer pays for documents already read**: (a) no extraction task scheduled for a `valid` document; (b) the batch stability poll runs concurrently (8 at a time) instead of serially. Sync of 200 already-read files: 13m14s → 2m5s. Zero VLM calls.
-- **Live DB repaired**: 26 quarantined DNs with no PO number → restored to input, status set `valid` (held). 2 genuine extraction failures remain quarantined. Backup at `data/aam_merger.db.bak-20261022-201905`.
-- **Conftest guard changed**: now blocks only the repository's own `.env`; a `.env` a test writes in tmp_path is loaded (so the loader can be tested).
-- **Tests added**: 5 (filename never places, old prefix path now a refusal, held not quarantined, unplaced visible, content path still attaches); 4 (env file supplies key, env wins over file, suite never reads repo .env, already-read not scheduled, batch poll not serial). Full suite green.
+1. **Daily backup** (`scripts/backup_db.py`, `tests/test_backup_script.py`)
+   - Relative `paths.database_path` resolved against the process cwd; the
+     Scheduled Task has no working directory. Now resolved against the project
+     root. Missing `config.yaml` raises instead of guessing. Verified from
+     `C:\Windows` against the live DB: 284 docs / 83 sets in the backup.
+2. **Installer** (`scripts/setup_test_rig.ps1`)
+   - Admin is required only when installing services/firewall/backup task;
+     `-SkipServices` now works non-admin (verified on the clean clone).
+   - Always syncs dependencies (a stale `.venv` is repaired), checks for
+     uv/python with a real message, sets the backup task `-WorkingDirectory`,
+     prints the LAN URL instead of `http://0.0.0.0:8000`.
+3. **Prefect on a fresh host** (`setup_test_rig.ps1`,
+   `install_nssm_services.ps1`, `tests/test_prefect_schedule.py`)
+   - Nothing created `aam-merger-process-pool`; `deploy_prefect.py` failed with
+     "Work pool not found", so the midnight sync was never registered.
+   - Install/start services first, wait for the API, create the pool,
+     register the deployment, restart the worker.
+   - Every service now receives the same `PREFECT_API_URL`; without it each
+     process starts its own ephemeral server.
+   - `PYTHONUTF8=1` — Prefect's Rich renderer crashed on cp1252 and made
+     `work-pool create` exit 1 after creating the pool. Now exit 0.
+   - `prefect.schedule_timezone` (config, validated): cron is UTC by default;
+     set the office zone for local midnight.
+4. **Offline LAN** (`templates/base.html`, `static/js/`, test)
+   - HTMX/Alpine were loaded from public CDNs; with no internet the page
+     rendered but no button worked. Vendored and served locally.
+5. **Force Merge audit** (`templates/po_set_detail.html`, test)
+   - The modal never sent the justification the service accepts. Added a
+     reason field + `hx-include`; the audit row can now carry the operator note.
+6. **Reset for test rounds** (`scripts/reset_data.ps1`) — backs up, refuses
+   while port 8000 listens, clears DB + folders, re-migrates; keeps config,
+   `.env`, backups, logs. Verified on the clean clone.
+7. **Type check** (`src/app/flows/sync.py`) — `ty check src` had 6 diagnostics
+   from an unguarded `Document | None`; a vanished document is now skipped.
+8. **Docs** — `docs/DELIVERY.md` (install/handover checklist) and
+   `docs/TESTER_GUIDE.md` (office users). README + DEPLOY link them.
 
 ### Verified live
 
-- 284 real vendor PDFs ingested → 282 valid, 2 failed.
-- 83 PO sets: 27 merged (packets in `data/output`), 18 quarantined, 3 mismatched, 35 pending.
-- 616 line items, 33 held (unplaced), 0 zero-qty rows, 0 empty descriptions.
-- Quarantines/mismatches caused by the `-pages-N` file layout (PO split across pages → multiple PO documents per set → `multiple_po_documents`; page-boundary quantity mismatches). Real data-layout issue for the operator.
+- Full suite green twice; ruff + ty clean (89% coverage).
+- Clean-clone end-to-end merge (above).
+- Backup from an unrelated cwd (above).
+- Reset script leaves 0 docs / 0 sets and keeps the backup.
+- Prefect pool + `aam-midnight-sync` deployment registered against a throwaway
+  local server on port 4210 (stopped afterwards).
+- Force Merge modal renders with the reason field on the running dev app.
 
 ---
 
 ## What is NOT done / next steps
 
-1. **Flaky test** `tests/test_concurrency.py::test_po_lock_timeout_releases` — intermittent in full-suite runs, passes in isolation. Not root-caused. Suspect: timing/environment interaction. Needs a clean re-run after the latest changes to see if it still occurs.
-2. **The 26 PO-less DNs** need a human to name their PO (or the vendor must print the PO number). They are visible in the holding area now ("33 waiting to be placed"). The user decided: content only, no filename matching.
-3. **The `-pages-N` layout** quarantines 5 sets ("more than one PO document") and causes page-boundary quantity mismatches. The operator must not split POs into per-page files, or name them so each is a full document.
-4. **Update docs** — `real arch v3.md` §30.8 table still says `missing_po_number` → "quarantined"; §31 records the change but §30.8 should be updated. Also `AAM_merger_V3_PRODUCT.md` §8 entries for the filename rule and the sync cost are done; sync-performance numbers (13m14s → 2m5s) should be noted.
-5. **`OPENROUTER_API_KEY not set` startup warning is gone** (verified on restart). The `.env` is loaded by `load_config`. Good.
-6. **Push any further fixes to `fix/mvp-high-priority` only** — never merge to main/dev-simplified.
+1. **Real NSSM install not exercised on this machine** (needs admin + Windows
+   services). Scripts parse clean and the Prefect steps were verified against a
+   real server, but the first client install should follow
+   `docs/DELIVERY.md` §4 and check both services and the midnight deployment.
+2. **Flaky test** `tests/test_concurrency.py::test_po_lock_timeout_releases`
+   did not reproduce today (green in isolation and in two full runs). No root
+   cause; watch it on the first full run on the client machine.
+3. **`-pages-N` layout** still quarantines 5 sets (multiple PO docs per set) and
+   causes page-boundary mismatches. Operator/input-naming issue.
+4. **33 held documents** (PO-less DNs) still need a human to name their PO.
+5. **Scheduled sync timezone** — set `prefect.schedule_timezone` in the client
+   `config.yaml` before handover if they expect local midnight. Default is UTC.
+6. **Push** — the three commits are local only. Push to
+   `fix/mvp-high-priority` when asked; never merge to main/dev-simplified.
+7. `EXTRACTION_PROMPT_AUDIT.md` is untracked user work — left alone.
 
 ---
 
-## Key facts for the next session
+## Key facts
 
-- Branch: `fix/mvp-high-priority`, 6 commits ahead of `dev-simplified` (5ea8f53), all pushed.
-- App running: `http://localhost:8000` (PID started via `.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000`).
-- DB: `data/aam_merger.db` (284 docs, 83 sets, 27 packets, 616 line items, 2 failed, 33 held).
-- Backup: `data/aam_merger.db.bak-20261022-201905` (+ wal).
-- `.env` at repo root (key present, 73 chars, prefix `sk-or-v1-`).
+- Branch `fix/mvp-high-priority`; 13 commits ahead of `dev-simplified`
+  (`5ea8f53`) after this session.
+- App running: `http://localhost:8000` (console Uvicorn on this dev box).
+- DB: `data/aam_merger.db` — 284 docs, 83 sets, 616 line items, 33 held,
+  2 failed. Fresh backup `data/backup/aam_merger_20261022_160548.db` (284/83).
+- `.env` at repo root (dev key). The client gets a separate tester key; `.env`
+  is gitignored and is not in the release zip.
 - Git identity: Shawn <shawnachirappuram@gmail.com>.
-- The 2 genuine failures are `SIV-DTS-25-584-2.pdf` and `SIV-DTS-25-584-3.pdf` (UNKNOWN, 0 line items, 3 attempts).
-
-Do not run `git add -A` on the dirty tree. Do not merge to main/dev-simplified.
+- Do not run `git add -A` on the dirty tree.
