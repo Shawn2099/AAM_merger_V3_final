@@ -45,6 +45,12 @@ class VLMConfig(BaseModel):
 class ExtractionConfig(BaseModel):
     max_retries: int = Field(ge=1, le=5, default=3)
     retry_backoff_seconds: list[int] = Field(default=[2, 5, 15])
+    # A document claimed for extraction (pending -> processing) that is still
+    # `processing` after this many seconds belonged to a worker that died.
+    # It is released back to `pending` and read again on the next pass.
+    # Must exceed the worst case of one attempt: vlm.request_timeout_seconds
+    # * max_retries, plus the retry backoff.
+    stale_processing_seconds: int = Field(default=900, ge=60)
 
 
 class MatchingConfig(BaseModel):

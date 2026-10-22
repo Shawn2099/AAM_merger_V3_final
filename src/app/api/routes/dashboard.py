@@ -519,6 +519,46 @@ def upload_manual_doc(
                 )
                 s.add(doc)
                 s.flush()
+            elif existing.po_set_id is None:
+                # The same bytes are already in the system, attached to
+                # nothing. The file the operator is uploading IS this set's
+                # customs/shipping document, so it is attached to the set
+                # rather than left where it is: the gate could otherwise
+                # never be satisfied and the operator had no way to tell a
+                # working upload from a discarded one.
+                #
+                # A row that already carries pipeline data is refused: it is
+                # a PO, DN or SI, or the parent of a multi-document split.
+                # Re-typing it as a customs document would corrupt a real
+                # document. The split parent is recognised by the generic
+                # hierarchy column, not by naming the packaging type.
+                pipeline_types = {DocType.PO.value, DocType.DN.value, DocType.SI.value}
+                existing_type = (
+                    existing.doc_type.value
+                    if hasattr(existing.doc_type, "value")
+                    else str(existing.doc_type)
+                )
+                has_lines = bool(list(existing.line_items or []))
+                is_split_parent = bool(getattr(existing, "is_split_parent", False))
+                if existing_type in pipeline_types or has_lines or is_split_parent:
+                    label = "multi-document PDF" if is_split_parent else existing_type
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "This exact file is already in the system as a "
+                            f"{label} document"
+                            + (f" (document #{existing.id})" if existing.id else "")
+                            + ". It carries pipeline data, so it cannot be re-typed as a "
+                            f"{doc_type} document. Attach it to this set from the "
+                            "Unclassified page instead."
+                        ),
+                    )
+                from app.models import ExtractionStatus as ES
+
+                existing.po_set_id = po_set_id
+                existing.doc_type = DocType(doc_type)
+                existing.extraction_status = ES.valid
+                s.flush()
             # update customs_doc_count (distinct required types: CUSTOMS and SHIPPING)
             docs = s.query(Document).filter_by(po_set_id=po_set_id).all()
             types_present = {

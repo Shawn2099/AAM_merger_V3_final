@@ -212,6 +212,7 @@ def _recovery_flow_locked(
     from app.models import Document as _Doc
     from app.models import POSet as _POSet
     from app.models import POSetStatus
+    from app.services.extraction import reclaim_stale_processing
     from app.services.grouping import (
         attach_unattached_to_open_sets,
         get_or_create_po_set,
@@ -220,6 +221,10 @@ def _recovery_flow_locked(
     from app.services.ingestion import delete_input_files
     from app.services.locking import acquire_lock, is_locked, release_lock
     from app.services.reconciliation import reconcile_po_set
+
+    # A document claimed by a worker that died is still marked `processing`.
+    # Release it first, so it is picked up as pending below and read again.
+    reclaim_stale_processing(cfg)
 
     input_folder = Path(cfg.paths.input_folder)
     input_folder.mkdir(parents=True, exist_ok=True)
@@ -433,12 +438,18 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     from app.models import Document as _Doc
+    from app.services.extraction import reclaim_stale_processing
     from app.services.grouping import get_or_create_po_set
     from app.services.ingestion import (
         find_input_pdfs,
         ingest_file,
         is_file_stable,
     )
+
+    # Release documents whose worker died mid-extraction before anything else
+    # looks at them, so they are read again in this run rather than being
+    # reported as processed and never read.
+    reclaim_stale_processing(cfg)
 
     input_folder = Path(cfg.paths.input_folder)
     input_folder.mkdir(parents=True, exist_ok=True)

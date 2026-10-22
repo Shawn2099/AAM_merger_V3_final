@@ -133,15 +133,43 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
 
 
 def _persist_reason(po_set_id: int, result: dict, cfg: AppConfig) -> None:
+    """Write the plain-language reason for a verdict — but only when the
+    engine has one to write.
+
+    A verdict carries a reason CODE (`result["reason"]`), and `explain`
+    renders a code into the sentence the dashboard shows. A verdict with no
+    code and no quantity evidence says nothing new: the set is already in
+    the state a previous pass put it in, with that pass's reason attached.
+    Overwriting it with "Awaiting further processing" would tell the
+    reviewer that a quarantined set is waiting for more documents, which is
+    the one thing a quarantine must never look like.
+    """
     status = result.get("status")
     flags = result.get("flags") or []
     naming = [f for f in flags if f.get("type") == "naming"]
+    reason_code = result.get("reason")
+    has_quantity_evidence = any(f.get("type") == "quantity" for f in flags)
+
     if status == "merged":
         note = "Fully reconciled — packet merged"
         if naming:
             note = f"Fully reconciled — packet merged. {naming[0].get('message', '')}"
+    elif reason_code:
+        if reason_code not in REASON_TEXT:
+            # Every code the reconciler can emit must have a text, or the
+            # dashboard degrades it to a generic message. Say so loudly.
+            logger.warning(
+                "Reason code %r has no text in REASON_TEXT — the dashboard will show a "
+                "generic message. Add the text in the same change that adds the code.",
+                reason_code,
+            )
+        note = explain(reason_code, flags)
+    elif has_quantity_evidence:
+        # A mismatch is described by its numbers, not by a code.
+        note = explain(None, flags)
     else:
-        note = explain(result.get("reason"), flags)
+        # Nothing new to say. Keep the reason already on the set.
+        return
     try:
         eng = get_engine(cfg)
         with Session(eng) as s:
@@ -201,9 +229,16 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
         # Operator actions (redo_extract, redo_match) reset status to pending
         # before calling reconcile — that reset is the explicit gate for re-entry.
         if ps.status == POSetStatus.quarantined:
+            # The set is already quarantined and a previous pass wrote the
+            # reason that explains it. The engine has no new reason CODE to
+            # give — only the stored sentence — so it returns none and leaves
+            # the stored reason alone. A later sweep must not replace a
+            # quarantine's explanation with a generic "Awaiting further
+            # processing", which reads as a wait.
             return {
                 "status": "quarantined",
-                "reason": ps.reconcile_reason or "quarantined",
+                "reason": None,
+                "detail": ps.reconcile_reason or "quarantined",
                 "po_set_id": po_set_id,
                 "flags": [],
             }

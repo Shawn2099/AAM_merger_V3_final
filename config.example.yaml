@@ -24,6 +24,12 @@ vlm:
 extraction:
   max_retries: 3
   retry_backoff_seconds: [2, 5, 15]
+  # A document claimed for extraction (pending -> processing) that is still
+  # "processing" after this many seconds belonged to a worker that died.
+  # It is released back to "pending" and read again on the next pass.
+  # Must exceed the worst case of one attempt: vlm.request_timeout_seconds
+  # * max_retries, plus the retry backoff.
+  stale_processing_seconds: 900
 
 matching:
   # Description similarity, used only for vendor rows carrying no line number.

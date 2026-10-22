@@ -235,6 +235,11 @@ def resolve_unattached_documents(cfg) -> set[int]:
        that is already attached, inherit that PO Set. (See _anchor_from_po_line_ref.)
     3. Sibling filename prefix: If doc shares a batch filename prefix (e.g. SIV-DTS-25-477)
        with an already-grouped SI or PO document in an open PO set.
+
+    A document that shows more than one PO number (`po_reference_ambiguous`)
+    is never attached here either: the attach sweep refuses it, and a
+    filename resemblance must not decide what the attach sweep deliberately
+    leaves for a human.
     """
     from sqlalchemy.orm import Session
 
@@ -255,6 +260,13 @@ def resolve_unattached_documents(cfg) -> set[int]:
             .all()
         )
         for doc in unattached:
+            if doc.po_reference_ambiguous:
+                # More than one PO number is printed on this document.
+                # `attach_unattached_to_open_sets` refuses to attach such a
+                # document; the same rule applies here, or this sweep would
+                # attach by a filename resemblance what the other sweep
+                # deliberately leaves for a human.
+                continue
             matched_ps_id: int | None = None
             matched_po_norm: str | None = None
 

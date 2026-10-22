@@ -119,6 +119,15 @@ must exist in `REASON_TEXT`; an unmapped code renders as "Awaiting further
 processing", which understates a quarantine as a wait. If you add a reason
 code, add the text in the same change.
 
+**A stored reason is never overwritten by a later sweep.** The reconciler
+returns a reason **code** (or none), and the code is rendered into the
+sentence the dashboard shows. A verdict with no code and no quantity
+evidence has nothing new to say, so the reason a previous pass wrote stays
+where it is. A quarantine's explanation must survive the nightly sweep that
+reconciles every open set — a quarantine that reads as "Awaiting further
+processing" tells the reviewer to wait for a set that will never resolve
+itself.
+
 ### 3.1 Every status this engine can produce
 
 Verified against `reconcile_po_set` — this is the complete list, not an
@@ -483,6 +492,49 @@ European `1.234` is caught by the 2-significant-decimal rule in §5.
 Prices are carried in the packet but never compared, so a price-only
 discrepancy is never surfaced to the reviewer.
 
+### M — a line the VLM could not read is kept, not dropped
+
+A row the VLM returns is **never dropped**. A row without a usable quantity
+is stored with a zero quantity, which the existing `non_positive_quantity`
+guard quarantines — the safe direction, and the reviewer sees the line in
+the quarantine report. A row without a description keeps its quantity and is
+stored with an empty description: the description is a fallback matching
+signal, not a reconciliation signal.
+
+**Why it matters.** Dropping a PO row would remove a line from the baseline
+the DN and SI are compared against, and the set could then merge with that
+line never checked. Kept instead of dropped, the cost is a false quarantine
+on a document the VLM read badly.
+
+### L — the reason on a quarantined set survives the nightly sweep
+
+The sweep reconciles every open set, quarantined ones included. A
+quarantine's plain-language reason is written once and is **not** rewritten by
+a later sweep — a quarantine that reads as "Awaiting further processing"
+tells the reviewer to wait for a set that will never resolve itself. The
+reconciler returns a reason **code**; the code is rendered into the sentence
+the dashboard shows.
+
+### M — a document claimed by a worker that died is re-claimed
+
+Extraction claims a document (`pending` -> `processing`) before the VLM
+call. If the process dies after the claim, the row would stay `processing`
+forever: the recovery sweep only looks at `pending`, and the extraction task
+returns the row unchanged — the document would be reported as processed and
+never read again. A claim older than `extraction.stale_processing_seconds`
+(default 900s, above the worst case of one attempt) is released back to
+`pending` and read again.
+
+### L — a multi-PO document is left for a human by every attach path
+
+A document that shows more than one PO number (`po_reference_ambiguous`) is
+never attached to a PO Set — not by the attach sweep, and not by the
+resolution sweep. Attaching it to any one PO strands the others, so it waits
+for a human. The resolution sweep also matches documents by sibling
+filename prefix, which is the weakest evidence it uses; a filename
+resemblance must not decide what the attach sweep deliberately leaves for a
+human.
+
 ### M — a broken document is quarantined, and the operator puts it back
 
 **The rule: anything broken, or that cannot be confirmed, is quarantined.**
@@ -513,9 +565,9 @@ file and re-runs extraction. Verified end to end by
 **Why a human has to do that step.** A failed document never produced a PO
 number, so it was never grouped and has no PO Set; the set-scoped
 `POST /po_sets/{id}/redo_extract` cannot reach it. Reclassifying the type
-alone does not help — `POST /unclassified/{id}/reclassify` resets the attempt
-count **only** when the new type is `COMBINED`, so a document reclassified as
-PO, DN or SI keeps its dead status and is skipped identically on the next run.
+alone does not help — `POST /unclassified/{id}/reclassify` does not reset the
+attempt count, so a document reclassified as PO, DN or SI keeps its dead
+status and is skipped identically on the next run.
 
 **What stays pending, and why that is not the same thing.** A set with a
 genuinely absent document is left `pending`, not quarantined — the vendor may

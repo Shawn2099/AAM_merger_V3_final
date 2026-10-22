@@ -831,6 +831,15 @@ if doc is None: raise ValueError(f"document {doc_id} not found")
 dtype = doc.doc_type
 if is_manual_only(dtype): RETURN doc unchanged          # CUSTOMS/SHIPPING skip the VLM
 
+# CLAIM (compare-and-swap) — the document is taken before the VLM call
+cur = doc.extraction_status
+if cur == pending:
+    UPDATE documents SET extraction_status='processing'
+      WHERE id = :id AND extraction_status = 'pending'
+    if rowcount == 0: RETURN doc (refreshed)   # another caller claimed it first
+elif cur == processing:
+    RETURN doc                                  # already claimed — leave it alone
+
 if (doc.extraction_attempt_count or 0) >= 3:             # ATTEMPT CAP
     doc.extraction_status = failed
     commit; refresh
@@ -1146,16 +1155,26 @@ s = re.sub(r"([A-Za-z])(\d)",  r"\1 \2", s)
 return s.strip()
 ```
 
-### 18.2 `normalize_line_no(s)` â€” the comparison key
+### 18.2 `normalize_line_no(s)` — the comparison key
+
+```
+t = str(s).strip()          # None -> "" ; empty -> ""
+return re.sub(r"(^|[-._/])0+(\d+)", r"\1\2", t)
+```
+
+Leading zeros are stripped **only at the start of the string or immediately
+after a separator** (`-`, `.`, `_`, `/`), and only when digits follow them.
 
 | Condition | Result |
 |---|---|
 | `s is None` | `""` |
 | `t = str(s).strip()` empty | `""` |
-| `t` does not match `^0*(\d.*)$` | `t` unchanged â€” alphanumeric forms (`1a`, `1-1`) survive intact |
-| matches | inner `^(\d+)(.*)$` on the digit run â†’ `num = digits.lstrip("0") or "0"`; return `num + suffix` |
+| zeros at the start, digits after | zeros removed (`"01"` → `"1"`) |
+| zeros after a separator, digits after | zeros removed (`"1-01"` → `"1-1"`, `"1.02"` → `"1.2"`) |
+| zeros with no digits after | unchanged (`"00"` → `"00"`) |
+| no zeros in that position | unchanged — alphanumeric forms (`1a`, `A01`) survive intact |
 
-Examples: `"01"â†’"1"`, `" 001 "â†’"1"`, `"1-1"â†’"1-1"`, `"10"â†’"10"`, `"00"â†’"0"`.
+Examples: `"01"`→`"1"`, `" 001 "`→`"1"`, `"1-1"`→`"1-1"`, `"10"`→`"10"`, `"00"`→`"00"`.
 Comparison is **as a string**, never as an integer, so form is preserved.
 
 ### 18.3 `group_by_line_no(po_lines, vendor_lines, desc_threshold=85)`
@@ -2167,7 +2186,7 @@ a link when non-null and `â€”` when the `ON DELETE SET NULL` fired.
 | 12 | duplicate SHA-256 | return existing row, no new document | `ingestion.py:36` |
 | 13 | PO Set already merged | a later same-key document opens a **new** set | `grouping.py:104` |
 | 14 | non-PO document, `create=False` | never mints; stays unattached & visible | `grouping.py:110` |
-| 15 | `po_reference_ambiguous` | never auto-attached, by any strategy | `grouping.py:149` |
+| 15 | `po_reference_ambiguous` | never auto-attached — by the attach sweep **or** the resolution sweep | `grouping.py:149` |
 | 16 | PO line with no usable line no. | comparison aborts, set quarantines | `matching.py:83` |
 | 17 | vendor row with no number, nothing â‰¥85 | orphan â†’ quarantine | `matching.py:98` |
 | 18 | vendor group not in PO totals | orphan â†’ quarantine | `matching.py:100` |
@@ -2996,3 +3015,72 @@ baseline must still equal the vendor's summed total.
     `reconciliation._reconcile_po_set_inner` (`reconciliation.py:44`) and by
     `dashboard.po_set_detail_view` (`routes/dashboard.py:268`).
 12. **No tolerance anywhere.** Exact integer equality on x1000 values.
+
+---
+
+## 30. Corrections and changes on `fix/mvp-high-priority` (2026-10-22)
+
+The body of this document describes the code as of the snapshot. The changes
+below are the ones made after it. Each one is covered by a test in
+`tests/test_mvp_high_priority.py`.
+
+### 30.1 A reason CODE, never a sentence
+
+`reconcile_po_set` returns `reason` as a **code** (`unmatched_vendor_line`,
+`non_positive_quantity`, ...) or `None`. The already-quarantined early return
+used to hand the stored *sentence* back in that field, so a later sweep could
+not map it, and `_persist_reason` replaced the quarantine's explanation with
+"Awaiting further processing" — a quarantine that read as a wait. The early
+return now gives `reason = None` and puts the preserved sentence in `detail`,
+and `_persist_reason` writes **only** when the engine has a code, a merged
+verdict, or quantity evidence. A stored reason is never overwritten by a
+later sweep.
+
+### 30.2 `delete_quarantined` reads the file identity before the delete
+
+The hashes and filenames used to clear the input folder were read *after* the
+rows were deleted and committed. The attributes were expired and the rows
+gone, so the read raised `ObjectDeletedError`, swallowed by a bare except —
+the operator's file stayed in `input/` and the next sync re-ingested it and
+recreated the set that had just been deleted. The identity is now
+snapshotted before the delete, and a failure to clear the folder is logged
+instead of swallowed.
+
+### 30.3 A document stuck in `processing` is re-claimed
+
+`extraction.reclaim_stale_processing(cfg)` releases documents that have been
+`processing` for longer than `extraction.stale_processing_seconds` (default
+900) back to `pending`. The compare-and-swap claim in `extract_document` is
+committed before the VLM call, so a worker that died after the claim left the
+row `processing` forever: the recovery sweep only looked at `pending`, and
+the extraction task returned the row unchanged — the document was reported as
+processed and never read again. The re-claim runs at the start of the sync
+flow and of the recovery flow.
+
+### 30.4 A line item the VLM returned is never dropped
+
+`populate_from_raw_dict` used to skip any row with a null `description` or a
+null `quantity`. A dropped PO row removes a line from the baseline the DN and
+SI are compared against, and the set can then merge with that line never
+checked. Rows are now kept: a row without a usable quantity is stored with a
+zero quantity and quarantines the set as `non_positive_quantity`; a row
+without a description keeps its quantity and is stored with an empty
+description.
+
+### 30.5 `po_reference_ambiguous` blocks every attach path
+
+`resolve_unattached_documents` now refuses an ambiguous document, as
+`attach_unattached_to_open_sets` already did. Otherwise the resolution
+sweep could attach a multi-PO document by the sibling-filename heuristic —
+the weakest evidence it uses — and quarantine an innocent set as
+`po_reference_mismatch`.
+
+### 30.6 Uploading a file that already exists, unattached
+
+The upload route created a document only when the bytes were unknown to the
+system. When the same bytes existed as an unattached row, the upload was a
+silent no-op: nothing was attached, the type was not set, the customs count
+did not move, and the response was a plain redirect that looked like success.
+Such a row is now attached to the set and typed as the uploaded manual
+document. A row that already carries pipeline data (a PO, DN or SI, or the
+parent of a split) is refused with a 409 that names the conflict.

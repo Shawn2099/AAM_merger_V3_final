@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -14,6 +15,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_engine
 from app.models import AuditAction, AuditLog, Document, LineItem, POSet, POSetStatus
 from app.models.base import Base
+
+logger = logging.getLogger(__name__)
 
 # Windows reserved device names. The production host is Win2016, so a PO
 # number normalising to one of these would create an unusable folder.
@@ -316,6 +319,13 @@ def delete_quarantined(
         # collect doc ids for line_items deletion
         docs = s.query(Document).filter_by(po_set_id=po_set_id).all()
         doc_ids = [d.id for d in docs]
+        # Snapshot the file identity NOW. After the delete and the commit
+        # these rows are gone and their attributes are expired, so reading
+        # them raises ObjectDeletedError — which is what used to leave the
+        # operator's file in the input folder, to be re-ingested by the next
+        # sync and resurrect the set that was just deleted.
+        valid_hashes = {d.sha256_hash for d in docs if d.sha256_hash}
+        valid_names = {d.original_filename for d in docs if d.original_filename}
         if doc_ids:
             s.query(LineItem).filter(LineItem.document_id.in_(doc_ids)).delete(
                 synchronize_session=False
@@ -349,8 +359,6 @@ def delete_quarantined(
             if input_dir.exists():
                 deleted_dir = Path(cfg.paths.quarantine_folder) / "deleted_inputs"
                 deleted_dir.mkdir(parents=True, exist_ok=True)
-                valid_hashes = {d.sha256_hash for d in docs if d.sha256_hash}
-                valid_names = {d.original_filename for d in docs if d.original_filename}
                 for f in list(input_dir.iterdir()):
                     if not f.is_file() or f.suffix.lower() != ".pdf":
                         continue
@@ -366,7 +374,15 @@ def delete_quarantined(
                         with contextlib.suppress(Exception):
                             shutil.move(str(f), str(dest))
         except Exception:
-            pass
+            # The rows are already deleted, so the file may survive in the
+            # input folder. That is visible — the next sync re-ingests it and
+            # the set comes back — but it must not be silent.
+            logger.warning(
+                "Could not clear the input folder after deleting PO Set %s — the file may "
+                "be picked up again by the next sync",
+                po_set_id,
+                exc_info=True,
+            )
 
         return audit
 

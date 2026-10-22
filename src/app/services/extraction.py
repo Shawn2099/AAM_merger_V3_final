@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -313,8 +314,6 @@ def _handle_combined(doc, s, result: dict, cfg) -> Document:
       return normally — validation failures must NOT raise into the Prefect
       retry envelope and burn VLM calls on a deterministic verdict.
     """
-    from datetime import UTC, datetime
-
     from app.models import DocType
 
     # Loop guard 1: a child never re-enters the splitter.
@@ -465,11 +464,25 @@ def populate_from_raw_dict(doc: Document, result: dict, s: Session, cfg) -> None
     for li in list(doc.line_items):
         s.delete(li)
     s.flush()
+    # A row the VLM returned is never dropped. Dropping a PO row removes a
+    # line from the baseline the DN and SI are compared against, and the set
+    # can then merge with that line never checked. A row the VLM could not
+    # read a quantity from is kept with a zero quantity, which the existing
+    # `non_positive_quantity` guard quarantines — the safe direction, and
+    # the reviewer sees the line. A row without a description keeps its
+    # quantity: the description is a fallback matching signal, not a
+    # reconciliation signal.
+    without_description = 0
+    without_quantity = 0
     for li in result.get("line_items", []) or []:
         qty = li.get("quantity")
         price = li.get("unit_price")
-        if qty is None or li.get("description") is None:
-            continue
+        description = li.get("description")
+        if description is None:
+            description = ""
+            without_description += 1
+        if qty is None or str(qty).strip() == "":
+            without_quantity += 1
         locale = getattr(getattr(cfg, "matching", None), "locale", "en_IN") or "en_IN"
         qty_i = _parse_scaled_int(qty, locale=locale)
         price_i = _parse_scaled_int(price, locale=locale)
@@ -477,12 +490,72 @@ def populate_from_raw_dict(doc: Document, result: dict, s: Session, cfg) -> None
             LineItem(
                 document_id=doc.id,
                 line_item_no=str(li.get("line_item_no")) if li.get("line_item_no") else None,
-                description=str(li.get("description")),
+                description=str(description),
                 quantity=qty_i,
                 unit_price=price_i,
                 dn_no=str(li.get("dn_no")) if li.get("dn_no") else None,
             )
         )
+    if without_description or without_quantity:
+        logger.warning(
+            "Document %s: kept %d line item(s) the VLM returned without a description and "
+            "%d without a usable quantity. They are stored, not dropped: a line with no "
+            "quantity quarantines the PO Set as non_positive_quantity.",
+            doc.id,
+            without_description,
+            without_quantity,
+        )
+
+
+def reclaim_stale_processing(cfg) -> int:
+    """Release documents left in `processing` by a worker that died.
+
+    `extract_document` claims a document with a compare-and-swap
+    (pending -> processing) before the VLM call, and that claim is committed.
+    If the process dies between the claim and the result — a service
+    restart, a killed Prefect worker, a machine reboot — the row stays
+    `processing` forever: the recovery sweep only looks at `pending`, and a
+    later extraction attempt returns the row unchanged because the claim is
+    already taken. The document would be reported as processed and never
+    read again.
+
+    A claim older than `extraction.stale_processing_seconds` cannot still be
+    in flight: one attempt is bounded by `vlm.request_timeout_seconds` and
+    the retry envelope, and the threshold is set well above that. Such a
+    claim is released back to `pending` and the document is read again on
+    the next pass.
+
+    Returns the number of documents reclaimed.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import update as _sa_update
+
+    from app.models import Document
+
+    timeout = int(getattr(cfg.extraction, "stale_processing_seconds", 900) or 900)
+    cutoff = datetime.now(UTC) - timedelta(seconds=timeout)
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        result = s.execute(
+            _sa_update(Document)
+            .where(
+                Document.extraction_status == ExtractionStatus.processing,
+                Document.updated_at <= cutoff,
+            )
+            .values(extraction_status=ExtractionStatus.pending)
+            .execution_options(synchronize_session=False)
+        )
+        s.commit()
+        reclaimed = getattr(result, "rowcount", 0) or 0
+    if reclaimed:
+        logger.error(
+            "Reclaimed %d document(s) left in 'processing' for more than %ds — the worker "
+            "that claimed them died. They will be read again.",
+            reclaimed,
+            timeout,
+        )
+    return reclaimed
 
 
 def repopulate_from_raw_json(doc_id: int, cfg) -> Document | None:
