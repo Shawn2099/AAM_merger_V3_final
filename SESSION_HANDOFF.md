@@ -1,7 +1,7 @@
 # Session Handover — AAM Merger V3
 
 **Branch:** `fix/mvp-high-priority` (local commits; not merged into main/dev-simplified).
-**Last commit:** `6ca02bb` (verify every verdict, report it, append customs after merge).
+**Last commit:** `c685444` (record the core contract and pin it with tests).
 **Tests:** full suite green (4 full runs today). `ruff check` / `ruff format --check` clean. `ty check src` clean. `make business-logic` = 26 scenario tests.
 **Delivery goal:** one Windows PC in the client's office is the server; office
 users open `http://<server-ip>:8000/dashboard`. See `docs/DELIVERY.md`.
@@ -79,7 +79,13 @@ produce and asserts both the engine result and the page an operator reads:
 merge, needs review, all six quarantine reasons, PO reference mismatch, packet
 name collision, partial delivery, duplicate bytes vs duplicate content,
 one-PO-many-DN/SI, customs before/after merge, the holding area, and quarantine
-delete. Run it with `make business-logic` (or the file directly; 26 tests).
+delete. Run it with `make business-logic` (or the file directly; 28 tests).
+
+The one-page contract is [`docs/CORE_LOGIC.md`](docs/CORE_LOGIC.md): one PO +
+n DN + n SI, per-line quantity aggregates, line number first / description only
+as a fallback, quantities only, customs append. Two tests pin the "only
+quantities" clause directly (`test_only_quantities_decide_the_verdict`) and the
+description fallback (`test_a_numberless_vendor_row_falls_back_to_description`).
 
 ### Defects found and fixed
 
