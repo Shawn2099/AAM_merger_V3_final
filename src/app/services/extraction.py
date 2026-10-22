@@ -192,34 +192,16 @@ def _parse_scaled_int(val: int | float | str | None, locale: str = "en_IN") -> i
 def _call_vlm(stored_path: str, doc_type: str, cfg) -> dict:
     """Single Luna native PDF call via instructor (no rasterization, FR-6.1). Fail-closed on missing secrets."""
     # --- fail-closed secret handling (never hardcoded, never logged) ---
-    # Load .env if present (python-dotenv) so os.getenv sees it without shell export
-    try:
-        from dotenv import load_dotenv
+    # The secret lives in .env or in the environment. `load_env` is the one
+    # place that reads the file (app.core.config); calling it here keeps the
+    # guarantee even when this service is reached without a config load
+    # first.
+    from app.core.config import load_env
 
-        load_dotenv(override=False)
-        # Also check .env next to config or database parent directory
-        if hasattr(cfg, "paths") and getattr(cfg.paths, "database_path", None):
-            cfg_dir = Path(cfg.paths.database_path).parent
-            if (cfg_dir / ".env").exists():
-                load_dotenv(cfg_dir / ".env", override=False)
-    except Exception:
-        pass
+    load_env()
 
     api_key_env = getattr(cfg.vlm, "api_key_env_var", "OPENROUTER_API_KEY") or "OPENROUTER_API_KEY"
     api_key = os.getenv(api_key_env) or os.getenv("OPENROUTER_API_KEY")
-    # Also try reading .env directly as fallback via dotenv_values
-    if not api_key:
-        try:
-            from dotenv import dotenv_values
-
-            for candidate in [Path(".env"), Path(__file__).resolve().parents[3] / ".env"]:
-                if candidate.exists():
-                    vals = dotenv_values(candidate)
-                    api_key = vals.get(api_key_env) or vals.get("OPENROUTER_API_KEY")
-                    if api_key:
-                        break
-        except Exception:
-            pass
 
     if not api_key:
         raise RuntimeError(f"{api_key_env} not configured — set in .env or env var (fail-closed)")

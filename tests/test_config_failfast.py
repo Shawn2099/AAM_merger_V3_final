@@ -37,6 +37,65 @@ def test_missing_api_key_warns(tmp_path, monkeypatch, caplog):
     assert any("OPENROUTER_API_KEY" in r.message for r in caplog.records)
 
 
+def test_the_env_file_beside_the_config_supplies_the_key(tmp_path, monkeypatch, caplog):
+    """A `.env` beside the config is the developer's way of setting the key.
+
+    The loader must read it, or the fail-closed check reports a failure that
+    is not happening: it printed "OPENROUTER_API_KEY not set - VLM
+    extraction will fail closed" on every config load while extraction was
+    working fine.
+    """
+    import os
+
+    from app.core.config import load_config
+
+    cfg_path = tmp_path / "cfg.yaml"
+    shutil.copy(Path("config.example.yaml"), cfg_path)
+    (tmp_path / ".env").write_text("OPENROUTER_API_KEY=sk-test-from-the-file\n", encoding="utf-8")
+    monkeypatch.setenv("AAM_CONFIG_PATH", str(cfg_path))
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with caplog.at_level(logging.WARNING, logger="app.core.config"):
+        load_config()
+    assert os.environ.get("OPENROUTER_API_KEY") == "sk-test-from-the-file"
+    assert not any("OPENROUTER_API_KEY" in r.message for r in caplog.records), (
+        "the loader announced a failure that the .env had just prevented"
+    )
+
+
+def test_the_environment_wins_over_the_env_file(tmp_path, monkeypatch):
+    """A deployed service sets the variable in its own environment.
+
+    The file must not overwrite it: `override=False`.
+    """
+    import os
+
+    from app.core.config import load_config
+
+    cfg_path = tmp_path / "cfg.yaml"
+    shutil.copy(Path("config.example.yaml"), cfg_path)
+    (tmp_path / ".env").write_text("OPENROUTER_API_KEY=from-the-file\n", encoding="utf-8")
+    monkeypatch.setenv("AAM_CONFIG_PATH", str(cfg_path))
+    monkeypatch.setenv("OPENROUTER_API_KEY", "from-the-environment")
+    load_config()
+    assert os.environ["OPENROUTER_API_KEY"] == "from-the-environment"
+
+
+def test_the_suite_never_reads_the_repositorys_own_env_file(monkeypatch):
+    """The guard that keeps the developer's live key out of the suite.
+
+    The repository root holds a real `.env` with a working API key. A test
+    that asserted "no key -> fail closed" would find that key and pass
+    straight through the guard it was testing.
+    """
+    import os
+
+    from app.core.config import load_env
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    load_env()
+    assert "OPENROUTER_API_KEY" not in os.environ, "the suite loaded the repository's own .env"
+
+
 def test_phase1_defaults_from_example():
     """Phase 1: example ships team decisions (gpt-6-luna, en_IN, current order)."""
     from app.core.config import load_config

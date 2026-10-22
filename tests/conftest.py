@@ -1,4 +1,4 @@
-"""Test bootstrap — the suite must never write into a real data folder.
+r"""Test bootstrap — the suite must never write into a real data folder.
 
 Two problems this file removes, both of which only show up when nobody is
 watching:
@@ -51,11 +51,30 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SESSION_DIR = Path(tempfile.mkdtemp(prefix="aam-merger-tests-"))
 
 #: The suite must never pick up the developer's own secrets. A real
-#: `.env` at the repository root holds a live API key, and the extraction
-#: code loads it — so a test that asserts "no key -> fail closed" would
+#: `.env` at the repository root holds a live API key, and the config
+#: loader reads it — so a test that asserts "no key -> fail closed" would
 #: find the real key and pass straight through the guard it is testing.
 #: Tests that need a key set one themselves.
-dotenv.load_dotenv = lambda *a, **kw: False
+#:
+#: The guard blocks the repository's own `.env` and nothing else: a `.env`
+#: a test writes in its tmp_path is still loaded, so the loader can be
+#: tested for what it does.
+_real_load_dotenv = dotenv.load_dotenv
+
+
+def _guarded_load_dotenv(dotenv_path=None, *args, **kwargs):
+    """Load `.env` files the suite wrote; never the repository's own."""
+    candidate = Path(dotenv_path) if dotenv_path else Path.cwd() / ".env"
+    try:
+        resolved = candidate.resolve()
+    except OSError:  # pragma: no cover - an unresolvable path is not ours
+        return False
+    if resolved == _REPO_ROOT or _REPO_ROOT in resolved.parents:
+        return False
+    return _real_load_dotenv(dotenv_path, *args, **kwargs)
+
+
+dotenv.load_dotenv = _guarded_load_dotenv
 dotenv.dotenv_values = lambda *a, **kw: {}
 
 #: The loader as it was before this file replaced it.

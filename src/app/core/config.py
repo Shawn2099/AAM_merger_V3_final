@@ -171,6 +171,39 @@ class AppConfig(BaseSettings):
         return v
 
 
+def load_env(cfg_path: Path | None = None) -> None:
+    """Load the `.env` file(s) so `os.getenv` sees the secrets in them.
+
+    Secrets live in `.env` or in the process environment — never in YAML
+    (SPEC §13.1). The service account sets the variable in the environment;
+    a developer sets it in `.env` beside the config.
+
+    `override=False`: an environment variable that is already set wins, so a
+    deployment's own environment is never overwritten by a file that happens
+    to sit next to the config.
+
+    The module is imported as `dotenv` and called as `dotenv.load_dotenv(...)`
+    rather than `from dotenv import load_dotenv`, so that a test which
+    replaces `dotenv.load_dotenv` (the suite must never see the developer's
+    real key) still replaces the call this function makes.
+    """
+    try:
+        import dotenv
+    except ImportError:  # pragma: no cover - dotenv is a dependency
+        return
+    candidates = []
+    if cfg_path is not None:
+        candidates.append(Path(cfg_path).parent / ".env")
+    candidates.append(Path(__file__).resolve().parents[3] / ".env")
+    candidates.append(Path(".env"))
+    for candidate in candidates:
+        try:
+            if candidate.exists():
+                dotenv.load_dotenv(candidate, override=False)
+        except Exception:  # pragma: no cover - a broken .env must not stop boot
+            logger.warning("Could not read %s", candidate, exc_info=True)
+
+
 def load_config(path: str | Path | None = None) -> AppConfig:
     """Load YAML config + .env. SPEC §13.1 — validated at startup, fail fast."""
     cfg_path = Path(path or os.getenv("AAM_CONFIG_PATH", "config.yaml"))
@@ -183,7 +216,12 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         )
     data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     cfg = AppConfig.model_validate(data)
-    # secrets never in YAML — resolve via env
+    # Secrets are in .env or in the environment; load the file so the check
+    # below sees the same key the VLM client will use. Without this the app
+    # announced "extraction will fail closed" on every single config load
+    # while extraction was in fact working — a false statement to the
+    # operator, printed once per file per sync.
+    load_env(cfg_path)
     api_key = os.getenv(cfg.vlm.api_key_env_var)
     if not api_key:
         logger.warning(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from prefect import flow, task
@@ -20,10 +21,65 @@ logger = logging.getLogger(__name__)
 #: never mint orphan sets from decoy/secondary PO codes.
 _ANCHOR_TYPES = ("PO",)
 
+#: How many files are stability-polled at the same time. The poll is pure
+#: waiting (sample a size, sleep, sample again), so the threads spend their
+#: time asleep and the host's two cores are free.
+_STABILITY_POLL_WORKERS = 8
+
 
 def _doc_type_val(doc) -> str:
     dt = doc.doc_type
     return dt.value if hasattr(dt, "value") else str(dt)
+
+
+def _already_read(doc) -> bool:
+    """True when this document has been read already and must not be read again.
+
+    The same rule `services.extraction.extract_document` applies, used one
+    level up so the task is never *scheduled* for such a document. That
+    matters because a Prefect task on the `process` work pool launches a
+    process per call: on the live vendor batch, scheduling a task for a file
+    that was already read cost about eleven seconds per file — fifty minutes
+    of a nightly sync spent launching processes to do nothing.
+
+    The one exception is a split parent whose split never completed: it
+    must be re-processed so the children are re-derived from the parent.
+    """
+    if doc.extraction_status != ExtractionStatus.valid:
+        return False
+    split_incomplete = bool(getattr(doc, "is_split_parent", False)) and not getattr(
+        doc, "split_completed_at", None
+    )
+    return not split_incomplete
+
+
+def _poll_stability(files, cfg) -> dict:
+    """Sample every file's size until it stops changing (FR-4.5).
+
+    A file still being copied into the input folder must not be read. The
+    check is pure waiting: `interval` x `count` seconds per file, and the
+    files are independent of each other. Polled one after another, a batch of
+    200 files spends 13 minutes of the sync asleep. Polled together, it
+    spends one poll's worth of time.
+
+    Only the sampling is parallel; the ingest itself stays on one thread,
+    because SQLite is a single-writer database.
+    """
+    from app.services.ingestion import is_file_stable
+
+    if not files:
+        return {}
+    interval = cfg.ingestion.stability_poll_interval_seconds
+    count = cfg.ingestion.stability_poll_count
+    workers = max(1, min(_STABILITY_POLL_WORKERS, len(files)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(
+            pool.map(
+                lambda f: (f, is_file_stable(f, interval=interval, count=count)),
+                files,
+            )
+        )
+    return dict(results)
 
 
 def _persisted_extraction_status(eng, doc_id) -> ExtractionStatus | None:
@@ -440,7 +496,6 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     from app.services.ingestion import (
         find_input_pdfs,
         ingest_file,
-        is_file_stable,
     )
 
     # Release documents whose worker died mid-extraction before anything else
@@ -459,37 +514,41 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     # case-insensitively in ONE pass — globbing "*.pdf" and "*.PDF" separately
     # would double the list on Windows and send every document to the VLM twice.
     files = find_input_pdfs(input_folder)
+
+    # Stability poll (FR-4.5) for the whole batch, taken together.
+    stable_map = _poll_stability(files, cfg)
+
     for f in files:
         try:
-            # Stability poll (FR-4.5)
-            stable = is_file_stable(
-                f,
-                interval=cfg.ingestion.stability_poll_interval_seconds,
-                count=cfg.ingestion.stability_poll_count,
-            )
-            if not stable:
+            if not stable_map.get(f, False):
                 continue
 
             doc = ingest_file(f, cfg)
             processed += 1
 
-            # Extract & Classify via VLM
-            try:
-                _extract_task_for(cfg)(doc.id, cfg_path=cfg_path)
-            except Exception:
-                logger.warning("Extract task failed for doc %s", doc.id, exc_info=True)
-                errors += 1
+            # Extract & Classify via VLM. A document that has been read
+            # already is not scheduled at all (see _already_read): the task
+            # would return it unchanged, and scheduling it costs a process
+            # launch per file.
+            if _already_read(doc):
+                logger.debug("Document %s was read already; not scheduled again", doc.id)
             else:
-                # A clean task return is NOT proof of success — see
-                # _persisted_extraction_status. Count the document from the
-                # row it left behind, and quarantine it if it is broken.
-                if _persisted_extraction_status(eng, doc.id) == ExtractionStatus.failed:
-                    logger.error(
-                        "Extraction did not succeed for doc %s; counted as an error",
-                        doc.id,
-                    )
+                try:
+                    _extract_task_for(cfg)(doc.id, cfg_path=cfg_path)
+                except Exception:
+                    logger.warning("Extract task failed for doc %s", doc.id, exc_info=True)
                     errors += 1
-                    _quarantine_broken_document(doc.id, cfg, eng, f, touched_po_set_ids)
+                else:
+                    # A clean task return is NOT proof of success — see
+                    # _persisted_extraction_status. Count the document from the
+                    # row it left behind, and quarantine it if it is broken.
+                    if _persisted_extraction_status(eng, doc.id) == ExtractionStatus.failed:
+                        logger.error(
+                            "Extraction did not succeed for doc %s; counted as an error",
+                            doc.id,
+                        )
+                        errors += 1
+                        _quarantine_broken_document(doc.id, cfg, eng, f, touched_po_set_ids)
 
             # Group into PO Set (FR-7.1-7.2). Only PO mints;
             # DN/SI/UNKNOWN attach to an open set or wait unattached.

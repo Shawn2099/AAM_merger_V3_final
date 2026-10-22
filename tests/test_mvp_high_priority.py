@@ -16,6 +16,7 @@ static expected values. Every one of them fails on the pre-fix code:
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -1248,3 +1249,99 @@ def test_the_customs_toggle_is_refused_on_a_merged_set(client):
         ps = s.get(POSet, ps_id)
         assert ps.status == POSetStatus.merged, "a delivered packet must stay merged"
         assert ps.has_customs_toggle is False
+
+
+# ---------------------------------------------------------------------------
+# Q7 — a nightly sync must not pay for documents it has already read
+# ---------------------------------------------------------------------------
+
+
+def test_a_read_document_is_not_scheduled_for_extraction(tmp_path, monkeypatch):
+    """Given a file that has already been read, when the sync runs, then no
+    extraction task is scheduled for it.
+
+    A Prefect task on the `process` work pool launches a process per call.
+    Scheduling a task for a document that is already read costs a process
+    launch to be told "nothing to do" — about eleven seconds per file on the
+    live vendor batch, fifty minutes of a nightly sync spent launching
+    processes.
+    """
+    import app.flows.sync as flow_mod
+
+    cfg = _cfg(tmp_path, "notscheduled.db")
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+
+    # a file in the input folder whose content is already stored and read
+    input_dir = Path(cfg.paths.input_folder)
+    input_dir.mkdir(parents=True, exist_ok=True)
+    pdf = input_dir / "read.pdf"
+    PdfWriter().write(str(pdf))
+    data = pdf.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    stored = Path(cfg.paths.stored_documents_folder) / f"{digest}.pdf"
+    stored.parent.mkdir(parents=True, exist_ok=True)
+    stored.write_bytes(data)
+
+    with Session(eng) as s:
+        s.add(
+            Document(
+                sha256_hash=digest,
+                original_filename="read.pdf",
+                stored_path=str(stored),
+                doc_type=DocType.PO,
+                extraction_status=ExtractionStatus.valid,
+                extraction_attempt_count=1,
+            )
+        )
+        s.commit()
+
+    scheduled: list[int] = []
+
+    class _Task:
+        def __call__(self, doc_id, cfg_path=None):
+            scheduled.append(doc_id)
+            raise AssertionError("a document that was read already must not be scheduled")
+
+    monkeypatch.setattr(flow_mod, "_extract_task_for", lambda cfg: _Task())
+    monkeypatch.setattr(flow_mod, "load_config", lambda *a, **kw: cfg)
+
+    flow_mod._sync_flow_locked()
+
+    assert scheduled == [], "an already-read document was scheduled for extraction"
+
+
+def test_the_stability_poll_of_a_batch_is_not_serial(tmp_path):
+    """Given a batch of files, when the stability poll runs, then the batch
+    is polled together rather than one file after another.
+
+    The poll is pure waiting (sample the size, sleep, sample again), so
+    polling 200 files one after another spent thirteen minutes of the sync
+    asleep. The files are independent; they are sampled together.
+    """
+    import time
+
+    import app.flows.sync as flow_mod
+
+    cfg = _cfg(tmp_path, "poll.db")
+    cfg.ingestion.stability_poll_interval_seconds = 0.3
+    cfg.ingestion.stability_poll_count = 1
+
+    input_dir = Path(cfg.paths.input_folder)
+    input_dir.mkdir(parents=True, exist_ok=True)
+    files = []
+    for i in range(8):
+        p = input_dir / f"f{i}.pdf"
+        p.write_bytes(b"%PDF-1.4\n")
+        files.append(p)
+
+    started = time.monotonic()
+    stable_map = flow_mod._poll_stability(files, cfg)
+    elapsed = time.monotonic() - started
+
+    assert len(stable_map) == len(files)
+    assert all(stable_map.values()), "every settled file must be reported stable"
+    serial = 8 * 0.3
+    assert elapsed < serial / 2, (
+        f"the batch was polled serially ({elapsed:.2f}s for {serial:.2f}s of waiting)"
+    )
