@@ -254,6 +254,10 @@ def toggle_customs(po_set_id: int):
         }
     except HTTPException:
         raise
+    except ValueError as e:
+        # A merged set refuses the toggle: its packet is final (FR-14.6).
+        # This is a conflict with the set's state, not a bad request.
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     finally:

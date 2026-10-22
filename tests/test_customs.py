@@ -141,7 +141,10 @@ def test_only_customs_and_shipping_satisfy_the_gate(tmp_path):
 
 
 def test_toggle_any_status(tmp_path):
-    """FR-12.1: toggle allowed regardless of current status."""
+    """FR-12.1: toggle allowed regardless of current status — except a set
+    that has already merged. Its packet is written and final (FR-14.6), so
+    the toggle is refused rather than overwriting a terminal status and
+    showing a delivered packet as "Awaiting Customs"."""
     from app.models import POSetStatus
     from app.services.customs import is_blocked, toggle_customs
 
@@ -149,7 +152,7 @@ def test_toggle_any_status(tmp_path):
         POSetStatus.pending,
         POSetStatus.mismatched,
         POSetStatus.quarantined,
-        POSetStatus.merged,
+        POSetStatus.blocked_customs,
     ]:
         po_set_id, cfg = _create_po_set(tmp_path, f"PO-ANY-{st.value}", status=st)
         ps = toggle_customs(po_set_id, cfg)
@@ -160,6 +163,20 @@ def test_toggle_any_status(tmp_path):
         ps2 = toggle_customs(po_set_id, cfg)
         assert ps2.has_customs_toggle is False
         assert is_blocked(ps2) is False
+
+
+def test_toggle_refused_on_a_merged_set(tmp_path):
+    """A merged packet is final: the customs gate cannot be turned on after
+    the fact, and the delivered packet must not be shown as awaiting
+    customs."""
+    import pytest
+
+    from app.models import POSetStatus
+    from app.services.customs import toggle_customs
+
+    po_set_id, cfg = _create_po_set(tmp_path, "PO-MERGED", status=POSetStatus.merged)
+    with pytest.raises(ValueError, match="already merged"):
+        toggle_customs(po_set_id, cfg)
 
 
 def test_is_blocked_without_toggle_false(tmp_path):

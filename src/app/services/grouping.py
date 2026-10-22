@@ -89,6 +89,53 @@ def normalize_po_no(raw: str) -> str:
     return "".join(kept).upper()
 
 
+#: The only document type that may mint a PO Set. A PO Set is expected to
+#: hold exactly one PO; every other type attaches to an existing set or
+#: waits visibly unattached (BLOCKER-5).
+ANCHOR_TYPES = ("PO",)
+
+#: Documents that must carry a PO reference of their own: a PO carries its
+#: own number, a DN and an SI carry the PO they belong to. A document in
+#: this list that arrives without one is quarantined — the operator names
+#: the PO it belongs to — rather than left holding nothing.
+NEEDS_PO_REFERENCE = ("PO", "DN", "SI")
+
+
+def group_document(doc, cfg) -> tuple[int | None, str | None]:
+    """Place a freshly-read document in its PO Set.
+
+    Returns `(po_set_id, problem)`.
+
+    `problem` is None when the document was placed, or deliberately left
+    unattached. Otherwise it is one of:
+
+      "missing_po_number"   - the document carries no PO reference at all.
+                               It was read successfully; it is quarantined
+                               so the operator can name the PO it belongs
+                               to, instead of being left holding nothing.
+      "ambiguous_po_number" - the document shows more than one PO number.
+                               A PO is the only type that mints a set, so
+                               an ambiguous PO would mint one under
+                               whichever number was named first and strand
+                               the others. It waits for a human.
+    """
+    dtype = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
+    if not doc.po_no_normalized:
+        if dtype in NEEDS_PO_REFERENCE:
+            return None, "missing_po_number"
+        return None, None
+    if doc.po_reference_ambiguous and dtype in ANCHOR_TYPES:
+        return None, "ambiguous_po_number"
+    ps = get_or_create_po_set(
+        doc.po_no_raw or doc.po_no_normalized,
+        cfg,
+        create=dtype in ANCHOR_TYPES,
+    )
+    if ps is None:
+        return None, None
+    return ps.id, None
+
+
 def get_or_create_po_set(po_no: str, cfg, create: bool = True):
     from sqlalchemy.orm import Session
 

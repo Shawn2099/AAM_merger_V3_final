@@ -39,6 +39,7 @@ import os
 import tempfile
 from pathlib import Path
 
+import dotenv
 import yaml
 
 from app.core import config as config_module
@@ -48,6 +49,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 #: One temporary directory for the whole session. Every path the suite
 #: touches lives under it, and it is removed when the session ends.
 _SESSION_DIR = Path(tempfile.mkdtemp(prefix="aam-merger-tests-"))
+
+#: The suite must never pick up the developer's own secrets. A real
+#: `.env` at the repository root holds a live API key, and the extraction
+#: code loads it — so a test that asserts "no key -> fail closed" would
+#: find the real key and pass straight through the guard it is testing.
+#: Tests that need a key set one themselves.
+dotenv.load_dotenv = lambda *a, **kw: False
+dotenv.dotenv_values = lambda *a, **kw: {}
 
 #: The loader as it was before this file replaced it.
 _original_load_config = config_module.load_config

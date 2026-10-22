@@ -215,7 +215,7 @@ def _recovery_flow_locked(
     from app.services.extraction import reclaim_stale_processing
     from app.services.grouping import (
         attach_unattached_to_open_sets,
-        get_or_create_po_set,
+        group_document,
         resolve_unattached_documents,
     )
     from app.services.ingestion import delete_input_files
@@ -309,33 +309,35 @@ def _recovery_flow_locked(
         try:
             with Session(eng) as s_grp:
                 d = s_grp.get(_Doc, doc_id)
-                if d and d.po_no_normalized:
-                    ps = get_or_create_po_set(
-                        d.po_no_raw or d.po_no_normalized,
-                        cfg,
-                        create=_doc_type_val(d) in _ANCHOR_TYPES,
-                    )
-                    if ps is not None:
+                if d and not d.is_split_parent:
+                    ps_id, problem = group_document(d, cfg)
+                    if problem == "missing_po_number":
+                        d.extraction_status = ExtractionStatus.failed
+                        s_grp.commit()
+                        _quarantine_broken_document(
+                            d.id,
+                            cfg,
+                            eng,
+                            None,
+                            touched_po_set_ids,
+                            reason=(
+                                "missing_po_reference: no PO number could be read from this "
+                                "document. It was read successfully; enter its PO number on "
+                                "the Unclassified page to place it."
+                            ),
+                        )
+                    elif problem == "ambiguous_po_number":
+                        logger.warning(
+                            "Document %s (%s) shows more than one PO number — it was not "
+                            "placed in a PO Set and waits for a human",
+                            d.id,
+                            d.original_filename,
+                        )
+                    elif ps_id is not None:
                         if d.po_set_id is None:
-                            d.po_set_id = ps.id
+                            d.po_set_id = ps_id
                             s_grp.commit()
-                        touched_po_set_ids.add(ps.id)
-                elif (
-                    d
-                    and not d.is_split_parent
-                    and _doc_type_val(d) in ("SI", "DN", "COMMERCIAL_INVOICE")
-                    and not d.po_no_normalized
-                ):
-                    d.extraction_status = ExtractionStatus.failed
-                    s_grp.commit()
-                    _quarantine_broken_document(
-                        d.id,
-                        cfg,
-                        eng,
-                        None,
-                        touched_po_set_ids,
-                        reason="missing_po_reference: Document is missing a PO number",
-                    )
+                        touched_po_set_ids.add(ps_id)
         except Exception:
             logger.warning("Grouping failed for pending doc %s", doc_id, exc_info=True)
             recovered_errors += 1
@@ -439,7 +441,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     Base.metadata.create_all(eng)
     from app.models import Document as _Doc
     from app.services.extraction import reclaim_stale_processing
-    from app.services.grouping import get_or_create_po_set
+    from app.services.grouping import group_document
     from app.services.ingestion import (
         find_input_pdfs,
         ingest_file,
@@ -499,24 +501,13 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
             try:
                 with Session(eng) as s2:
                     d2 = s2.get(_Doc, doc.id)
-                    if d2 and d2.po_no_normalized:
-                        ps = get_or_create_po_set(
-                            d2.po_no_raw or d2.po_no_normalized,
-                            cfg,
-                            create=_doc_type_val(d2) in _ANCHOR_TYPES,
-                        )
-                        if ps is None:
-                            continue
-                        if d2.po_set_id is None:
-                            d2.po_set_id = ps.id
-                            s2.commit()
-                        touched_po_set_ids.add(ps.id)
-                    elif (
-                        d2
-                        and not d2.is_split_parent
-                        and _doc_type_val(d2) in ("SI", "DN", "COMMERCIAL_INVOICE")
-                        and not d2.po_no_normalized
-                    ):
+                    ps_id, problem = group_document(d2, cfg)
+                    if problem == "missing_po_number":
+                        # Read successfully, but no PO reference on the face
+                        # of the document. Quarantine it so the operator can
+                        # name the PO it belongs to — a document that is
+                        # simply unanchored must not be left holding
+                        # nothing, invisible to everyone.
                         d2.extraction_status = ExtractionStatus.failed
                         s2.commit()
                         _quarantine_broken_document(
@@ -525,8 +516,24 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
                             eng,
                             f,
                             touched_po_set_ids,
-                            reason="missing_po_reference: Document is missing a PO number",
+                            reason=(
+                                "missing_po_reference: no PO number could be read from this "
+                                "document. It was read successfully; enter its PO number on "
+                                "the Unclassified page to place it."
+                            ),
                         )
+                    elif problem == "ambiguous_po_number":
+                        logger.warning(
+                            "Document %s (%s) shows more than one PO number — it was not "
+                            "placed in a PO Set and waits for a human",
+                            d2.id,
+                            d2.original_filename,
+                        )
+                    elif ps_id is not None:
+                        if d2.po_set_id is None:
+                            d2.po_set_id = ps_id
+                            s2.commit()
+                        touched_po_set_ids.add(ps_id)
             except Exception:
                 logger.warning("Grouping failed for doc %s", doc.id, exc_info=True)
                 errors += 1

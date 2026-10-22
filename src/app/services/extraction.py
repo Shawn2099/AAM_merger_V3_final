@@ -620,6 +620,23 @@ def extract_document(doc_id: int, cfg) -> Document:
         elif cur_status == ExtractionStatus.processing:
             # Already claimed by a concurrent caller; leave it.
             return doc
+        elif cur_status == ExtractionStatus.valid:
+            # Already read. A file stays in the input folder until its PO
+            # Set merges, so a set that is still waiting for a document would
+            # otherwise be re-read on every sync: one VLM call per file per
+            # night, and the attempt count climbing until a perfectly good
+            # document was marked permanently failed. A deliberate re-read is
+            # the operator's: redo_extract sets the status back to pending.
+            #
+            # The one exception is a split parent whose split never
+            # completed (the worker died between cutting the children and
+            # stamping the row): it must be re-processed so the children are
+            # re-derived from the parent.
+            split_incomplete = bool(getattr(doc, "is_split_parent", False)) and not getattr(
+                doc, "split_completed_at", None
+            )
+            if not split_incomplete:
+                return doc
 
         if (doc.extraction_attempt_count or 0) >= 3:
             # Attempt cap reached. This is a terminal state, not a no-op: the

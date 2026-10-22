@@ -3098,3 +3098,39 @@ a "N need a PO number" count beside the "N failed" count. Entering the PO
 number on the reclassify form attaches the document and **clears the
 ambiguity flag**: a human decision supersedes the model's uncertainty, and
 the document stops being held and stops being reported as unresolved.
+
+### 30.8 Three defects found by running the real vendor PDFs
+
+The first live run over 284 real vendor documents exposed these.
+
+**A merged set accepted the customs toggle.** `toggle_customs` had no
+merged guard, so toggling the gate on a set whose packet was already
+written overwrote the terminal `merged` status with `blocked_customs`: the
+dashboard showed a delivered packet as "Awaiting Customs", and nothing
+audited it. `toggle_customs` now refuses a merged set (the route answers
+**409**, not 422). FR-12.1 in the SPEC was amended: the toggle is allowed
+from any status *except* a merged one. The customs requirement is set
+before the merge, and the packet is then written
+`SI → DN → PO → SHIPPING → CUSTOMS` into `paths.output_folder`.
+
+**A document that had been read was read again on every sync.** A file
+stays in the input folder until its set merges, so a set still waiting for a
+document was re-extracted nightly: one VLM call per file per night, and the
+attempt count climbing until a perfectly good document was marked
+permanently failed. `extract_document` now returns a `valid` document
+unchanged. The exception is a split parent whose split never completed
+(`is_split_parent` and no `split_completed_at`): it must be re-processed so
+the children are re-derived.
+
+**A purchase order with no readable number disappeared.** A PO is the only
+type that mints a set, so the grouping block let it through with no number:
+stored, attached to nothing, in no set, in no view. A PO is just another
+document like a DN or an SI — it needs a PO reference like they do. Grouping
+now runs through one function, `grouping.group_document(doc, cfg)`, which
+returns `(po_set_id, problem)`:
+
+| problem | when | what happens |
+|---|---|---|
+| `missing_po_number` | a PO, DN or SI with no readable PO reference | quarantined — the operator names the PO on the Unclassified page |
+| `ambiguous_po_number` | a PO showing more than one PO number | **no set is minted**; it waits for a human, so the other PO's invoices are not stranded under whichever number was named first |
+| `None` | everything else | placed in its set, or deliberately left unattached |

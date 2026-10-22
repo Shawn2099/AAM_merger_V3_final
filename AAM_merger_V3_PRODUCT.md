@@ -337,6 +337,15 @@ the gates by design but still refuses to write a 0-page PDF.
 **Immutability.** Once `merged`, the set is closed. Re-merging returns the
 existing path. A later document with the same PO number starts a new PO Set.
 
+**The customs gate cannot be turned on after the merge.** A merged packet is
+final: toggling the gate on a merged set is refused (409), so a packet that
+has already been delivered is never re-opened or shown as "Awaiting
+Customs". The customs requirement is set **before** the merge: the set then
+waits in `blocked_customs` until both customs documents are uploaded, and the
+packet is written with them — `SI → DN → PO → SHIPPING → CUSTOMS`, in
+`merge.legal_order` — into `paths.output_folder` under the invoice number
+(or the PO number when no invoice number was extracted).
+
 **Force Merge writes an audit row on every path**, carrying the customs
 document count, the output filename, and the operator's written justification.
 The justification must be ≥ 20 characters when supplied.
@@ -541,7 +550,29 @@ must not wait unseen: it is listed in the Unclassified holding area with a
 number there. Naming the PO number clears the ambiguity — a human decision
 supersedes the model's uncertainty — and the document joins the set.
 
-### M — a broken document is quarantined, and the operator puts it back
+### M — a document that has been read is not read again
+
+A file stays in the input folder until its PO Set merges, so a set that is
+still waiting for a document would otherwise be re-read on every sync: one
+VLM call per file per night, and the attempt count climbing until a
+perfectly good document was marked permanently failed. A document that was
+read successfully is therefore **not** read again. A deliberate re-read is
+the operator's — Redo/Re-extract sets the status back to pending first. A
+document whose extraction **failed** is read again (up to the attempt cap),
+because that is the recovery path.
+
+### L — a document with no PO reference is quarantined, whoever it is
+
+A PO carries its own number; a DN and an SI carry the PO they belong to. A
+document of any of those three types that arrives without a readable PO
+reference is quarantined, so the operator can name the PO it belongs to on
+the Unclassified page. A **purchase order** is no exception: it used to be
+stored, attached to nothing, in no set and in no view — it simply
+disappeared. A PO that shows more than one PO number mints **no** set (a PO
+is the only type that can mint one) and waits for a human, so the other PO's
+invoices are not stranded under whichever number was named first.
+
+### M — a document that failed to read is quarantined, and the operator puts it back
 
 **The rule: anything broken, or that cannot be confirmed, is quarantined.**
 Nothing uncertain is allowed to look like normal work, and nothing broken is

@@ -903,3 +903,235 @@ def test_upload_of_a_new_file_still_creates_the_document(client):
         assert doc.doc_type == DocType.CUSTOMS
         assert doc.extraction_status == ExtractionStatus.valid
         assert s.get(POSet, ps_id).customs_doc_count == 1
+
+
+# ---------------------------------------------------------------------------
+# a document that has been read is not read again
+# ---------------------------------------------------------------------------
+
+
+def test_a_document_that_was_already_read_is_not_read_again(tmp_path, monkeypatch):
+    """Given a document that was read successfully, when the sync runs again,
+    then the VLM is not called for it a second time.
+
+    A file stays in the input folder until its PO Set merges, so a set that
+    is still waiting for a document would be re-read on every sync: one VLM
+    call per file per night, and the attempt count climbing until a
+    perfectly good document was marked permanently failed.
+    """
+    import app.services.extraction as ext
+
+    cfg = _cfg(tmp_path, "reread.db")
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="already-read",
+            original_filename="read.pdf",
+            stored_path=str(Path(cfg.paths.stored_documents_folder) / "read.pdf"),
+            doc_type=DocType.PO,
+            extraction_status=ExtractionStatus.valid,
+            extraction_attempt_count=1,
+        )
+        s.add(doc)
+        s.commit()
+        doc_id = doc.id
+
+    def _boom(*a, **kw):
+        raise AssertionError("the VLM must not be called for a document that was already read")
+
+    monkeypatch.setattr(ext, "_call_vlm", _boom)
+
+    ext.extract_document(doc_id, cfg)
+
+    with Session(eng) as s:
+        doc = s.get(Document, doc_id)
+        assert doc.extraction_status == ExtractionStatus.valid
+        assert doc.extraction_attempt_count == 1, "the attempt count was spent for nothing"
+
+
+def test_a_failed_document_is_read_again(tmp_path, monkeypatch):
+    """Given a document whose extraction failed, when the sync runs again,
+    then it is read again — that is the recovery path."""
+    import app.services.extraction as ext
+
+    cfg = _cfg(tmp_path, "refail.db")
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    stored = Path(cfg.paths.stored_documents_folder) / "failed.pdf"
+    _pdf(stored)
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="failed-once",
+            original_filename="failed.pdf",
+            stored_path=str(stored),
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.failed,
+            extraction_attempt_count=1,
+        )
+        s.add(doc)
+        s.commit()
+        doc_id = doc.id
+
+    calls = []
+
+    def _fake(path, dtype, cfg):
+        calls.append(path)
+        return {
+            "document_type": "PO",
+            "po_no_raw": "PO-RETRY",
+            "line_items": [
+                {"line_item_no": "1", "description": "ITEM", "quantity": "1", "unit_price": "1.00"}
+            ],
+        }
+
+    monkeypatch.setattr(ext, "_call_vlm", _fake)
+
+    ext.extract_document(doc_id, cfg)
+
+    assert len(calls) == 1, "a failed document must be read again"
+    with Session(eng) as s:
+        doc = s.get(Document, doc_id)
+        assert doc.extraction_status == ExtractionStatus.valid
+        assert doc.extraction_attempt_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Q1 — a document with no PO reference must not vanish
+# ---------------------------------------------------------------------------
+
+
+def test_a_po_without_a_number_is_reported_not_dropped(tmp_path):
+    """Given a purchase order whose own number could not be read, when it is
+    grouped, then the problem is reported.
+
+    A PO is just another document like a DN or an SI — it needs a PO
+    reference like they do. Without this the document was stored, attached
+    to nothing, in no set and in no view: it simply disappeared.
+    """
+    from app.services.grouping import group_document
+
+    cfg = _cfg(tmp_path, "no-number.db")
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        d = Document(
+            sha256_hash="po-no-number",
+            original_filename="po.pdf",
+            stored_path=str(Path(cfg.paths.stored_documents_folder) / "po.pdf"),
+            doc_type=DocType.PO,
+            extraction_status=ExtractionStatus.valid,
+        )
+        s.add(d)
+        s.commit()
+        d_id = d.id
+
+    with Session(eng) as s:
+        d = s.get(Document, d_id)
+        ps_id, problem = group_document(d, cfg)
+
+    assert ps_id is None
+    assert problem == "missing_po_number"
+
+
+def test_an_ambiguous_po_does_not_mint_a_set(tmp_path):
+    """Given a purchase order that shows more than one PO number, when it is
+    grouped, then it mints no set and waits for a human.
+
+    A PO is the only type that mints a set. Minting one under whichever
+    number was named first would strand the other PO's invoices.
+    """
+    from app.services.grouping import group_document
+
+    cfg = _cfg(tmp_path, "ambiguous-po.db")
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        d = Document(
+            sha256_hash="ambiguous-po",
+            original_filename="po.pdf",
+            stored_path=str(Path(cfg.paths.stored_documents_folder) / "po.pdf"),
+            doc_type=DocType.PO,
+            extraction_status=ExtractionStatus.valid,
+            po_no_raw="12345",
+            po_no_normalized="12345",
+            po_reference_ambiguous=True,
+        )
+        s.add(d)
+        s.commit()
+        d_id = d.id
+
+    with Session(eng) as s:
+        d = s.get(Document, d_id)
+        ps_id, problem = group_document(d, cfg)
+
+    assert ps_id is None
+    assert problem == "ambiguous_po_number"
+    with Session(eng) as s:
+        assert s.query(POSet).count() == 0, "an ambiguous PO must not mint a set"
+
+
+def test_a_normal_po_still_mints_its_set(tmp_path):
+    """The ordinary case is untouched: a PO with a number mints its set."""
+    from app.services.grouping import group_document
+
+    cfg = _cfg(tmp_path, "normal-po.db")
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        d = Document(
+            sha256_hash="normal-po",
+            original_filename="po.pdf",
+            stored_path=str(Path(cfg.paths.stored_documents_folder) / "po.pdf"),
+            doc_type=DocType.PO,
+            extraction_status=ExtractionStatus.valid,
+            po_no_raw="4500043712",
+            po_no_normalized="4500043712",
+        )
+        s.add(d)
+        s.commit()
+        d_id = d.id
+
+    with Session(eng) as s:
+        d = s.get(Document, d_id)
+        ps_id, problem = group_document(d, cfg)
+
+    assert problem is None
+    assert ps_id is not None
+    with Session(eng) as s:
+        assert s.get(POSet, ps_id).po_no_normalized == "4500043712"
+
+
+# ---------------------------------------------------------------------------
+# Q6 — the customs gate cannot be turned on after the merge
+# ---------------------------------------------------------------------------
+
+
+def test_the_customs_toggle_is_refused_on_a_merged_set(client):
+    """Given a PO Set whose packet has been written, when the operator
+    toggles the customs gate, then it is refused with a 409 and the set
+    stays merged.
+
+    The packet is final. Toggling the gate used to overwrite the terminal
+    status, so the dashboard showed a packet that had already been
+    delivered as "Awaiting Customs".
+    """
+    c, cfg = client
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps_id = _new_set(s, "PO-MERGED")
+        ps = s.get(POSet, ps_id)
+        ps.status = POSetStatus.merged
+        ps.merged_at = datetime.now(UTC)
+        ps.merged_output_path = str(Path(cfg.paths.output_folder) / "INV-X.pdf")
+        s.commit()
+
+    resp = c.post(f"/po_sets/{ps_id}/toggle_customs", follow_redirects=False)
+
+    assert resp.status_code == 409, resp.text
+    assert "already merged" in resp.json()["detail"], resp.json()
+    with Session(eng) as s:
+        ps = s.get(POSet, ps_id)
+        assert ps.status == POSetStatus.merged, "a delivered packet must stay merged"
+        assert ps.has_customs_toggle is False

@@ -209,7 +209,7 @@ Numbering mirrors business doc sections for traceability.
 
 ### 7.7 Customs gate (business doc §12)
 
-- **[FR-12.1]** The system shall allow a PO Set to be manually toggled "Has Customs" at any time regardless of current status.
+- **[FR-12.1]** The system shall allow a PO Set to be manually toggled "Has Customs" at any time regardless of current status — **except a PO Set that has already merged**, whose packet is written and final (FR-14.6). Toggling a merged set is refused, so a delivered packet is never re-opened or shown as awaiting customs.
 - **[FR-12.2]** Once toggled, the system shall force the PO Set into `blocked_customs` and hold it there until both a `CUSTOMS` and a `SHIPPING` document have been manually uploaded. These shall be attached as-is, never sent to the VLM.
 - **[FR-12.3]** A `COMBINED` document that is otherwise self-reconciled shall still wait on the 2 customs uploads if the toggle is on.
 - **[FR-12.4]** `COMMERCIAL_INVOICE` shall be attachable at any time as an optional document and shall never itself be required to clear `blocked_customs`.
