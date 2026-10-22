@@ -774,9 +774,10 @@ def test_the_reclaim_leaves_finished_documents_alone(tmp_path):
 
 def test_an_unambiguous_document_is_still_attached_by_the_resolution_sweep(tmp_path):
     """Given a document with ONE PO number, when the resolution sweep runs,
-    then it is still attached by the sibling filename prefix.
+    then it is still attached — by the content, not by its name.
 
-    The ambiguity guard must not turn the sweep off for every document.
+    The content-based strategy here is the delivery-note number printed on
+    the document: it matches a document that is already in an open set.
     """
     from app.services.grouping import resolve_unattached_documents
 
@@ -786,8 +787,26 @@ def test_an_unambiguous_document_is_still_attached_by_the_resolution_sweep(tmp_p
     with Session(eng) as s:
         ps_id = _new_set(s, "PO-UNAMB")
         _add_doc(s, cfg, ps_id, "PO", "SIV-DTS-25-477-PO.pdf", [("1", 100)], po_no="PO-UNAMB")
+        # a delivery note whose own DN number is printed on it, and which
+        # names the PO set it belongs to
         sibling = _add_doc(
-            s, cfg, None, "DN", "SIV-DTS-25-477-DN.pdf", [("1", 100)], po_reference_ambiguous=False
+            s,
+            cfg,
+            None,
+            "DN",
+            "SIV-DTS-25-477-DN.pdf",
+            [("1", 100)],
+            dn_no="GDN-477",
+        )
+        # a document already in a set that carries the same DN number
+        _add_doc(
+            s,
+            cfg,
+            ps_id,
+            "DN",
+            "another-dn.pdf",
+            [("2", 50)],
+            dn_no="GDN-477",
         )
         s.commit()
         sibling_id = sibling.id
@@ -796,6 +815,100 @@ def test_an_unambiguous_document_is_still_attached_by_the_resolution_sweep(tmp_p
 
     with Session(eng) as s:
         assert s.get(Document, sibling_id).po_set_id is not None
+
+
+def test_a_filename_is_never_evidence(tmp_path):
+    """Given a document whose NAME matches a document in a PO Set, when the
+    resolution sweep runs, then it is NOT attached.
+
+    A filename is not evidence: the same bytes can be renamed, and a batch
+    export can give two unrelated documents the same prefix. Only what is
+    printed on the document may place it.
+    """
+    from app.services.grouping import resolve_unattached_documents
+
+    cfg = _cfg(tmp_path, "filename.db")
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps_id = _new_set(s, "PO-NAME")
+        _add_doc(s, cfg, ps_id, "PO", "SIV-DTS-25-477-PO.pdf", [("1", 100)], po_no="PO-NAME")
+        # same batch name, but nothing printed on it links it to that set
+        lookalike = _add_doc(s, cfg, None, "DN", "SIV-DTS-25-477-DN.pdf", [("1", 100)], dn_no=None)
+        s.commit()
+        lookalike_id = lookalike.id
+
+    resolve_unattached_documents(cfg)
+
+    with Session(eng) as s:
+        assert s.get(Document, lookalike_id).po_set_id is None, (
+            "a document was placed on the strength of its filename"
+        )
+
+
+def test_a_document_with_no_po_reference_is_held_not_quarantined(tmp_path):
+    """Given a document that was read successfully but carries no PO
+    reference, when the flow groups it, then it stays valid and unplaced.
+
+    It is not broken: marking it failed would hide it from the content-
+    based sweeps (which only place valid documents) and from the operator.
+    It waits, visible, for the content to place it or for a human to name
+    its PO.
+    """
+    from app.services.grouping import group_document
+
+    cfg = _cfg(tmp_path, "held.db")
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        d = Document(
+            sha256_hash="held-dn",
+            original_filename="dn.pdf",
+            stored_path=str(Path(cfg.paths.stored_documents_folder) / "dn.pdf"),
+            doc_type=DocType.DN,
+            extraction_status=ExtractionStatus.valid,
+        )
+        s.add(d)
+        s.commit()
+        d_id = d.id
+
+    with Session(eng) as s:
+        d = s.get(Document, d_id)
+        ps_id, problem = group_document(d, cfg)
+
+    assert ps_id is None
+    assert problem == "missing_po_number"
+    with Session(eng) as s:
+        d = s.get(Document, d_id)
+        assert d.extraction_status == ExtractionStatus.valid, "a readable document is not broken"
+        assert d.po_set_id is None
+
+
+def test_an_unplaced_document_is_visible_in_the_holding_area(client):
+    """Given a document that is valid and in no PO Set, when the operator
+    opens the holding area, then it is there.
+
+    A document that waits for a human the human cannot see waits forever.
+    """
+    c, cfg = client
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        _add_doc(
+            s,
+            cfg,
+            None,
+            "DN",
+            "unplaced.pdf",
+            [("1", 100)],
+            dn_no=None,
+        )
+        s.commit()
+
+    resp = c.get("/unclassified")
+    assert resp.status_code == 200, resp.text
+    assert "unplaced.pdf" in resp.text, "the unplaced document is invisible"
+    assert "waiting to be placed" in resp.text, resp.text
 
 
 def test_an_ambiguous_document_is_visible_in_the_holding_area(client):

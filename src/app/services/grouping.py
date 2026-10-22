@@ -96,8 +96,10 @@ ANCHOR_TYPES = ("PO",)
 
 #: Documents that must carry a PO reference of their own: a PO carries its
 #: own number, a DN and an SI carry the PO they belong to. A document in
-#: this list that arrives without one is quarantined — the operator names
-#: the PO it belongs to — rather than left holding nothing.
+#: this list that arrives without one is **held** — valid, unattached and
+#: visible in the holding area for the operator to name its PO — not
+#: quarantined: it was read successfully, so it is not broken, and marking
+#: it failed would hide it from the sweeps that could still place it.
 NEEDS_PO_REFERENCE = ("PO", "DN", "SI")
 
 
@@ -110,9 +112,12 @@ def group_document(doc, cfg) -> tuple[int | None, str | None]:
     unattached. Otherwise it is one of:
 
       "missing_po_number"   - the document carries no PO reference at all.
-                               It was read successfully; it is quarantined
-                               so the operator can name the PO it belongs
-                               to, instead of being left holding nothing.
+                               It was read successfully, so it is not
+                               broken: it is HELD (valid, unattached,
+                               visible in the holding area) for the
+                               operator to name the PO it belongs to, or
+                               for a later document's content to place
+                               it. It is not quarantined.
       "ambiguous_po_number" - the document shows more than one PO number.
                                A PO is the only type that mints a set, so
                                an ambiguous PO would mint one under
@@ -275,18 +280,22 @@ def _anchor_from_po_line_ref(session, dn_no: str | None) -> tuple[int | None, st
 def resolve_unattached_documents(cfg) -> set[int]:
     """Group unattached documents (e.g. Delivery Notes without printed PO) into PO Sets.
 
-    Strategies, in order of evidential strength:
-    1. Cross-reference: If doc has dn_no and another document has the same dn_no
-       and an open po_set_id.
-    2. PO line reference: If the doc's dn_no is printed against rows of a PO
-       that is already attached, inherit that PO Set. (See _anchor_from_po_line_ref.)
-    3. Sibling filename prefix: If doc shares a batch filename prefix (e.g. SIV-DTS-25-477)
-       with an already-grouped SI or PO document in an open PO set.
+    Two strategies, both of them **content-based**. A filename is not
+    evidence: the same bytes can be renamed, and a batch export can name
+    two unrelated documents alike. Nothing is placed on the strength of
+    what a file is called.
+
+    1. Cross-reference: the document's own DN number matches the DN number
+       of a document that is already in an open set.
+    2. PO line reference: the document's DN number is printed against rows
+       of a PO that is already attached (see _anchor_from_po_line_ref).
 
     A document that shows more than one PO number (`po_reference_ambiguous`)
     is never attached here either: the attach sweep refuses it, and a
-    filename resemblance must not decide what the attach sweep deliberately
-    leaves for a human.
+    document that cannot be identified must not be placed by anything.
+
+    A document neither strategy can place stays unattached, visible in the
+    holding area, for a human to name its PO.
     """
     from sqlalchemy.orm import Session
 
@@ -338,33 +347,11 @@ def resolve_unattached_documents(cfg) -> set[int]:
                     matched_ps_id = anchor.po_set_id
                     matched_po_norm = anchor.po_no_normalized
 
-            # 2. Match via the PO's per-line delivery-note reference. Stronger
-            # evidence than the filename heuristic below: the number is
-            # printed on the document itself, not inferred from a name.
+            # 2. Match via the PO's per-line delivery-note reference: the
+            # number is printed on the document itself, not inferred from a
+            # name.
             if not matched_ps_id:
                 matched_ps_id, matched_po_norm = _anchor_from_po_line_ref(s, doc.dn_no)
-
-            # 3. Match by sibling filename prefix
-            if not matched_ps_id and doc.original_filename:
-                fn = doc.original_filename
-                parts = fn.replace("_", "-").split("-pages-")[0].split("-")
-                if len(parts) >= 4:
-                    prefix = "-".join(parts[:4])
-                    siblings = (
-                        s.query(Document)
-                        .filter(
-                            Document.original_filename.like(f"{prefix}%"),
-                            Document.id != doc.id,
-                            Document.po_set_id.isnot(None),
-                        )
-                        .all()
-                    )
-                    sibling_ps_ids = {sib.po_set_id for sib in siblings if sib.po_set_id}
-                    if len(sibling_ps_ids) == 1:
-                        cand_id = sibling_ps_ids.pop()
-                        target_sib = next(sib for sib in siblings if sib.po_set_id == cand_id)
-                        matched_ps_id = cand_id
-                        matched_po_norm = target_sib.po_no_normalized
 
             if matched_ps_id:
                 ps = s.get(POSet, matched_ps_id)

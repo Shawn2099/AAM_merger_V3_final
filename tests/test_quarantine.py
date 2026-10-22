@@ -439,18 +439,23 @@ def test_quarantine_si_dn_missing_po_reference(tmp_path, monkeypatch):
     monkeypatch.setattr("app.core.config.load_config", lambda *a, **kw: cfg)
     sync_flow()
 
-    # Verify input file was removed
-    assert not si_pdf.exists(), "Quarantined file should be removed from input folder"
+    # The document was READ successfully - it carries no PO reference, but
+    # nothing about it is broken. It is therefore held, not quarantined:
+    # marking it failed would hide it from the content-based sweeps (which
+    # place only valid documents) and from the operator. It waits, visible,
+    # for the content to place it or for a human to name its PO.
+    assert si_pdf.exists(), "a readable document must not be treated as broken"
 
-    # Verify document in DB is marked failed
     eng = get_engine(cfg)
     with Session(eng) as s:
         doc = s.query(Document).filter_by(original_filename="si_no_po.pdf").one()
-        assert doc.extraction_status == ExtractionStatus.failed
+        assert doc.extraction_status == ExtractionStatus.valid
         assert doc.po_no_normalized is None
+        assert doc.po_set_id is None
+        # its line items are intact
+        assert len(doc.line_items) == 1
+        assert doc.line_items[0].quantity == 10000
 
-    # Verify quarantine file and QUARANTINE.txt exist
+    # and nothing was quarantined
     q_docs = list((Path(cfg.paths.quarantine_folder) / "_documents").glob("*"))
-    assert len(q_docs) == 1
-    q_txt = (q_docs[0] / "QUARANTINE.txt").read_text(encoding="utf-8")
-    assert "missing_po_reference" in q_txt
+    assert not q_docs, "a readable document must not be quarantined"

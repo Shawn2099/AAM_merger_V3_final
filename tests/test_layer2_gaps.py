@@ -136,9 +136,14 @@ def test_ambiguous_doc_never_attaches(tmp_path):
         assert s.query(Document).filter_by(sha256_hash="h_amb").one().po_set_id is None
 
 
-def test_prefix_match_attaches_and_inherits_po_no(tmp_path):
-    """Sibling-prefix success path: no dn_no anywhere, one set shares the
-    4-part prefix → attaches and inherits the set's po_no."""
+def test_prefix_match_does_not_attach(tmp_path):
+    """A filename is never evidence: no dn_no anywhere, but the 4-part
+    prefix matches a set → the document is NOT attached.
+
+    The same bytes can be renamed, and a batch export can give two
+    unrelated documents the same prefix. Only what is printed on the
+    document may place it. The document waits, visible, for a human.
+    """
     from app.services.grouping import resolve_unattached_documents
 
     cfg, eng = _cfg(tmp_path, "prefix_ok.db")
@@ -167,12 +172,11 @@ def test_prefix_match_attaches_and_inherits_po_no(tmp_path):
             )
         )
         s.commit()
-        ps_id = ps.id
-    assert resolve_unattached_documents(cfg) == {ps_id}
+    assert resolve_unattached_documents(cfg) == set()
     with Session(eng) as s:
         o = s.query(Document).filter_by(sha256_hash="h_orph").one()
-        assert o.po_set_id == ps_id
-        assert o.po_no_normalized == "PO-PREF"
+        assert o.po_set_id is None
+        assert o.po_no_normalized is None
 
 
 def test_prefix_match_to_merged_set_refuses(tmp_path):

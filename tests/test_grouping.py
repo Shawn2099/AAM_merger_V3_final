@@ -64,7 +64,13 @@ def test_grouping_post_merge_starts_new_set(tmp_path):
     assert set2.status == POSetStatus.pending
 
 
-def test_resolve_unattached_documents_by_sibling_prefix(tmp_path):
+def test_resolve_unattached_documents_by_dn_cross_reference(tmp_path):
+    """The evidence is the DN number printed on the document, not its name.
+
+    The DN carries no PO number, but it carries its own delivery-note
+    number, which the already-attached SI also carries. That is the
+    cross-reference strategy — the only kind that may place a document.
+    """
     from sqlalchemy.orm import Session
 
     from app.core.config import load_config
@@ -96,7 +102,7 @@ def test_resolve_unattached_documents_by_sibling_prefix(tmp_path):
             po_no_normalized="TOGAPO2526163",
             dn_no="GDN-DTS-25-505",
         )
-        # DN is unattached (po_no_raw is None)
+        # DN is unattached (po_no_raw is None) but prints its own DN number
         doc_dn = Document(
             sha256_hash="h_dn_477",
             original_filename="SIV-DTS-25-477-pages-2.pdf",

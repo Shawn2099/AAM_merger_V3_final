@@ -33,6 +33,19 @@ that claim does and does not cover.
 This is the whole matching and reconciliation algorithm. There is no second
 implementation anywhere in the codebase.
 
+**What may place a document.** A document is attached to a PO Set only on
+evidence printed on the documents themselves:
+
+1. the PO number printed on the document, and
+2. the delivery-note number printed on the document (matched against the DN
+   number of a document already in an open set, or against a PO row that
+   names that DN number).
+
+**A filename is never evidence.** The same bytes can be renamed, and a batch
+export can give two unrelated documents the same prefix, so a name proves
+nothing about what a document is. A document that carries no content anchor
+waits for a human rather than being placed on a guess.
+
 ```
 1. Group BOTH sides by line_item_no, summing each group.
    Line numbers are normalised first: whitespace stripped, leading zeros
@@ -561,16 +574,39 @@ the operator's — Redo/Re-extract sets the status back to pending first. A
 document whose extraction **failed** is read again (up to the attempt cap),
 because that is the recovery path.
 
-### L — a document with no PO reference is quarantined, whoever it is
+### L — a document with no PO reference is **held**, not quarantined
 
 A PO carries its own number; a DN and an SI carry the PO they belong to. A
 document of any of those three types that arrives without a readable PO
-reference is quarantined, so the operator can name the PO it belongs to on
-the Unclassified page. A **purchase order** is no exception: it used to be
-stored, attached to nothing, in no set and in no view — it simply
-disappeared. A PO that shows more than one PO number mints **no** set (a PO
-is the only type that can mint one) and waits for a human, so the other PO's
-invoices are not stranded under whichever number was named first.
+reference has **not** been broken — it was read successfully. It is therefore
+**held**: it stays `valid`, attached to nothing, and listed in the Unclassified
+holding area, where the operator can name the PO it belongs to.
+
+Marking it `failed` (the behaviour before 2026-10-22) was wrong twice over: it
+made a perfectly readable document look like a loss, and it hid the document
+from the two content-based sweeps, which place only valid documents — so a DN
+that a later PO would have named could never be picked up.
+
+A **purchase order** is no exception: it used to be stored, attached to
+nothing, in no set and in no view — it simply disappeared. A PO that shows
+more than one PO number mints **no** set (a PO is the only type that can mint
+one) and waits for a human, so the other PO's invoices are not stranded under
+whichever number was named first.
+
+### L — a document that only a filename could have placed waits for a human
+
+The resolution sweep used to attach a document that shared a batch filename
+prefix with a document already in a set (`SIV-DTS-25-477-…` → the set that
+held `SIV-DTS-25-477-…`). That is gone: a filename is not evidence (§2).
+
+**The cost, stated plainly.** In the live vendor run, **26 of 284 documents**
+(9%) carry neither a PO number nor a DN number — the vendor did not print
+one on those pages. Nothing on their face links them to a PO, so under this
+rule they cannot be placed automatically. Each one waits for a human to name
+its PO on the Unclassified page. The alternatives were worse: placing them on
+a name (a guess that can attach a delivery to the wrong purchase order) or
+quarantining them (which hides a readable document and stops the sweeps from
+ever placing it).
 
 ### M — a document that failed to read is quarantined, and the operator puts it back
 

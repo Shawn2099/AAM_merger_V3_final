@@ -15,6 +15,9 @@
         {% if ambiguous_count %}
         <span class="badge badge-quarantined" style="font-size:0.8rem;" title="These documents show more than one PO number. Nothing will attach them automatically — enter the PO number to place them.">{{ ambiguous_count }} need a PO number</span>
         {% endif %}
+        {% if unplaced_count %}
+        <span class="badge badge-pending" style="font-size:0.8rem;" title="These were read successfully but carry no PO reference, and nothing has placed them yet. Enter the PO number to place them.">{{ unplaced_count }} waiting to be placed</span>
+        {% endif %}
       </h2>
       <p class="card-subtitle">
         These documents could not be automatically identified during ingestion. Review each document's PDF and assign its type to route it to the pipeline.

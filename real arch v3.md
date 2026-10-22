@@ -3131,6 +3131,93 @@ returns `(po_set_id, problem)`:
 
 | problem | when | what happens |
 |---|---|---|
-| `missing_po_number` | a PO, DN or SI with no readable PO reference | quarantined — the operator names the PO on the Unclassified page |
+| `missing_po_number` | a PO, DN or SI with no readable PO reference | **held**, not quarantined — see §31: it waits, visible, for the content to place it or for a human to name its PO |
 | `ambiguous_po_number` | a PO showing more than one PO number | **no set is minted**; it waits for a human, so the other PO's invoices are not stranded under whichever number was named first |
 | `None` | everything else | placed in its set, or deliberately left unattached |
+
+---
+
+## 31. Content only — a filename is never evidence (2026-10-22)
+
+The operator's rule: **the contents of the document are the only source of
+truth.** Two defects followed from not holding to that.
+
+### 31.1 The filename-prefix strategy is gone
+
+`resolve_unattached_documents` had three strategies. The third was:
+
+```python
+# 3. Match by sibling filename prefix
+if not matched_ps_id and doc.original_filename:
+    ...  Document.original_filename.like(f"{prefix}%") ...
+```
+
+Any document sharing a four-part batch prefix with a document already in an
+open set was attached to that set, and inherited its PO number. On the live
+vendor batch this did real work — and it was a guess wearing a suit. The same
+bytes can be renamed; a batch export can give two unrelated documents the
+same prefix; a prefix is not a PO number. The strategy is deleted, not
+disabled.
+
+The two surviving strategies are both content-based and both print a number
+on the document itself:
+
+| strategy | evidence |
+|---|---|
+| cross-reference | the document's own DN number equals the DN number of a document already in an open set |
+| PO line reference | the document's DN number is printed against rows of a PO that is already attached (`_anchor_from_po_line_ref`) |
+
+### 31.2 A readable document with no PO reference is held, not quarantined
+
+Before this change, a document with no readable PO reference was set
+`extraction_status = failed` and quarantined — it was treated as a loss.
+That was wrong twice over:
+
+1. **It was not broken.** It had been read successfully; the vendor simply
+   did not print a PO number on it.
+2. **It hid the document from the very thing that could have placed it.** The
+   two sweeps place only `valid` documents. Marking it failed meant a DN that
+   a PO arriving later would have named (by DN number) could never be picked
+   up — the sweep skipped it every night, forever.
+
+It is now **held**: `valid`, unattached, input copy untouched, and listed in
+the Unclassified holding area. The holding area query now includes
+`Document.po_set_id.is_(None)`, so *every* document that is not in a PO Set is
+visible — including the ones waiting for their PO to arrive — with a
+"N waiting to be placed" badge beside "N failed" and "N need a PO number".
+
+### 31.3 What it costs, measured on the 284 real vendor documents
+
+**28 of the 284 documents carry no PO number. 27 of those 28 carry no DN
+number either.** They are DNs whose pages print neither reference:
+
+```
+SIV-DTS-25-452-pages-2.pdf    SIV-DTS-25-477-pages-2.pdf
+SIV-DTS-25-480-pages-2.pdf    SIV-DTS-25-486-pages-2.pdf
+SIV-DTS-25-498-pages-2.pdf    SIV-DTS-25-509-pages-2.pdf
+SIV-DTS-25-517-pages-2.pdf    SIV-DTS-25-519-pages-2.pdf
+SIV-DTS-25-538-pages-2.pdf    SIV-DTS-25-548-pages-2.pdf
+SIV-DTS-25-565-2.pdf          SIV-DTS-25-456-pages-3.pdf
+```
+
+(the full list is in the commit message of this change)
+
+Their line items are intact — 21 000, 240 000, 700 000 units and so on — and
+the quantities are correct. Nothing about them is broken. But there is no
+content anchor anywhere on them, so no content-based method can place them.
+Each waits for a human to name its PO.
+
+Under the old rules they were quarantined and lost to the sweeps; under the
+filename heuristic they were placed on a guess. Now they wait, visibly, and
+the operator decides. That is the honest outcome.
+
+### 31.4 The tests that encode this
+
+| test | asserts |
+|---|---|
+| `test_a_filename_is_never_evidence` | a document whose name matches a set is **not** attached |
+| `test_prefix_match_does_not_attach` (was `…_attaches_and_inherits_po_no`) | the old success path is now a refusal |
+| `test_a_document_with_no_po_reference_is_held_not_quarantined` | it stays `valid`, unplaced, with its line items |
+| `test_an_unplaced_document_is_visible_in_the_holding_area` | the operator can see it |
+| `test_quarantine_si_dn_missing_po_reference` | the input copy is **not** removed, nothing is quarantined, the line item survives |
+| `test_an_unambiguous_document_is_still_attached_by_the_resolution_sweep` | the content-based path still works |

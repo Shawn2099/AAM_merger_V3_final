@@ -312,19 +312,14 @@ def _recovery_flow_locked(
                 if d and not d.is_split_parent:
                     ps_id, problem = group_document(d, cfg)
                     if problem == "missing_po_number":
-                        d.extraction_status = ExtractionStatus.failed
-                        s_grp.commit()
-                        _quarantine_broken_document(
+                        # Read successfully, no PO reference on the face of
+                        # the document: it waits, visible, for the content to
+                        # place it or for a human to name its PO.
+                        logger.warning(
+                            "Document %s (%s) carries no PO reference — it stays unplaced "
+                            "and visible in the holding area",
                             d.id,
-                            cfg,
-                            eng,
-                            None,
-                            touched_po_set_ids,
-                            reason=(
-                                "missing_po_reference: no PO number could be read from this "
-                                "document. It was read successfully; enter its PO number on "
-                                "the Unclassified page to place it."
-                            ),
+                            d.original_filename,
                         )
                     elif problem == "ambiguous_po_number":
                         logger.warning(
@@ -504,23 +499,17 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
                     ps_id, problem = group_document(d2, cfg)
                     if problem == "missing_po_number":
                         # Read successfully, but no PO reference on the face
-                        # of the document. Quarantine it so the operator can
-                        # name the PO it belongs to — a document that is
-                        # simply unanchored must not be left holding
-                        # nothing, invisible to everyone.
-                        d2.extraction_status = ExtractionStatus.failed
-                        s2.commit()
-                        _quarantine_broken_document(
+                        # of the document. It is NOT broken and it is NOT
+                        # quarantined: it waits, visible, until the content
+                        # allows it to be placed (a PO that names its DN) or
+                        # until a human names its PO. Marking it failed
+                        # would hide it from both the sweeps and the
+                        # operator.
+                        logger.warning(
+                            "Document %s (%s) carries no PO reference — it stays unplaced "
+                            "and visible in the holding area",
                             d2.id,
-                            cfg,
-                            eng,
-                            f,
-                            touched_po_set_ids,
-                            reason=(
-                                "missing_po_reference: no PO number could be read from this "
-                                "document. It was read successfully; enter its PO number on "
-                                "the Unclassified page to place it."
-                            ),
+                            d2.original_filename,
                         )
                     elif problem == "ambiguous_po_number":
                         logger.warning(

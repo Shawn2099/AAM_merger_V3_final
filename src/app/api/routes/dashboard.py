@@ -714,14 +714,21 @@ def unclassified_view(request: Request):
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     with Session(eng) as s:
-        # The holding area shows untyped documents AND permanently failed ones
-        # of any type: a failure is a loss the operator must see, wherever it
-        # happened. Failed rows never attach (sweeps only take `valid`).
+        # The holding area shows every document that is not in the pipeline
+        # yet, because every one of them is waiting for something:
         #
-        # It also shows documents that show more than one PO number. Both
-        # attach sweeps refuse those on purpose, so nothing will ever place
-        # them — without this they would wait for a human who cannot see
-        # them. The operator resolves them by entering the PO number here.
+        #   - untyped documents (nothing could identify them)
+        #   - documents whose extraction failed permanently (a loss — they
+        #     will never be read again)
+        #   - documents that show more than one PO number (both attach
+        #     sweeps refuse them on purpose)
+        #   - documents that were read successfully but carry no PO
+        #     reference, and are in no PO Set. They are not broken: they
+        #     wait for the content to place them, or for a human to name
+        #     their PO.
+        #
+        # A document nothing can place must not wait unseen: a document
+        # waiting for a human the human cannot see waits forever.
         docs = (
             s.query(Document)
             .filter(
@@ -729,6 +736,7 @@ def unclassified_view(request: Request):
                     Document.doc_type == DocType.UNKNOWN,
                     Document.extraction_status == ExtractionStatus.failed,
                     Document.po_reference_ambiguous.is_(True),
+                    Document.po_set_id.is_(None),
                 )
             )
             .all()
@@ -740,6 +748,9 @@ def unclassified_view(request: Request):
         # files that will never be read.
         failed_count = sum(1 for d in docs if d.extraction_status == ExtractionStatus.failed)
         ambiguous_count = sum(1 for d in docs if d.po_reference_ambiguous)
+        unplaced_count = sum(
+            1 for d in docs if d.extraction_status == ExtractionStatus.valid and d.po_set_id is None
+        )
         return _templates.TemplateResponse(
             request,
             "unclassified.html",
@@ -749,6 +760,7 @@ def unclassified_view(request: Request):
                 "unclassified_count": len(docs),
                 "failed_count": failed_count,
                 "ambiguous_count": ambiguous_count,
+                "unplaced_count": unplaced_count,
             },
         )
 
