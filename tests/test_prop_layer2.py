@@ -514,18 +514,18 @@ def test_prop_duplicate_po_lines_sum(data):
 
 
 # ---------------------------------------------------------------------------
-# 12. One numberless PO row poisons the set regardless of the vendor side
+# 12. A PO row with neither number nor description poisons the set
 # ---------------------------------------------------------------------------
 
 
 @SETTINGS
 @given(st.data())
-def test_prop_numberless_po_row_always_quarantines(data):
+def test_prop_numberless_po_row_without_description_always_quarantines(data):
     po = [
         _row("1", "WIDGET", data.draw(pos_qty)),
         {
             "line_item_no": data.draw(st.sampled_from([None, "", "   "])),
-            "description": "MYSTERY",
+            "description": data.draw(st.sampled_from([None, "", "   "])),
             "quantity": data.draw(pos_qty),
         },
     ]
@@ -535,3 +535,22 @@ def test_prop_numberless_po_row_always_quarantines(data):
     assert po_t == {} and v_t == {} and orphans == []
     res = compare_po_set_lines(po, vendor, vendor)
     assert res["po_fail"] == "po_line_missing_line_item_no"
+
+
+@SETTINGS
+@given(st.data())
+def test_prop_numberless_po_row_with_a_description_is_addressable(data):
+    """A description is enough identity for a PO row with no number."""
+    desc = "HEX BOLT M12"
+    po = [
+        _row("1", "WIDGET", data.draw(pos_qty)),
+        {
+            "line_item_no": data.draw(st.sampled_from([None, "", "   "])),
+            "description": desc,
+            "quantity": data.draw(pos_qty),
+        },
+    ]
+    vendor = [_row("1", "WIDGET", po[0]["quantity"]), _row(None, desc, po[1]["quantity"])]
+    po_t, v_t, orphans, po_fail = group_by_line_no(po, vendor)
+    assert po_fail is None and orphans == []
+    assert v_t == po_t

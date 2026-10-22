@@ -223,9 +223,9 @@ def test_po_without_a_number_is_held_not_quarantined(cfg, client):
 # ---------------------------------------------------------------------------
 
 
-def test_po_line_without_a_number_quarantines_and_both_pages_say_why(cfg, client):
+def test_po_line_without_a_number_or_description_quarantines_and_both_pages_say_why(cfg, client):
     pid = _set(cfg, "PO-NOLINE")
-    _doc(cfg, pid, DocType.PO, "po-noline.pdf", [(None, "BOLT", 100)], po_no="PO-NOLINE")
+    _doc(cfg, pid, DocType.PO, "po-noline.pdf", [(None, "", 100)], po_no="PO-NOLINE")
     _doc(cfg, pid, DocType.DN, "dn-noline.pdf", [("1", "BOLT", 100)], po_no="PO-NOLINE")
     _doc(cfg, pid, DocType.SI, "si-noline.pdf", [("1", "BOLT", 100)], po_no="PO-NOLINE")
 
@@ -243,6 +243,45 @@ def test_po_line_without_a_number_quarantines_and_both_pages_say_why(cfg, client
 
     detail = client.get(f"/po_sets/{pid}/view").text
     assert "line number" in detail
+
+
+def test_a_numberless_po_line_reconciles_by_description(cfg, client):
+    """The table content identifies the item on both sides. A PO row with no
+    number is matched to a numbered DN row and a numberless SI row by its
+    description; the quantities still have to agree exactly."""
+    pid = _set(cfg, "NOLINEPO")
+    _doc(
+        cfg,
+        pid,
+        DocType.PO,
+        "nolinepo-po.pdf",
+        [(None, "BOLT HEX 1/2 IN YELLOW ZINC", 100)],
+        po_no="NOLINEPO",
+    )
+    _doc(
+        cfg,
+        pid,
+        DocType.DN,
+        "nolinepo-dn.pdf",
+        [("1", "BOLT HEX 1/2 IN YELLOW ZINC", 100)],
+        po_no="NOLINEPO",
+    )
+    _doc(
+        cfg,
+        pid,
+        DocType.SI,
+        "nolinepo-si.pdf",
+        [(None, "BOLT HEX 1/2 IN YELLOW ZINC", 100)],
+        si_no="INV-NOLINEPO",
+        po_no="NOLINEPO",
+    )
+
+    result = reconcile_po_set(pid, cfg)
+
+    assert result["status"] == "merged", _status(cfg, pid).reconcile_reason
+    detail = client.get(f"/po_sets/{pid}/view").text
+    assert "BOLT HEX 1/2 IN YELLOW ZINC" in detail
+    assert "✅ Match" in detail
 
 
 # ---------------------------------------------------------------------------
@@ -736,7 +775,7 @@ def test_customs_on_before_merge_blocks_then_merges_after_both_docs(cfg, client)
 
 def test_quarantine_delete_removes_it_from_the_page_and_keeps_files(cfg, client):
     pid = _set(cfg, "PO-DEL")
-    doc_id = _doc(cfg, pid, DocType.PO, "del-po.pdf", [(None, "BOLT", 100)], po_no="PO-DEL")
+    doc_id = _doc(cfg, pid, DocType.PO, "del-po.pdf", [(None, "", 100)], po_no="PO-DEL")
     _doc(cfg, pid, DocType.DN, "del-dn.pdf", [("1", "BOLT", 100)], po_no="PO-DEL")
     _doc(cfg, pid, DocType.SI, "del-si.pdf", [("1", "BOLT", 100)], si_no="INV-DEL", po_no="PO-DEL")
     assert reconcile_po_set(pid, cfg)["status"] == "quarantined"

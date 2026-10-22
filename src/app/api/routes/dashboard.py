@@ -332,12 +332,12 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
 
             # Per-PO-line 3-way matrix, built from the same totals the
             # comparison just used. Keys are normalised so a PO printing "01"
-            # lines up with a DN printing "1".
-            from app.services.matching import normalize_line_no
+            # lines up with a DN printing "1"; a PO line with no number is keyed
+            # by its description, exactly as the engine keyed it.
+            from app.services.matching import display_line_key, po_item_key
 
             for p in po_lines:
-                raw_line_no = p.get("line_item_no")
-                key = normalize_line_no(str(raw_line_no) if raw_line_no is not None else None)
+                key = po_item_key(p)
                 dn_scaled = comparison["dn_totals"].get(key, 0)
                 si_scaled = comparison["si_totals"].get(key, 0)
                 agg_dn = dn_scaled / 1000
@@ -355,7 +355,7 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
                     verdict = f"❌ Mismatch (PO: {po_q:g}, DN: {agg_dn:g}, SI: {agg_si:g})"
                 matrix_rows.append(
                     {
-                        "line_item_no": key or "—",
+                        "line_item_no": display_line_key(key) or "—",
                         "description": p.get("description") or "",
                         "po_qty": po_q,
                         "dn_agg_qty": agg_dn,

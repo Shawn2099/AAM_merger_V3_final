@@ -53,6 +53,32 @@ def normalize_line_no(s: str | None) -> str:
     return re.sub(r"(^|[-._/])0+(\d+)", r"\1\2", t)
 
 
+#: Synthetic keys for PO lines that carry no number. The description is the
+#: only identity such a row has. The prefix cannot collide with a printed line
+#: number (those are alphanumeric).
+_DESC_KEY_PREFIX = "@desc:"
+
+
+def po_item_key(line: dict) -> str:
+    """The comparison key for a PO line.
+
+    A printed line number is authoritative. A PO row with no number is still
+    addressable by its description — the table content names the same item even
+    when the vendor omitted the number. Returns "" only when the row has
+    neither a number nor a description, which nothing can match.
+    """
+    key = normalize_line_no(line.get("line_item_no"))
+    if key:
+        return key
+    desc = _norm(line.get("description") or "")
+    return f"{_DESC_KEY_PREFIX}{desc}" if desc else ""
+
+
+def display_line_key(key: str) -> str:
+    """The operator-facing form of a key (no synthetic prefix)."""
+    return key[len(_DESC_KEY_PREFIX) :] if key.startswith(_DESC_KEY_PREFIX) else key
+
+
 def group_by_line_no(
     po_lines: list[dict],
     vendor_lines: list[dict],
@@ -65,15 +91,23 @@ def group_by_line_no(
 
     Rows are summed rather than matched one-to-one, so a single PO line
     delivered across several vendor rows reconciles correctly.
+
+    A PO line with no printed number is keyed by its description (see
+    `po_item_key`); a vendor row with no number, or with a number the PO does
+    not carry, is matched by description. A printed number that the PO does
+    carry is always authoritative — description never overrides it.
     """
     po_totals: dict[str, int] = {}
     po_desc: dict[str, str] = {}
+    numberless_po_keys: set[str] = set()
 
     for ln in po_lines:
-        key = normalize_line_no(ln.get("line_item_no"))
+        key = po_item_key(ln)
         if not key:
-            # A PO line we cannot address is unresolvable by definition.
+            # Neither a number nor a description: nothing can address this row.
             return {}, {}, [], "po_line_missing_line_item_no"
+        if key.startswith(_DESC_KEY_PREFIX):
+            numberless_po_keys.add(key)
         qty = int(ln.get("quantity") or 0)
         po_totals[key] = po_totals.get(key, 0) + qty
         po_desc.setdefault(key, _norm(ln.get("description") or ""))
@@ -83,16 +117,22 @@ def group_by_line_no(
 
     for ln in vendor_lines:
         key = normalize_line_no(ln.get("line_item_no"))
-        if not key and desc_threshold:
-            # Fallback only: this row has no usable number, so try the
-            # description. Never used to override a real line number.
-            key = _best_desc_key(ln, po_desc, desc_threshold)
-        if not key:
+        target = key if key in po_totals else None
+
+        if target is None and desc_threshold:
+            # No number, or a number the PO does not carry. A numbered vendor
+            # row can only fall back to a PO line that has no number of its
+            # own; allowing it to match a different numbered PO line would let
+            # a typo override a printed key.
+            candidates = {k: po_desc[k] for k in numberless_po_keys} if key else po_desc
+            target = _best_desc_key(ln, candidates, desc_threshold)
+
+        if target:
+            vendor_totals[target] = vendor_totals.get(target, 0) + int(ln.get("quantity") or 0)
+        elif not key:
             orphans.append({**ln, "why": "no_line_number_and_no_description_match"})
-        elif key not in po_totals:
-            orphans.append({**ln, "why": "no_po_line_with_this_number"})
         else:
-            vendor_totals[key] = vendor_totals.get(key, 0) + int(ln.get("quantity") or 0)
+            orphans.append({**ln, "why": "no_po_line_with_this_number"})
 
     return po_totals, vendor_totals, orphans, None
 
@@ -143,6 +183,11 @@ def compare_aggregates(
         v_qty = vendor_totals.get(key, 0)
         if v_qty != po_qty:
             diffs.append(
-                {"line": key, "po_qty": po_qty, "vendor_qty": v_qty, "reason": "quantity_mismatch"}
+                {
+                    "line": display_line_key(key),
+                    "po_qty": po_qty,
+                    "vendor_qty": v_qty,
+                    "reason": "quantity_mismatch",
+                }
             )
     return diffs

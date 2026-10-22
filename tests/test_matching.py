@@ -136,12 +136,51 @@ def test_description_never_overrides_a_real_line_number():
     assert compare_aggregates(po_totals, vendor_totals, orphans)[0]["line"] == "2"
 
 
-def test_po_line_without_a_line_number_fails_the_set():
-    """An unaddressable PO line is unresolvable by definition."""
-    _pt, _vt, _orphans, fail = group_by_line_no([_ln("1"), _ln(None)], [_ln("1")])
+def test_po_line_without_a_number_or_description_fails_the_set():
+    """A PO row that can be addressed neither by number nor by description is
+    unresolvable. A description alone is enough (see the next tests)."""
+    _pt, _vt, _orphans, fail = group_by_line_no([_ln("1"), _ln(None, desc="")], [_ln("1")])
     assert fail == "po_line_missing_line_item_no"
 
 
-def test_missing_line_number_fails_even_when_other_lines_are_fine():
-    _pt, _vt, _orphans, fail = group_by_line_no([_ln("1"), _ln("2"), _ln("")], [_ln("1"), _ln("2")])
+def test_missing_line_number_and_description_fails_even_when_other_lines_are_fine():
+    _pt, _vt, _orphans, fail = group_by_line_no(
+        [_ln("1"), _ln("2"), _ln("", desc="")], [_ln("1"), _ln("2")]
+    )
     assert fail == "po_line_missing_line_item_no"
+
+
+def test_a_numberless_po_line_is_matched_by_its_description():
+    """The operator's rule: the table content identifies the item when the
+    number is absent, on the PO side as well."""
+    po_totals, vendor_totals, orphans, fail = group_by_line_no(
+        [_ln(None, desc="Hexagon head bolt M12")],
+        [{"line_item_no": None, "description": "Hexagon head bolt M12", "quantity": 100_000}],
+    )
+    assert fail is None and orphans == []
+    assert list(po_totals.values()) == [100_000]
+    assert list(vendor_totals.values()) == [100_000]
+    assert compare_aggregates(po_totals, vendor_totals, orphans) == []
+
+
+def test_a_numbered_vendor_row_can_match_a_numberless_po_line_by_description():
+    """One side printed a number, the other did not; the description still
+    names the same table item."""
+    po_totals, vendor_totals, orphans, fail = group_by_line_no(
+        [_ln(None, desc="Hexagon head bolt M12")],
+        [_ln("1", desc="Hexagon head bolt M12")],
+    )
+    assert fail is None and orphans == []
+    assert list(vendor_totals.values()) == [100_000]
+    assert vendor_totals.keys() == po_totals.keys()
+
+
+def test_a_numbered_vendor_row_never_matches_a_different_numbered_po_line_by_description():
+    """A printed number the PO carries stays authoritative: a description that
+    resembles another line must not move the quantity."""
+    _po, vendor_totals, orphans, _ = group_by_line_no(
+        [_ln("1", desc="Widget Alpha"), _ln("2", desc="Widget Beta")],
+        [_ln("1", desc="Widget Beta", qty=100)],
+    )
+    assert orphans == []
+    assert vendor_totals == {"1": 100_000}

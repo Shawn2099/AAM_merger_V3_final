@@ -1277,7 +1277,7 @@ are separate facts, and either can fail alone.
 | `missing_si_document` | No invoice in this set yet |
 | `partial_fulfillment` | Waiting on more deliveries or invoices |
 | `unmatched_vendor_line` | A delivery or invoice line could not be matched to any PO line |
-| `po_line_missing_line_item_no` | A PO line has no line number, so it cannot be compared |
+| `po_line_missing_line_item_no` | A PO line has neither a line number nor a description, so it cannot be compared |
 | `multiple_po_documents` | This PO Set holds more than one PO document |
 | `packet_naming_failed` | The merged packet could not be named unambiguously |
 | `po_reference_mismatch` | A document references a different PO number |
@@ -2931,7 +2931,7 @@ scenarios:
 | 35.4 over 120 | 1 quantity, vendor 120000 | `True` | **mismatched** | -- |
 | 35.5 SI short 80 | 1 quantity, vendor 80000 | `True` | **mismatched** | -- |
 | 35.6 orphan | 1 **identification** | -- | **quarantined** | `unmatched_vendor_line` |
-| 35.7 no number | -- | -- | **quarantined** | `po_line_missing_line_item_no` |
+| 35.7 no number or description | -- | -- | **quarantined** | `po_line_missing_line_item_no` |
 | 35.8 duplicate numbers | none | -- | proceeds | -- |
 | 35.9 desc fallback | none | -- | proceeds | -- |
 | 35.10 undelivered lines | 4 quantity, **all vendor 0** | `False` | **pending** | `partial_fulfillment` |
@@ -3251,3 +3251,32 @@ The current contract (also in PRODUCT §6):
 Tests: `tests/test_business_scenarios_ui.py` (append, idempotency,
 upload-before-toggle, status stays merged), `tests/test_customs.py`,
 `tests/test_mvp_high_priority.py`.
+
+---
+
+## 33. Correction (2026-10-22): description keys a PO row with no number
+
+The traces above (and the earlier `po_line_missing_line_item_no` abort) say a
+PO line with no printed number stops the set. That is no longer true. The
+operator's rule is that the table content identifies the item when the number
+is absent — on **either** side.
+
+Current behaviour (`matching.py`):
+
+- `po_item_key(po_line)`: the normalised printed number when present; otherwise
+  the synthetic key `@desc:<normalised description>`.
+- A PO line with **neither** a number nor a description still aborts with
+  `po_line_missing_line_item_no` — nothing can address it.
+- A vendor row whose number the PO carries is matched by that number, and
+  description never overrides it.
+- A vendor row with **no** number is description-matched against every PO line.
+- A vendor row with a number the PO does **not** carry may description-match
+  only a PO line that itself has no number. It may not steal another numbered
+  PO line.
+- Quantity arithmetic is unchanged: per key, `PO == ΣDN == ΣSI`, exact.
+- The dashboard matrix uses the same keys, so a numberless PO line displays its
+  description and its Match/Mismatch verdict correctly.
+
+Tests: `test_a_numberless_po_line_is_matched_by_its_description`,
+`test_a_numbered_vendor_row_can_match_a_numberless_po_line_by_description`,
+`test_a_numberless_po_line_reconciles_by_description` (engine + page).

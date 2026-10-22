@@ -58,12 +58,14 @@ def _build(tmp_path, cfg, po_no, docs, po_no_normalized=None):
             )
             s.add(d)
             s.commit()
-            for ln, qty in lines:
+            for line in lines:
+                ln, qty = line[0], line[1]
+                desc = line[2] if len(line) > 2 else f"item {ln}"
                 s.add(
                     LineItem(
                         document_id=d.id,
                         line_item_no=ln,
-                        description=f"item {ln}",
+                        description=desc,
                         quantity=qty * 1000,
                         unit_price=1000,
                     )
@@ -166,16 +168,33 @@ def test_orphan_vendor_line_quarantines_with_reason(tmp_path):
     assert reason and "could not be matched" in reason, reason
 
 
-def test_po_line_without_line_number_quarantines(tmp_path):
+def test_po_line_without_number_is_matched_by_description(tmp_path):
+    """The table content identifies the item when the PO omits the number."""
     cfg = _cfg(tmp_path, "noline.db")
     ps_id = _build(
         tmp_path,
         cfg,
         "PO-NOLINE",
         [
-            ("PO", [(None, 100)], {}),
-            ("DN", [("1", 100)], {}),
-            ("SI", [("1", 100)], {}),
+            ("PO", [(None, 100, "BOLT HEX 1/2 IN")], {}),
+            ("DN", [("1", 100, "BOLT HEX 1/2 IN")], {}),
+            ("SI", [("1", 100, "BOLT HEX 1/2 IN")], {}),
+        ],
+    )
+    res = reconcile_po_set(ps_id, cfg)
+    assert res["status"] == "merged", res
+
+
+def test_po_line_without_number_or_description_quarantines(tmp_path):
+    cfg = _cfg(tmp_path, "noline2.db")
+    ps_id = _build(
+        tmp_path,
+        cfg,
+        "PO-NOLINE2",
+        [
+            ("PO", [(None, 100, "")], {}),
+            ("DN", [("1", 100, "BOLT")], {}),
+            ("SI", [("1", 100, "BOLT")], {}),
         ],
     )
     res = reconcile_po_set(ps_id, cfg)

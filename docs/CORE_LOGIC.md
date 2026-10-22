@@ -36,16 +36,17 @@ contract is pinned by `tests/test_business_scenarios_ui.py`.
 a group. A PO line delivered or invoiced in several rows reconciles by sum — it
 is an aggregate comparison, not a one-to-one pairing.
 
-**Description only as a fallback for a vendor row with no number.** If a DN/SI
-row has no usable line number, its description is matched to the closest PO
-line at ≥85 % token-sort similarity (`matching.fuzzy_description_threshold`).
-It is never used to override a printed number, and it never compares
-quantities.
+**Description is the identity when a number is absent — on either side.** A
+vendor row with no usable line number is matched to the closest PO line at
+≥85 % token-sort similarity (`matching.fuzzy_description_threshold`). A PO
+line with no printed number is keyed by its description (`po_item_key`); a
+numbered vendor row that the PO does not carry may match such a line by
+description too. A printed number that the PO **does** carry is always
+authoritative — description never overrides it.
 
-**A PO line with no number quarantines** (`po_line_missing_line_item_no`). The
-PO is the baseline; a baseline line that cannot be addressed cannot be
-compared. (This is the one place the "use description if no number" rule does
-not apply — a deliberate, safe refusal. Say so if the business wants otherwise.)
+**A PO line with neither a number nor a description quarantines**
+(`po_line_missing_line_item_no`). Nothing can address it. A PO line with a
+description is addressable and is compared like any other line.
 
 **The comparison.** For every PO line, the PO quantity must equal the DN
 aggregate **and** the SI aggregate, exactly, as integers scaled ×1000:
@@ -119,7 +120,8 @@ belonging to another set is never overwritten — that set quarantines as
 | 1 PO + n DN + n SI, per-line aggregates | `test_one_po_two_dn_two_si_sum_and_merge` |
 | Only quantities matter (prices/descriptions differ) | `test_only_quantities_decide_the_verdict` |
 | Description fallback for a numberless vendor row | `test_a_numberless_vendor_row_falls_back_to_description` |
-| A PO line with no number quarantines | `test_po_line_without_a_number_quarantines_and_both_pages_say_why` |
+| A PO line with no number matches by description | `test_a_numberless_po_line_reconciles_by_description` |
+| A PO line with no number *and* no description quarantines | `test_po_line_without_a_number_or_description_quarantines_and_both_pages_say_why` |
 | Second PO document quarantines | `test_two_po_documents_quarantine_and_the_pages_explain_it` |
 | Identical bytes are one document | `test_identical_po_bytes_are_one_document_not_a_second_po` |
 | Same PO number is required | `test_po_reference_mismatch_quarantines_with_the_offending_file` |

@@ -65,7 +65,8 @@ waits for a human rather than being placed on a guess.
 4. A vendor group with no PO counterpart is an orphan: quarantine the set.
    A delivered line that resolves nowhere cannot be ignored.
 
-5. A PO line with no line number at all is unresolvable: quarantine the set.
+5. A PO line with no printed number is keyed by its description; a line with
+   neither a number nor a description is unresolvable: quarantine the set.
 
 6. Zero or negative anywhere: quarantine the set. Never evaluate it as a
    normal case.
@@ -158,7 +159,7 @@ approximation.
 | `mismatched` | *(none)* | both sides reported a line and the quantities differ |
 | `quarantined` | `non_positive_quantity` | any quantity zero, negative, or unparseable |
 | `quarantined` | `po_reference_mismatch` | a document's PO number disagrees with its set's |
-| `quarantined` | `po_line_missing_line_item_no` | a PO line has no line number to compare on |
+| `quarantined` | `po_line_missing_line_item_no` | a PO line has neither a number nor a description to compare on |
 | `quarantined` | `multiple_po_documents` | the set holds more than one PO document (config `reconciliation.single_po_document`) |
 | `quarantined` | `unmatched_vendor_line` | a vendor row resolved to no PO line (see 3.2) |
 | `quarantined` | `po_document_has_no_line_items` | the PO document was read but contains no line items |

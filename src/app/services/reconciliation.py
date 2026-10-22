@@ -80,7 +80,9 @@ REASON_TEXT: dict[str, str] = {
     "missing_si_document": "No invoice in this set yet",
     "partial_fulfillment": "Waiting on more deliveries or invoices",
     "unmatched_vendor_line": "A delivery or invoice line could not be matched to any PO line",
-    "po_line_missing_line_item_no": "A PO line has no line number, so it cannot be compared",
+    "po_line_missing_line_item_no": (
+        "A PO line has neither a line number nor a description, so it cannot be compared"
+    ),
     "multiple_po_documents": "This PO Set holds more than one PO document",
     "packet_naming_failed": "The merged packet could not be named unambiguously",
     "po_reference_mismatch": "A document references a different PO number",
