@@ -101,14 +101,18 @@ def _doc(
     ps_id: int,
     dtype: DocType,
     filename: str,
-    lines: list[tuple[str | None, str, int]],
+    lines: list[tuple],
     *,
     seed: str | None = None,
     si_no: str | None = None,
     po_no: str = "",
     status: ExtractionStatus = ExtractionStatus.valid,
 ) -> int:
-    """Add one attached document with line items. `lines` are (no, desc, qty)."""
+    """Add one attached document with line items.
+
+    `lines` are `(line_no, description, qty)` or
+    `(line_no, description, qty, unit_price)`, unscaled.
+    """
     sha, path = _pdf(cfg, seed or f"{ps_id}-{filename}-{dtype.value}")
     eng = get_engine(cfg)
     with Session(eng) as s:
@@ -125,14 +129,15 @@ def _doc(
         s.add(doc)
         s.commit()
         s.refresh(doc)
-        for name, desc, qty in lines:
+        for name, desc, qty, *rest in lines:
+            price = rest[0] if rest else 0
             s.add(
                 LineItem(
                     document_id=doc.id,
                     line_item_no=name,
                     description=desc,
                     quantity=qty * K,
-                    unit_price=0,
+                    unit_price=price * K,
                 )
             )
         s.commit()
@@ -368,6 +373,98 @@ def test_one_po_two_dn_two_si_sum_and_merge(cfg):
     eng = get_engine(cfg)
     with Session(eng) as s:
         assert s.query(Document).filter(Document.po_set_id == pid).count() == 5
+
+
+def test_only_quantities_decide_the_verdict(cfg):
+    """The contract: line number is the key, quantities are the only signal.
+
+    Prices, descriptions and leading zeros on the line number must not change
+    the verdict. One PO against two DNs and two SIs, each split 40/60 and
+    70/30, with deliberately different descriptions and prices, merges.
+    """
+    pid = _set(cfg, "ONLYQTY")
+    _doc(
+        cfg,
+        pid,
+        DocType.PO,
+        "onlyqty-po.pdf",
+        [("1", "BOLT HEX 1/2 IN", 100, 10)],
+        po_no="ONLYQTY",
+    )
+    _doc(
+        cfg,
+        pid,
+        DocType.DN,
+        "onlyqty-dn-1.pdf",
+        [("01", "COMPLETELY DIFFERENT TEXT", 40, 999)],
+        po_no="ONLYQTY",
+    )
+    _doc(
+        cfg,
+        pid,
+        DocType.DN,
+        "onlyqty-dn-2.pdf",
+        [("1", "ANOTHER DESCRIPTION", 60, 1)],
+        po_no="ONLYQTY",
+    )
+    _doc(
+        cfg,
+        pid,
+        DocType.SI,
+        "onlyqty-si-1.pdf",
+        [("001", "PRICE IS WRONG", 70, 500)],
+        si_no="INV-ONLYQTY",
+        po_no="ONLYQTY",
+    )
+    _doc(
+        cfg,
+        pid,
+        DocType.SI,
+        "onlyqty-si-2.pdf",
+        [("1", "DESCRIPTION IS IRRELEVANT", 30, 2)],
+        si_no="INV-ONLYQTY-2",
+        po_no="ONLYQTY",
+    )
+
+    result = reconcile_po_set(pid, cfg)
+
+    assert result["status"] == "merged", _status(cfg, pid).reconcile_reason
+    assert Path(result["merged_output_path"]).exists()
+
+
+def test_a_numberless_vendor_row_falls_back_to_description(cfg):
+    """When a vendor row carries no line number, its description is the only
+    way to place it. A close description match still reconciles."""
+    pid = _set(cfg, "DESCFALL")
+    _doc(
+        cfg,
+        pid,
+        DocType.PO,
+        "descf-po.pdf",
+        [("1", "BOLT HEX 1/2 IN YELLOW ZINC PLATED", 100)],
+        po_no="DESCFALL",
+    )
+    _doc(
+        cfg,
+        pid,
+        DocType.DN,
+        "descf-dn.pdf",
+        [(None, "BOLT HEX 1/2 IN YELLOW ZINC PLATED", 100)],
+        po_no="DESCFALL",
+    )
+    _doc(
+        cfg,
+        pid,
+        DocType.SI,
+        "descf-si.pdf",
+        [("1", "BOLT HEX 1/2 IN YELLOW ZINC PLATED", 100)],
+        si_no="INV-DESCF",
+        po_no="DESCFALL",
+    )
+
+    result = reconcile_po_set(pid, cfg)
+
+    assert result["status"] == "merged", _status(cfg, pid).reconcile_reason
 
 
 # ---------------------------------------------------------------------------

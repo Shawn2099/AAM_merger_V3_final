@@ -3,8 +3,10 @@
 AI-assisted PO/DN/SI reconciliation → one merged PDF per PO. FastAPI + Prefect
 + SQLite WAL, built for a single Windows Server 2016 host on a LAN.
 
-**Start here:** [`AAM_merger_V3_PRODUCT.md`](./AAM_merger_V3_PRODUCT.md) — what
-the product is, the reconciliation rule, and its accepted limitations.
+**Start here:** [`docs/CORE_LOGIC.md`](./docs/CORE_LOGIC.md) — the one-page
+contract (1 PO + n DN + n SI, per-line quantity aggregates, line number first,
+customs append). Then [`AAM_merger_V3_PRODUCT.md`](./AAM_merger_V3_PRODUCT.md)
+— what the product is, the reconciliation rule, and its accepted limitations.
 
 > The older `AAM_merger_V3_SPEC.md` and `AAM_merger_V3_business_logic.md` are
 > kept for the vendor research and requirement history they contain. Their

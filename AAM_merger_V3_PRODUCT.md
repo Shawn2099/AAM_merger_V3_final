@@ -3,6 +3,11 @@
 **Status:** Authoritative. This document describes the product as it is built
 and as it is intended to behave.
 
+**One-page contract:** [`docs/CORE_LOGIC.md`](./docs/CORE_LOGIC.md) restates the
+rule the operator gave: one PO + n DN + n SI sharing a PO number, per-line
+quantity aggregates, line number first with description only as the fallback,
+quantities only, and the customs append. Keep it and this document in step.
+
 **Supersedes:** `AAM_merger_V3_SPEC.md` for the reconciliation, matching and
 merge sections, and `AAM_merger_V3_business_logic.md` §8, §10, §11 wherever the
 two disagree. Where this document and the older specs conflict, **this

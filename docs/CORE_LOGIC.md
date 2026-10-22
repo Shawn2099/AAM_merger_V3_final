@@ -1,0 +1,131 @@
+# The Core Contract — AAM Merger
+
+This is the operator's statement of what the product is, in one page. The
+long-form reasoning is `AAM_merger_V3_PRODUCT.md`; where the two disagree, this
+page is the intent and PRODUCT must be corrected. The rule is implemented in
+`src/app/services/matching.py` and `src/app/services/reconciliation.py`; the
+contract is pinned by `tests/test_business_scenarios_ui.py`.
+
+---
+
+## 1. The rule, verbatim
+
+> A set is **one PO PDF, plus any number of SI PDFs and DN PDFs**, all carrying
+> the **same PO number**. For every line item, the **aggregate quantity of the
+> PO equals the aggregate quantity of the DN and equals the aggregate quantity
+> of the SI**. Line numbers are the primary key; description is used only when
+> a line number is absent. **Only quantities are compared — nothing else.**
+> If the customs toggle is enabled, the two customs documents are appended to
+> the merged packet; if it is not, the merged packet is final.
+
+## 2. Forming the set
+
+| Rule | Implementation |
+|---|---|
+| One PO document anchors a set. A second PO document under the same number **quarantines** (`multiple_po_documents`) rather than doubling the baseline. | `reconciliation.py` (`single_po_document`, default `true`) |
+| DN and SI documents never create a set; they attach to the open set with the **same normalised PO number**. | `grouping.py` (`ANCHOR_TYPES`, `get_or_create_po_set(create=False)`) |
+| Any number of DN and SI documents may attach. All of them are included in the packet. | `reconciliation.py` (`dn_docs`, `si_docs`); `merge.py::_ordered_docs` |
+| The PO number is normalised (labels/leading `PO`, spacing, case, revision suffix). `PO 161538`, `161538` and `PO, Rev # 161538,0` are the same set. | `grouping.normalize_po_no` |
+| A document whose printed PO number differs from the set's quarantines the set (`po_reference_mismatch`). | `reconciliation.py` |
+| Duplicate bytes are one document (SHA-256 unique). The same content cannot be attached twice. | `ingestion.py`, upload route |
+
+## 3. Matching and comparison
+
+**Line key first.** Group **both sides** by `line_item_no`, normalised
+(whitespace and leading zeros: `01` = `1`; `1-1` stays `1-1`). Sum all rows in
+a group. A PO line delivered or invoiced in several rows reconciles by sum — it
+is an aggregate comparison, not a one-to-one pairing.
+
+**Description only as a fallback for a vendor row with no number.** If a DN/SI
+row has no usable line number, its description is matched to the closest PO
+line at ≥85 % token-sort similarity (`matching.fuzzy_description_threshold`).
+It is never used to override a printed number, and it never compares
+quantities.
+
+**A PO line with no number quarantines** (`po_line_missing_line_item_no`). The
+PO is the baseline; a baseline line that cannot be addressed cannot be
+compared. (This is the one place the "use description if no number" rule does
+not apply — a deliberate, safe refusal. Say so if the business wants otherwise.)
+
+**The comparison.** For every PO line, the PO quantity must equal the DN
+aggregate **and** the SI aggregate, exactly, as integers scaled ×1000:
+
+```
+PO(line) == Σ DN(line) == Σ SI(line)      for every line
+```
+
+A vendor row that resolves to no PO line is an orphan → the set quarantines
+(`unmatched_vendor_line`). One failing line fails the whole set; there is no
+partial merge.
+
+| Only these are compared | Never compared |
+|---|---|
+| `line_item_no` (the key) | price / unit_price |
+| quantity (scaled integer) | description (except the numberless fallback) |
+| | UOM (not stored) |
+| | part number / SKU (not stored) |
+| | positional order / `slno` |
+
+## 4. What each outcome means
+
+| Outcome | When |
+|---|---|
+| `merged` | Every line matched exactly and, if the customs requirement is on, both customs documents are present. Packet written. |
+| `mismatched` | A line was reported on both sides with different quantities. A human decides which document is right. |
+| `pending` | A required side is missing, or the vendor reported **nothing** for a PO line (an outstanding delivery, not a failure). **Not a pass.** |
+| `quarantined` | A line could not be identified, a quantity is zero/unreadable, a second PO document, a PO reference mismatch, or the packet cannot be named. Whole set, never a line. |
+
+Zero or unreadable quantities quarantine (`non_positive_quantity`); a row is
+never silently dropped.
+
+## 5. Customs
+
+Default **off**: the packet is final when the set merges.
+
+Enabled: both a `CUSTOMS` and a `SHIPPING` document are required.
+
+- **Enabled before the merge** → the set waits at `blocked_customs`; after both
+  are uploaded, Merge Now (or the next sync) writes the packet with them.
+- **Enabled after the merge** → the set stays `merged`; uploading both rebuilds
+  the same packet in place (legal order ends SHIPPING → CUSTOMS), atomically,
+  with an audit row (`customs_append`). The rebuild is idempotent.
+- One document alone does not rebuild the packet; the dashboard shows
+  "Customs append pending".
+
+## 6. The packet
+
+All attached documents, concatenated whole in the configured legal order:
+`SI → DN → PO → SHIPPING → CUSTOMS`. Pages are never edited or re-sorted. The
+filename is the first SI's invoice number, falling back to the PO number (with
+a visible naming note) when no invoice number was extracted. An existing packet
+belonging to another set is never overwritten — that set quarantines as
+`packet_naming_failed`.
+
+## 7. What this contract does **not** claim
+
+- It does not catch "same line number, same quantity, different item". That is
+  the accepted high-consequence limitation; human review of the packet is
+  load-bearing. See PRODUCT §8-H.
+- It does not compare units. `1 BOX` and `1 EA` are both 1.
+- ERP step-10 numbering (PO 10/20/30 vs DN 1/2/3) is not mapped; those lines
+  quarantine.
+- A missing invoice number does not block the merge; the packet is named from
+  the PO number and the gap is flagged.
+
+## 8. Where the contract is tested
+
+| Clause | Test |
+|---|---|
+| 1 PO + n DN + n SI, per-line aggregates | `test_one_po_two_dn_two_si_sum_and_merge` |
+| Only quantities matter (prices/descriptions differ) | `test_only_quantities_decide_the_verdict` |
+| Description fallback for a numberless vendor row | `test_a_numberless_vendor_row_falls_back_to_description` |
+| A PO line with no number quarantines | `test_po_line_without_a_number_quarantines_and_both_pages_say_why` |
+| Second PO document quarantines | `test_two_po_documents_quarantine_and_the_pages_explain_it` |
+| Identical bytes are one document | `test_identical_po_bytes_are_one_document_not_a_second_po` |
+| Same PO number is required | `test_po_reference_mismatch_quarantines_with_the_offending_file` |
+| Partial delivery is a wait, not a pass | `test_partial_delivery_is_pending_not_quarantined` |
+| Customs off (default) → the merge is the end | `test_one_po_two_dn_two_si_sum_and_merge` |
+| Customs on before merge → blocked then merged | `test_customs_on_before_merge_blocks_then_merges_after_both_docs` |
+| Customs on after merge → appended, status stays merged | `test_customs_documents_can_be_appended_after_merge` |
+
+Run them with `make business-logic`.
