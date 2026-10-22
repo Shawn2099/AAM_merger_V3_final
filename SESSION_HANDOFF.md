@@ -1,8 +1,8 @@
 # Session Handover — AAM Merger V3
 
 **Branch:** `fix/mvp-high-priority` (local commits; not merged into main/dev-simplified).
-**Last commit:** `2719748` (docs: client delivery runbook and tester guide).
-**Tests:** full suite green (exit 0, run twice today). `ruff check` / `ruff format --check` clean. `ty check src` clean.
+**Last commit:** `6ca02bb` (verify every verdict, report it, append customs after merge).
+**Tests:** full suite green (4 full runs today). `ruff check` / `ruff format --check` clean. `ty check src` clean. `make business-logic` = 26 scenario tests.
 **Delivery goal:** one Windows PC in the client's office is the server; office
 users open `http://<server-ip>:8000/dashboard`. See `docs/DELIVERY.md`.
 
@@ -70,8 +70,86 @@ set `merged`, 1.1 MB packet written. This is the path the client machine takes.
 
 ---
 
-## What is NOT done / next steps
+---
 
+## Business-logic verification pass (2026-10-22, third session)
+
+`tests/test_business_scenarios_ui.py` now builds every verdict the product can
+produce and asserts both the engine result and the page an operator reads:
+merge, needs review, all six quarantine reasons, PO reference mismatch, packet
+name collision, partial delivery, duplicate bytes vs duplicate content,
+one-PO-many-DN/SI, customs before/after merge, the holding area, and quarantine
+delete. Run it with `make business-logic` (or the file directly; 26 tests).
+
+### Defects found and fixed
+
+1. **The Quarantine page showed no reason.** It listed PO number, status and
+   doc count only. Added a "Why" column (page and HTMX fragment) and replaced
+   the stale subtitle (it named retired matcher concepts) with the real
+   reasons. Both routes now pass `reconcile_reason`.
+2. **A quarantined set could show a fully green matrix with no explanation.**
+   The detail page only re-ran the line comparison; it never reproduced the
+   guards that run before it (two PO documents, PO reference mismatch, packet
+   naming). Added a verdict banner ("Why this set is quarantined / needs review
+   / blocked / waiting") and a note that a quarantined set does not merge even
+   when every line matches.
+3. **The dashboard holding-area badge counted only `UNKNOWN` documents.**
+   Live it showed **2** while the page held **37**. One `_holding_area_query`
+   now feeds the dashboard badge, KPI count, quarantine and detail views, and
+   the page itself. Verified live: 37 = 37.
+4. **`multiple_po_documents` / `po_reference_mismatch` persisted a generic
+   sentence.** The detail (which names the offending files) is now stored; the
+   PO-reference-mismatch result was not even returning its detail. New
+   quarantines say which files; existing rows keep their old sentence until a
+   Re-Match.
+5. **Naming the PO on a held document attached it but never re-reconciled the
+   set** — the operator had to wait for the next scan. The reclassify route now
+   runs the engine once, outside the write session (SQLite writer overlap).
+6. **A blank `stored_path` made the merge open the cwd** (`Path("")` "exists")
+   and crash with `PermissionError`. Treated as a missing file: auto-merge
+   refuses, the set keeps its status, the sweep survives.
+7. The Unclassified page subtitle said every document there "could not be
+   identified"; it also holds read-but-unplaced documents. Corrected.
+
+### Customs append after the merge (client decision, supersedes FR-14.6)
+
+The client's answer: customs defaults **off**, but it must be possible to
+switch it on **after** delivery and append the two documents to the packet
+already written. The earlier "merged refuses the toggle (409)" rule (defect #7
+in the previous session) is **superseded**.
+
+- `toggle_customs` accepts a merged set; status stays `merged` (never
+  `blocked_customs` — that was the original reporting defect).
+- New `merge.append_customs_to_merged_packet`: rebuilds the packet from all
+  attached documents in legal order, temp file + atomic replace, `merged_at`
+  untouched, idempotent, `audit_log.action = customs_append`.
+- Upload route rebuilds once both CUSTOMS and SHIPPING are present on a merged
+  set; toggle route rebuilds if both were uploaded while the requirement was
+  off.
+- Dashboard badge "Customs append pending" on merged sets with the requirement
+  on and fewer than two documents; detail page says the upload rebuilds the
+  packet.
+- `AuditAction.customs_append` added (column is VARCHAR(20), no migration).
+- `prefect.schedule_timezone` now defaults to `Asia/Kolkata` in
+  `config.example.yaml` (IST midnight).
+- PRODUCT §3, §6, §6.1 updated; `real arch v3.md` §32 added; tester guide and
+  delivery runbook updated.
+
+Tests: `test_customs_documents_can_be_appended_after_merge`,
+`test_customs_docs_uploaded_before_the_requirement_is_switched_on_rebuild_on_toggle`,
+`test_the_customs_toggle_is_allowed_on_a_merged_set`,
+`test_toggle_allowed_on_a_merged_set_and_status_stays_merged`.
+
+### Verified live on the real 83-set database
+
+- Quarantine page: 18 rows, 18 reasons; fragment too.
+- `?status=mismatched`: 3 rows with numbers ("delivered 400 of 4200").
+- Detail pages: quarantine banner (set 7), needs-review banner + numbers (set 1).
+- Dashboard nav badge 37 == holding area 37 ("33 waiting to be placed", 2 failed).
+
+---
+
+## What is NOT done / next steps
 1. **Real NSSM install not exercised on this machine** (needs admin + Windows
    services). Scripts parse clean and the Prefect steps were verified against a
    real server, but the first client install should follow
