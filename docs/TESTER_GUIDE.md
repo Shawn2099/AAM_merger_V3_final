@@ -130,6 +130,19 @@ These are deliberate limits of the current version, not bugs:
   SKU are not compared. Two different items on the same line number with the
   same quantity would be treated as equal — so a human review of every merge is
   required, not optional.
+- **Check the document numbers when you review a merge.** A re-scanned or
+  re-issued copy of the same delivery note or invoice is a different file, so
+  its quantities are added a second time and a half-delivered order can look
+  complete. Before sending a packet on, confirm that every DN and SI in it has a
+  different printed number, and that no two pages describe the same delivery.
+- **Items are matched by line number, then by description.** When a line has
+  no number, a description that differs by only one word (a size, a rating) can
+  still be linked to the wrong PO line. The set page shows these links; check
+  them.
+- **A document stays "Not read" if the AI service is down or cannot read it.**
+  A service outage never quarantines good documents; they are read again on the
+  next scan. A file that fails every time (for example a very large scan) stays
+  "Not read" until someone replaces it.
 - **One PO per set.** A second PO document under the same number holds the set
   pending for review; the engine never sums them or auto-merges.
 - **Content only.** A promising filename is ignored on purpose.

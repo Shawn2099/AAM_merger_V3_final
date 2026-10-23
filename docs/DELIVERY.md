@@ -91,6 +91,19 @@ scheduled sync without touching data. That is also the upgrade path (section 8).
 5. `.\scripts\backup_db.ps1 -RetentionDays 0` creates a file in
    `data\development\snapshots\db`, and the `AAMMerger-DevelopmentSnapshot`
    task has copied logs/files into `data\development\snapshots`.
+6. **Pin the host names.** In `config.yaml` set `server.allowed_hosts` to the
+   server's name and static IP, for example `["aam-server", "10.0.0.5"]`. The
+   shipped default `["*"]` accepts any Host header, which leaves the dashboard
+   open to a malicious web page reaching the LAN server from a user's browser.
+   Restart `AAMMerger-Web`, then re-check step 2 from another PC.
+7. **Confirm the schedule zone.** `prefect.schedule_timezone` must be the
+   office's IANA zone (default `Asia/Kolkata`); re-run the installer if it
+   changed.
+8. **Hand over the daily check.** Nothing alerts anyone if the midnight sync
+   does not run. Every morning the operator opens the dashboard and confirms
+   that new documents from yesterday have been read; if the inbox is waiting
+   and nothing moved overnight, check the three services
+   (`manage_services.ps1 -Action status`) before anything else.
 
 ---
 
