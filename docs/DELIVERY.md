@@ -40,6 +40,9 @@ are `./data/...`, relative to the project folder — that is correct for a
 single-PC install. Edit only if you are moving the data to another local disk,
 and keep the SQLite file on a local drive.
 
+If the project folder moves or is renamed, rerun `scripts/deploy_prefect.py`:
+the Prefect deployment's paths are fixed at deploy time.
+
 ---
 
 ## 3. Install
