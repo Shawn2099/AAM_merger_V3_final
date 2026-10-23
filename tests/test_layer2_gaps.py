@@ -707,9 +707,9 @@ def test_force_route_422_and_releases_lock(client):
     with Session(eng) as s:
         ps = _po_set(s, "PO-F422")
         ps_id = ps.id
-    # empty set: service raises MergeNamingError → route maps to 422
+    # empty set: service raises MergeNamingError → route maps to 409
     r = c.post(f"/po_sets/{ps_id}/force_merge", data={"justification": ""})
-    assert r.status_code == 422
+    assert r.status_code == 409
     # short justification → validation error → 422, and the lock was released
     r2 = c.post(f"/po_sets/{ps_id}/force_merge", data={"justification": "too short"})
     assert r2.status_code == 422

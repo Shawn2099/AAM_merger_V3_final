@@ -1182,6 +1182,22 @@ def reclassify_document(
                     "Use the customs append path for a post-delivery document."
                 ),
             )
+        # Only a held document may be placed here. One already attached to a set
+        # (open, since merged and archived were refused above) would keep its old
+        # line items, leave that set's status stale and race a Force Merge on its
+        # lock. There is no UI path that moves it (see PRODUCT section 8).
+        held = _holding_area_query(s).filter(Document.id == doc.id).first() is not None
+        if not held and doc.po_set_id is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"This document is already placed in PO Set #{doc.po_set_id}. "
+                    "If it is in the wrong set: Re-Extract with AI sends it back to "
+                    "Unclassified only when no PO number is printed on it. Otherwise, "
+                    "if the set is quarantined, Delete (archive) the set and add the "
+                    "files again; if not, ask the administrator."
+                ),
+            )
         # A split parent is the source of the child rows. Once its split
         # COMPLETED it has no line items and its stored_path is the whole
         # combined PDF, so attaching it would duplicate every child page in the

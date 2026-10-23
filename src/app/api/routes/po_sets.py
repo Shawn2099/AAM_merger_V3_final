@@ -16,6 +16,7 @@ from __future__ import annotations
 import html as _html
 import json
 import logging
+import re
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Form, HTTPException, Response
@@ -289,6 +290,52 @@ def get_po_set_detail_html(po_set_id: int):
         return HTMLResponse(content=html)
 
 
+_ABS_PATH_RE = re.compile(
+    # Drive-letter and UNC paths: directory segments may contain spaces
+    # (word characters only, so prose is never swallowed)
+    # ("C:\\Program Files\\AAM\\x.pdf"); the last segment ends at whitespace.
+    r"(?<![\w.])(?:[A-Za-z]:[\\/]|\\\\)(?:(?:[^\s\\/:*?\"<>|]+|[\w\-() ]+)[\\/])*[^\s\\/:*?\"<>|']*"
+    # POSIX absolute paths: no spaces.
+    r"|(?<![\w.])/[^\s'\"<>|,;()]+"
+)
+
+
+def _scrub_paths(text: str) -> str:
+    """Replace absolute filesystem paths in `text` with their final file name.
+
+    Error text can carry server paths (stored documents, the DB file); the
+    operator needs the file name, not the server's directory layout.
+    """
+
+    def _name_only(m: re.Match[str]) -> str:
+        parts = [p for p in re.split(r"[\\/]", m.group(0)) if p]
+        return parts[-1] if parts else "[path]"
+
+    return _ABS_PATH_RE.sub(_name_only, text)
+
+
+def _merge_failure(e: Exception, label: str, po_set_id: int) -> HTTPException:
+    """Map a merge-action exception to an HTTP error with a path-free message.
+
+    The full traceback goes to the server log. Only the operator-fixable cases
+    get their own message: a missing or unreadable source, a naming collision
+    and a bad justification. Anything else is a generic 500.
+    """
+    from app.services.merge import MergeNamingError, MergeSourceError
+
+    logger.error("%s failed for PO Set %s", label, po_set_id, exc_info=e)
+    if isinstance(e, MergeSourceError):
+        return HTTPException(status_code=409, detail=_scrub_paths(str(e)))
+    if isinstance(e, MergeNamingError):
+        return HTTPException(
+            status_code=409,
+            detail=_scrub_paths(str(e)),
+        )
+    if isinstance(e, ValueError):
+        return HTTPException(status_code=422, detail=_scrub_paths(str(e)))
+    return HTTPException(status_code=500, detail=f"{label} failed; see the server log.")
+
+
 @router.post("/{po_set_id}/force_merge")
 def force_merge(po_set_id: int, justification: str = Form("")):
     """Force Merge - acquires per-PO lock, 409 if already locked (FR-CONC-1/2).
@@ -307,8 +354,7 @@ def force_merge(po_set_id: int, justification: str = Form("")):
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("Force merge failed for PO Set %s: %s", po_set_id, e)
-        raise HTTPException(status_code=422, detail=f"Force merge failed: {e}") from e
+        raise _merge_failure(e, "Force merge", po_set_id) from e
     finally:
         _release_lock(po_set_id, cfg, "force_merge")
 
@@ -482,8 +528,7 @@ def merge_now(po_set_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("Merge failed for PO Set %s: %s", po_set_id, e)
-        raise HTTPException(status_code=422, detail=f"Merge failed: {e}") from e
+        raise _merge_failure(e, "Merge", po_set_id) from e
     finally:
         _release_lock(po_set_id, cfg, "merge")
 
