@@ -142,6 +142,20 @@ symbol; `detect-changes --scope all` before each commit; name files explicitly.
   output packets changed and no `*prefect` temp copy exists.
 - Run the merged-set review query.
 
-## Status
+## Status (update this as work lands)
 
-- 2026-10-23: plan written; commits 2 and 3 (A3/A1/A2) delegated.
+- 2026-10-23 DONE (local + pushed): plan doc `22dd016`; A3/A1 reconcile guards `6b00f9c`;
+  A2 grouping allowlist `42a046d` (+ `tests/test_mvp_blockers.py`, 19 tests; suite green).
+- NEXT, in order (nothing started on these):
+  1. A4 merge snapshot guard (section 2 "A4").
+  2. C Prefect `working_dir` + `AAM_CONFIG_PATH` + execution-policy docs, and the small
+     script/UI fixes (commit order items 6-7). Independent of A4; may run in parallel.
+  3. B persisted `customs_append_pending` + sync retry + honest UI (after A4).
+  4. PRODUCT §3.1/§8 docs + `test_known_limitation_*` for the deferred list.
+  5. Final gate (section 6), including a real `prefect deployment run` on the rig.
+- Working method: Sonnet/Haiku subagents implement test-first, Opus reviews; run GitNexus
+  impact before editing a symbol and detect-changes before commit; name files in commits;
+  redirect pytest output to a file and use `--no-cov` (piping hangs). The PRODUCT.md has
+  unrelated uncommitted manual-merger hunks: stage only your own hunk (`git apply --cached`).
+- Manual merger files are uncommitted work in progress by the user: do not commit them.
+  Scratch/audit files at repo root are never committed.
