@@ -20,7 +20,7 @@ from typing import Literal
 
 import instructor
 from openai import OpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.database import get_engine
@@ -96,7 +96,60 @@ _PAGE_PROMPT = (
 )
 
 
+def _coerce_number_to_str(value: object) -> object:
+    """Before-validator for the string-typed VLM fields.
+
+    The model sometimes emits a JSON number (50, 12.5, 1) where the schema asks
+    for a string. With max_retries=0 there is no re-ask, so that would fail the
+    whole document. Numbers become their printed text; everything else is left
+    for pydantic to validate. bool, NaN and inf are deliberately not converted.
+
+    Only the VALUE fields (quantity, unit_price, description) use this. The
+    identity fields that key a set or a line (document_number, po_reference,
+    dn_no) are never coerced: `normalize_po_no` refuses non-strings on purpose,
+    and a number cannot carry a leading zero ('007' vs 7), so coercing would turn
+    a loud failure into a plausible but wrong key. line_item_no accepts an int
+    only (`_coerce_int_to_str`): a float such as 1.10 would print as '1.1' and
+    collide with the separate line 1.1.
+    """
+    from decimal import Decimal
+
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            return value
+        if value.is_integer():
+            return str(int(value))
+        return format(Decimal(str(value)), "f")
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            return value
+        return format(value, "f")
+    return value
+
+
+def _coerce_int_to_str(value: object) -> object:
+    """Before-validator for line_item_no: a bare integer becomes its text, a float
+    or anything else is left for pydantic to reject (see _coerce_number_to_str)."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    return value
+
+
 class _VLMLineItem(BaseModel):
+    @field_validator("description", "quantity", "unit_price", mode="before")
+    @classmethod
+    def _coerce_numbers(cls, value: object) -> object:
+        return _coerce_number_to_str(value)
+
+    @field_validator("line_item_no", mode="before")
+    @classmethod
+    def _coerce_line_no(cls, value: object) -> object:
+        return _coerce_int_to_str(value)
+
     line_item_no: str | None = Field(
         None,
         description=(
@@ -243,7 +296,14 @@ def _call_vlm(stored_path: str, doc_type: str, cfg) -> dict:
     b64 = base64.b64encode(pdf_bytes).decode()
 
     client = instructor.from_openai(
-        OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key, timeout=timeout)
+        OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+            timeout=timeout,
+            # The SDK default is 2 inner retries; the attempt budget validated in
+            # config (validate_attempt_budget) assumes exactly one HTTP call per try.
+            max_retries=0,
+        )
     )
     # Native PDF input — no JPEG rasterization; system role per OpenAI guide, strict schema via response_model
     resp: _VLMPageExtraction = client.chat.completions.create(
