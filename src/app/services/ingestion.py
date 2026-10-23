@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
 import shutil
 import time
 import uuid
 from pathlib import Path
 
+from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
 from app.core.config import AppConfig
@@ -27,7 +29,56 @@ def is_file_stable(p: Path, interval: int, count: int) -> bool:
             return False
         sizes.append(p.stat().st_size)
         time.sleep(interval)
-    return len(set(sizes)) == 1 and sizes[0] >= 0
+    # A zero-byte file is never a finished upload, so it must not pass as stable.
+    return len(set(sizes)) == 1 and sizes[0] > 0
+
+
+_INCOMPLETE_PDF_REASON = (
+    "incomplete or unreadable PDF (truncated copy, corrupt, or password-protected)"
+)
+
+
+def _incomplete_pdf_problem(data: bytes) -> str | None:
+    """Return why these bytes are not a complete, openable PDF, or None if they are.
+
+    pypdf itself needs the `%%EOF` / xref structure (it searches the tail of the
+    file), so a truncated copy fails to open here. A separate fixed-window
+    `%%EOF` test was dropped: it added no detection and rejected legitimate
+    files that carry long trailing padding.
+    """
+    try:
+        n_pages = len(PdfReader(io.BytesIO(data), strict=False).pages)
+    except Exception as e:
+        return f"pypdf could not open it: {type(e).__name__}: {e}"
+    if n_pages < 1:
+        return "pypdf found no pages"
+    return None
+
+
+#: A file modified more recently than this may still be mid-copy (a paused SMB or
+#: USB transfer passes the size-stability poll), so it is left in place for the
+#: next scan. An older incomplete file is permanently bad and is quarantined
+#: with a visible reason instead of warning in the log every night.
+_RECENT_WRITE_SECONDS = 300
+
+
+def _reject_incomplete_pdf(src: Path, cfg: AppConfig, problem: str) -> None:
+    """Refuse an incomplete PDF without ever creating a Document row.
+
+    No row is written, so the truncated bytes never become a permanent SHA
+    duplicate: the finished file ingests as a normal new document. A file
+    written in the last few minutes stays in the input folder to be retried; an
+    older one is quarantined with a reason file so the operator can see it.
+    """
+    reason = f"{_INCOMPLETE_PDF_REASON}: {problem}"
+    try:
+        recent = (time.time() - src.stat().st_mtime) < _RECENT_WRITE_SECONDS
+    except OSError:
+        recent = False
+    if recent:
+        logger.warning("Input %s not ingested (may still be copying; will retry): %s", src, reason)
+        raise ValueError(f"{src.name}: {reason}")
+    _reject_input(src, cfg, f"{src.name}: {reason}")
 
 
 def _quarantine_unreadable(src: Path, cfg: AppConfig, exc: Exception) -> None:
@@ -95,6 +146,12 @@ def ingest_file(src: Path, cfg: AppConfig) -> Document:
             cfg,
             "no %PDF- header in the first 1024 bytes; it is not a PDF",
         )
+    # A partial copy keeps its header, so it passes the check above. Verify it
+    # is complete BEFORE hashing: otherwise the truncated bytes are stored and
+    # sent to the VLM, and the finished file later lands as a second document.
+    problem = _incomplete_pdf_problem(data)
+    if problem is not None:
+        _reject_incomplete_pdf(src, cfg, problem)
     h = hashlib.sha256(data).hexdigest()
     eng = get_engine(cfg)
     from app.models.base import Base

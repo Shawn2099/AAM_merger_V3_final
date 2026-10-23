@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import base64
 import io
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -402,13 +404,15 @@ def test_missing_stored_pdf_at_merge_time_writes_nothing(env, vlm):
 
 
 def test_one_unreadable_document_does_not_stop_the_run(env, vlm):
-    """TIER 2. A corrupt file must not prevent the good documents merging.
+    """TIER 2. A document the VLM cannot read must not prevent the good documents merging.
 
     This is the single most important resilience property: one bad PDF in the
-    input folder must not cost the operator every other PO that day.
+    input folder must not cost the operator every other PO that day. The file
+    here is a real, complete PDF that the faked VLM rejects. Bytes that fail
+    ingestion are covered by test_corrupt_bytes_are_rejected_at_ingestion_and_do_not_stop_the_run.
 
     MEASURED: the engine is correct here. Three good documents group, reconcile
-    and merge; the corrupt file is quarantined rather than being silently
+    and merge; the unreadable document is quarantined rather than being silently
     consumed or left to be retried forever.
     """
     from app.flows.sync import sync_flow
@@ -418,7 +422,7 @@ def test_one_unreadable_document_does_not_stop_the_run(env, vlm):
     _pdf(inp / "PO.pdf", W_PO)
     _pdf(inp / "DN.pdf", W_DN)
     _pdf(inp / "SI.pdf", W_SI)
-    (inp / "corrupt.pdf").write_bytes(b"%PDF-1.4\nthis is definitely not a PDF")
+    _pdf(inp / "corrupt.pdf", 999.0)  # a real PDF the faked VLM cannot read
 
     result = sync_flow()
 
@@ -448,7 +452,7 @@ def test_a_permanently_failed_document_is_counted_as_an_error_in_the_summary(env
     """TIER 2. A total loss must never be reported as a clean run.
 
     This was a real defect, pinned here so it cannot come back. Measured with
-    one corrupt file among four documents, the summary used to say:
+    one document the VLM cannot read among four documents, the summary used to say:
 
         FLOW SUMMARY : {'processed': 4, 'extracted': 4, 'errors': 0, ...}
         corrupt.pdf  type=UNKNOWN status=failed attempts=3
@@ -474,7 +478,7 @@ def test_a_permanently_failed_document_is_counted_as_an_error_in_the_summary(env
     _pdf(inp / "PO.pdf", W_PO)
     _pdf(inp / "DN.pdf", W_DN)
     _pdf(inp / "SI.pdf", W_SI)
-    (inp / "corrupt.pdf").write_bytes(b"%PDF-1.4\nnot a pdf at all")
+    _pdf(inp / "corrupt.pdf", 999.0)  # a real PDF the faked VLM cannot read
 
     result = sync_flow()
 
@@ -486,6 +490,42 @@ def test_a_permanently_failed_document_is_counted_as_an_error_in_the_summary(env
         f"a document that exhausted its retries must be counted as an error; summary said {result}"
     )
     assert result["extracted"] == 3, f"only three documents were really extracted; got {result}"
+
+
+def test_corrupt_bytes_are_rejected_at_ingestion_and_do_not_stop_the_run(env, vlm):
+    """TIER 2. Bytes that are not a PDF are rejected at ingestion, and the run goes on.
+
+    A truncated or invalid file never reaches the VLM. It is quarantined with a
+    reason that says it is an incomplete or unreadable PDF, and the good set
+    still merges.
+    """
+    from app.flows.sync import sync_flow
+
+    cfg = env
+    inp = Path(cfg.paths.input_folder)
+    _pdf(inp / "PO.pdf", W_PO)
+    _pdf(inp / "DN.pdf", W_DN)
+    _pdf(inp / "SI.pdf", W_SI)
+    corrupt = inp / "corrupt.pdf"
+    corrupt.write_bytes(b"%PDF-1.4\nnot a real pdf")
+    aged = time.time() - 3600
+    os.utime(corrupt, (aged, aged))
+
+    result = sync_flow()
+
+    assert result["processed"] == 3, f"the corrupt file should be rejected, not processed: {result}"
+    assert result["errors"] == 1, result
+    ids = sets(cfg)
+    assert ids[PO_NO][1] == "merged", f"the good documents must still merge: {ids}"
+    out = [p.name for p in Path(cfg.paths.output_folder).iterdir()]
+    assert out == [f"{INVOICE_NO}.pdf"], out
+    assert "corrupt.pdf" not in [p.name for p in inp.iterdir()], "corrupt.pdf was left in input"
+    qroot = Path(cfg.paths.quarantine_folder) / "_documents"
+    reasons = list(qroot.rglob("*.reason.txt"))
+    assert reasons, "the rejected file has no quarantine reason file"
+    assert any("incomplete or unreadable PDF" in r.read_text(encoding="utf-8") for r in reasons), (
+        f"the reason does not name the cause: {[r.name for r in reasons]}"
+    )
 
 
 def test_extraction_failure_on_one_document_does_not_stop_the_run(env, vlm, monkeypatch):

@@ -35,10 +35,10 @@ def _cfg(tmp_path, name="w.db"):
     return cfg
 
 
-def _pdf(path: Path, pages: int):
+def _pdf(path: Path, pages: int, width: int = 100):
     w = PdfWriter()
     for _ in range(pages):
-        w.add_blank_page(width=100, height=100)
+        w.add_blank_page(width=width, height=100)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "wb") as f:
         w.write(f)
@@ -185,7 +185,7 @@ def test_ingestion_links_child_filename_to_parent(tmp_path, monkeypatch):
     assert kid.parent_document_id == parent.id
     # Ordinary filenames never link.
     other = Path(cfg.paths.input_folder) / "invoice.pdf"
-    other.write_bytes(b"%PDF-1.4 other")
+    _pdf(other, 1, width=211)
     plain = ingest_file(other, cfg)
     assert plain.parent_document_id is None
 
@@ -388,7 +388,7 @@ def test_unknown_child_prefix_never_links(tmp_path):
 
     cfg = _cfg(tmp_path, "w10.db")
     stray = Path(cfg.paths.input_folder) / "deadbeefcafe1234_p1.pdf"
-    stray.write_bytes(b"%PDF-1.4 stray")
+    _pdf(stray, 2, width=223)
     doc = ingest_file(stray, cfg)
     assert doc.parent_document_id is None
 
