@@ -677,7 +677,9 @@ def test_document_preview_and_merged_download(tmp_cfg, client, tmp_path):
 
     with Session(eng) as s:
         ps = POSet(
-            po_no_normalized="POPREV1", status=POSetStatus.merged, merged_output_path=str(merged_file)
+            po_no_normalized="POPREV1",
+            status=POSetStatus.merged,
+            merged_output_path=str(merged_file),
         )
         s.add(ps)
         s.commit()
@@ -926,6 +928,7 @@ def test_reclassify_customs_updates_count_and_clears_blocked(tmp_cfg, client):
         assert ps.customs_doc_count == 2
         assert ps.status == POSetStatus.pending
 
+
 def test_invalid_status_filter_is_422(client):
     r = client.get("/dashboard", params={"status": "not-a-status"})
     assert r.status_code == 422
@@ -939,6 +942,7 @@ def test_unclassified_normalize_uses_the_server_normalizer(client):
     assert r.json() == {"normalized": "210851"}
     r2 = client.get("/unclassified/normalize", params={"po_no": "161538,2"})
     assert r2.json() == {"normalized": "161538"}
+
 
 def test_unclassified_save_and_route_has_a_form_owner(client, tmp_cfg):
     """The button and inputs live in the same row; no <form> inside <tr>."""
@@ -982,6 +986,7 @@ def test_document_filename_is_escaped_not_interpolated_into_js(client, tmp_cfg):
     html = client.get(f"/po_sets/{pid}/view").text
     assert 'onmouseover="alert(1)' not in html
     assert "data-preview-name=" in html
+
 
 def test_reclassify_refuses_a_completed_split_parent(client, tmp_cfg):
     from datetime import UTC, datetime
@@ -1048,6 +1053,7 @@ def test_a_failed_split_parent_is_visible_and_recoverable(client, tmp_cfg):
         assert recovered.is_split_parent is False
         assert recovered.po_set_id is not None
 
+
 def test_customs_badges_use_attached_types_not_the_count(client, tmp_cfg):
     """A CUSTOMS document must not make the SHIPPING badge say Attached."""
     import re
@@ -1086,9 +1092,8 @@ def test_customs_badges_use_attached_types_not_the_count(client, tmp_cfg):
     assert re.search(r"Customs Clearance:.*?Attached", html, re.S)
     assert re.search(r"Shipping \(AWB\):.*?Missing", html, re.S)
 
-def test_customs_rebuild_runs_while_the_per_po_lock_is_held(
-    client, tmp_cfg, monkeypatch
-):
+
+def test_customs_rebuild_runs_while_the_per_po_lock_is_held(client, tmp_cfg, monkeypatch):
     """The append must not run after the upload lock is released."""
     from pypdf import PdfWriter
 

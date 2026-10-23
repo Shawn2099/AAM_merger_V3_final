@@ -82,10 +82,7 @@ def _acquire_lock(po_set_id: int, action: str, cfg) -> POSet:
         if ps.archived_at is not None and action != "quarantine_delete":
             raise HTTPException(
                 status_code=409,
-                detail=(
-                    "This PO Set is archived and read-only. "
-                    f"{action} is not allowed."
-                ),
+                detail=(f"This PO Set is archived and read-only. {action} is not allowed."),
             )
         if not acquire_lock(ps, action, s, cfg):
             raise HTTPException(
@@ -219,15 +216,15 @@ def get_po_set_detail_html(po_set_id: int):
         )
         locked_msg = (
             f'<span class="locked-msg">Locked by '
-            f'{_html.escape(str(d["locked_by_action"] or ""))}</span>'
+            f"{_html.escape(str(d['locked_by_action'] or ''))}</span>"
             if d["is_locked"] and not d["is_archived"]
             else ""
         )
         archived_msg = (
             f'<p class="muted" style="margin:8px 0;">Archived '
-            f'{_html.escape(d["archived_at"] or "")} by '
-            f'{_html.escape(d["archived_by"] or "unknown")}; read-only. '
-            f'Export: {_html.escape(d["archive_path"] or "")}</p>'
+            f"{_html.escape(d['archived_at'] or '')} by "
+            f"{_html.escape(d['archived_by'] or 'unknown')}; read-only. "
+            f"Export: {_html.escape(d['archive_path'] or '')}</p>"
             if d["is_archived"]
             else ""
         )

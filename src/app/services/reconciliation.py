@@ -122,9 +122,7 @@ REASON_TEXT: dict[str, str] = {
     "vendor_document_has_no_line_items": (
         "A delivery note or invoice was read but contains no line items"
     ),
-    "blocked_customs": (
-        "Customs requirement is ON; attach both a CUSTOMS and a SHIPPING document"
-    ),
+    "blocked_customs": ("Customs requirement is ON; attach both a CUSTOMS and a SHIPPING document"),
     "packet_naming_failed": "The merged packet could not be named unambiguously",
     "packet_source_unreadable": (
         "A document's stored PDF is missing or unreadable; the packet cannot be written"
@@ -371,7 +369,6 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 "flags": [],
             }
 
-
         # Decoy PO / Cross-document PO Reference Validation (SPEC §7.3 FR-6.3)
         for d in docs:
             if (
@@ -564,9 +561,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
         # description fallback — real information for the reviewer, but the
         # quantities still agree, so it must not turn a merged set into
         # "pending" or "mismatched".
-        failure_flags = [
-            f for f in flags if f.get("type") in ("identification", "quantity")
-        ]
+        failure_flags = [f for f in flags if f.get("type") in ("identification", "quantity")]
         if failure_flags:
             # A vendor line with no PO counterpart is unresolvable identity, not a
             # shortfall: quarantine rather than guess which PO line it belongs to.

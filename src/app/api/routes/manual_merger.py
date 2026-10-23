@@ -12,9 +12,7 @@ from fastapi.templating import Jinja2Templates
 router = APIRouter(prefix="/manual", tags=["manual"])
 
 # templates isolated from pipeline dashboard
-templates = Jinja2Templates(
-    directory=str(Path(__file__).resolve().parents[4] / "templates")
-)
+templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[4] / "templates"))
 
 
 @router.get("/merger", response_class=HTMLResponse)
@@ -34,9 +32,7 @@ def manual_merge_endpoint(
         return _manual_merge_impl(files, order, output_filename)
     except HTTPException as exc:
         if "text/html" in (request.headers.get("accept") or ""):
-            return HTMLResponse(
-                content=_error_page(str(exc.detail)), status_code=exc.status_code
-            )
+            return HTMLResponse(content=_error_page(str(exc.detail)), status_code=exc.status_code)
         raise
 
 

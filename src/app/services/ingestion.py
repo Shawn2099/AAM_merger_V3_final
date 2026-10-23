@@ -52,9 +52,7 @@ def _quarantine_unreadable(src: Path, cfg: AppConfig, exc: Exception) -> None:
             encoding="utf-8",
         )
     except Exception:
-        logger.warning(
-            "Could not move unreadable input file %s to quarantine", src, exc_info=True
-        )
+        logger.warning("Could not move unreadable input file %s to quarantine", src, exc_info=True)
 
 
 def _reject_input(src: Path, cfg: AppConfig, reason: str) -> None:

@@ -48,9 +48,7 @@ _HAND_ASSIGNABLE_DOC_TYPES = frozenset(
 )
 
 # Jinja templates — directory = "templates" (cross-platform, not hardcoded absolute)
-_templates = Jinja2Templates(
-    directory=str(Path(__file__).resolve().parents[4] / "templates")
-)
+_templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[4] / "templates"))
 
 # 5 statuses as defined in SPEC §6.3 — enum values are the source of truth
 _ALLOWED_STATUSES = {s.value for s in POSetStatus}
@@ -217,11 +215,7 @@ def build_matrix_rows(
         raw_price = int(p.get("unit_price") or 0)
         po_q = po_scaled / 1000
         missing_pool = "DN" if not dn_lines else ("SI" if not si_lines else None)
-        reconciled = (
-            not missing_pool
-            and dn_scaled == po_scaled
-            and si_scaled == po_scaled
-        )
+        reconciled = not missing_pool and dn_scaled == po_scaled and si_scaled == po_scaled
         if reconciled:
             row_class, badge, verdict = "row-match", "badge-merged", "\u2705 Match"
         elif missing_pool:
@@ -432,9 +426,7 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
             thr = getattr(cfg.matching, "fuzzy_description_threshold", 85)
 
             comparison = compare_po_set_lines(po_lines, dn_lines, si_lines, thr)
-            set_status_value = (
-                ps.status.value if hasattr(ps.status, "value") else str(ps.status)
-            )
+            set_status_value = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
 
             # A pending set is waiting, not failing. Comparing a set whose DN
             # has not arrived yet produces vendor-line "identifications" that
@@ -660,10 +652,7 @@ def upload_manual_doc(
             raise
         if _wants_html(request) and request.headers.get("HX-Request") != "true":
             return RedirectResponse(
-                url=(
-                    f"/po_sets/{po_set_id}/view?notice="
-                    + quote(str(exc.detail))
-                ),
+                url=(f"/po_sets/{po_set_id}/view?notice=" + quote(str(exc.detail))),
                 status_code=302,
             )
         raise
@@ -1213,9 +1202,7 @@ def reclassify_document(
                         "PDF in the packet."
                     ),
                 )
-            children = (
-                s.query(Document).filter(Document.parent_document_id == doc.id).count()
-            )
+            children = s.query(Document).filter(Document.parent_document_id == doc.id).count()
             if children:
                 raise HTTPException(
                     status_code=409,

@@ -409,11 +409,7 @@ def resolve_unattached_documents(cfg) -> set[int]:
 
             if matched_ps_id:
                 ps = s.get(POSet, matched_ps_id)
-                if (
-                    ps
-                    and ps.status != POSetStatus.merged
-                    and ps.archived_at is None
-                ):
+                if ps and ps.status != POSetStatus.merged and ps.archived_at is None:
                     doc.po_set_id = matched_ps_id
                     if not doc.po_no_normalized and matched_po_norm:
                         doc.po_no_normalized = matched_po_norm

@@ -94,8 +94,7 @@ def downgrade() -> None:
 
     hash_dupes = bind.execute(
         sa.text(
-            "SELECT sha256_hash, COUNT(*) FROM documents "
-            "GROUP BY sha256_hash HAVING COUNT(*) > 1"
+            "SELECT sha256_hash, COUNT(*) FROM documents GROUP BY sha256_hash HAVING COUNT(*) > 1"
         )
     ).fetchall()
     if hash_dupes:

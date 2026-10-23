@@ -134,8 +134,20 @@ def test_matrix_uses_one_row_per_comparison_key():
     from app.services.reconciliation import compare_po_set_lines
 
     po = [
-        {"doc_type": "PO", "line_item_no": "1", "description": "A", "quantity": 40_000, "unit_price": 1000},
-        {"doc_type": "PO", "line_item_no": "1", "description": "A", "quantity": 60_000, "unit_price": 1000},
+        {
+            "doc_type": "PO",
+            "line_item_no": "1",
+            "description": "A",
+            "quantity": 40_000,
+            "unit_price": 1000,
+        },
+        {
+            "doc_type": "PO",
+            "line_item_no": "1",
+            "description": "A",
+            "quantity": 60_000,
+            "unit_price": 1000,
+        },
     ]
     dn = [{"doc_type": "DN", "line_item_no": "1", "description": "A", "quantity": 100_000}]
     si = [{"doc_type": "SI", "line_item_no": "1", "description": "A", "quantity": 100_000}]
@@ -155,9 +167,7 @@ def test_multiple_si_numbers_are_deterministic():
 
 def test_zero_page_packet_is_refused(tmp_path):
     src = _pdf(tmp_path / "empty.pdf", pages=0)
-    doc = SimpleNamespace(
-        stored_path=str(src), id=1, original_filename="empty.pdf"
-    )
+    doc = SimpleNamespace(stored_path=str(src), id=1, original_filename="empty.pdf")
     with pytest.raises(MergeEmptyError):
         _write_merged([doc], tmp_path / "out.pdf", allow_missing=False)
     assert not (tmp_path / "out.pdf").exists()

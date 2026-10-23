@@ -196,7 +196,9 @@ def test_a_re_read_with_no_po_detaches_the_document_from_its_set(cfg):
         )
         s.commit()
         assert doc.po_no_normalized is None
-        assert doc.po_set_id is None, "a document with no PO reference must be held, not left attached"
+        assert doc.po_set_id is None, (
+            "a document with no PO reference must be held, not left attached"
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -425,9 +425,7 @@ def _copy_doc_to_archive(
     file_rows.append(row)
 
 
-def _find_existing_archive(
-    archive_root: Path, po_set_id: int, po_no: str | None
-) -> Path | None:
+def _find_existing_archive(archive_root: Path, po_set_id: int, po_no: str | None) -> Path | None:
     """A complete archive left by a previous attempt whose DB commit failed.
 
     Reusing it makes a retry idempotent instead of writing a second copy of
@@ -453,8 +451,7 @@ def _find_existing_archive(
         # A manifest is not proof that its files survived. A partially deleted
         # export must not be adopted as the archive.
         if any(
-            row.get("archived_name")
-            and not (candidate / "files" / row["archived_name"]).is_file()
+            row.get("archived_name") and not (candidate / "files" / row["archived_name"]).is_file()
             for row in manifest.get("files", [])
         ):
             continue
@@ -666,18 +663,12 @@ def archive_quarantined(
         docs = s.query(Document).filter_by(po_set_id=po_set_id).order_by(Document.id).all()
         doc_ids = [d.id for d in docs]
         line_items = (
-            s.query(LineItem)
-            .filter(LineItem.document_id.in_(doc_ids))
-            .order_by(LineItem.id)
-            .all()
+            s.query(LineItem).filter(LineItem.document_id.in_(doc_ids)).order_by(LineItem.id).all()
             if doc_ids
             else []
         )
         audits = (
-            s.query(AuditLog)
-            .filter(AuditLog.po_set_id == po_set_id)
-            .order_by(AuditLog.id)
-            .all()
+            s.query(AuditLog).filter(AuditLog.po_set_id == po_set_id).order_by(AuditLog.id).all()
         )
 
         archive_root = Path(cfg.paths.archive_folder)
@@ -687,9 +678,7 @@ def archive_quarantined(
         file_rows: list[dict] = []
         missing_files: list[dict] = []
 
-        final_folder = _find_existing_archive(
-            archive_root, po_set_id, ps.po_no_normalized
-        )
+        final_folder = _find_existing_archive(archive_root, po_set_id, ps.po_no_normalized)
         if final_folder is None:
             import uuid
 
@@ -706,10 +695,7 @@ def archive_quarantined(
                 # does not describe a different set than the DB commit marks.
                 for _ in range(2):
                     current_docs = (
-                        s.query(Document)
-                        .filter_by(po_set_id=po_set_id)
-                        .order_by(Document.id)
-                        .all()
+                        s.query(Document).filter_by(po_set_id=po_set_id).order_by(Document.id).all()
                     )
                     seen = {row["document_id"] for row in file_rows}
                     late = [d for d in current_docs if d.id not in seen]
@@ -742,9 +728,7 @@ def archive_quarantined(
                 if final_folder.exists():
                     # Keep the id LAST: _find_existing_archive matches the
                     # suffix, and a post-commit retry must find this folder.
-                    final_folder = (
-                        archive_root / f"{safe}_{stamp}_{uuid.uuid4().hex[:6]}_{ps.id}"
-                    )
+                    final_folder = archive_root / f"{safe}_{stamp}_{uuid.uuid4().hex[:6]}_{ps.id}"
                 _write_archive_manifest(
                     staging,
                     ps,
@@ -768,9 +752,7 @@ def archive_quarantined(
             # Retry after a commit failure: reuse the completed export and
             # recover its file/missing counts for the audit row.
             try:
-                manifest = json.loads(
-                    (final_folder / "manifest.json").read_text(encoding="utf-8")
-                )
+                manifest = json.loads((final_folder / "manifest.json").read_text(encoding="utf-8"))
                 file_rows = list(manifest.get("files", []))
                 missing_files = list(manifest.get("missing_files", []))
             except (OSError, ValueError):
@@ -822,9 +804,7 @@ def archive_quarantined(
                 dest = input_dir / source_file.name
                 counter = len(moved) + 1
                 while dest.exists():
-                    dest = input_dir / (
-                        f"{source_file.stem}_{counter}{source_file.suffix}"
-                    )
+                    dest = input_dir / (f"{source_file.stem}_{counter}{source_file.suffix}")
                     counter += 1
                 try:
                     shutil.move(str(source_file), str(dest))
@@ -855,11 +835,7 @@ def archive_quarantined(
 
         document_count = s.query(Document).filter_by(po_set_id=po_set_id).count()
         line_item_count = (
-            s.query(LineItem)
-            .filter(LineItem.document_id.in_(doc_ids))
-            .count()
-            if doc_ids
-            else 0
+            s.query(LineItem).filter(LineItem.document_id.in_(doc_ids)).count() if doc_ids else 0
         )
         detail = json.dumps(
             {
@@ -889,9 +865,7 @@ def delete_quarantined(
     po_set_id: int, cfg, justification: str | None = None, source: str = "system"
 ) -> AuditLog:
     """Backward-compatible name for the Delete route: archive, never delete."""
-    return archive_quarantined(
-        po_set_id, cfg, justification=justification, source=source
-    )
+    return archive_quarantined(po_set_id, cfg, justification=justification, source=source)
 
 
 def manual_merge(

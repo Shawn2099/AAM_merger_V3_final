@@ -998,9 +998,7 @@ def test_archive_keeps_rows_manifest_and_hides_from_worklists(cfg, client):
         assert manifest["po_set_id"] == pid
         assert manifest["document_count"] == 3
         assert len(manifest["files"]) == 3
-        assert {row["sha256_hash"] for row in manifest["files"]} == {
-            d.sha256_hash for d in docs
-        }
+        assert {row["sha256_hash"] for row in manifest["files"]} == {d.sha256_hash for d in docs}
         exported_docs = json.loads((archive / "documents.json").read_text(encoding="utf-8"))
         assert len(exported_docs) == 3
         assert (archive / "line_items.json").is_file()
@@ -1151,16 +1149,11 @@ def test_archive_retry_after_commit_failure_reuses_one_export(cfg, monkeypatch):
         assert ps.archived_at is not None
         archive = Path(ps.archive_path)
         folders = [
-            p
-            for p in archive.parent.iterdir()
-            if p.is_dir() and p.name.startswith(f"{po_no}_")
+            p for p in archive.parent.iterdir() if p.is_dir() and p.name.startswith(f"{po_no}_")
         ]
         assert len(folders) == 1, folders
         assert s.query(Document).filter_by(po_set_id=pid).count() == 3
-        assert all(
-            d.archived_at is not None
-            for d in s.query(Document).filter_by(po_set_id=pid)
-        )
+        assert all(d.archived_at is not None for d in s.query(Document).filter_by(po_set_id=pid))
 
     manifest = json.loads((archive / "manifest.json").read_text(encoding="utf-8"))
     detail = json.loads(audit.detail)

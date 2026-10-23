@@ -83,9 +83,7 @@ def test_referer_is_checked_when_origin_is_absent(client):
 
 @pytest.mark.parametrize("method", ["put", "patch", "delete"])
 def test_every_state_changing_method_is_guarded(client, method):
-    response = getattr(client, method)(
-        "/no-such-route", headers={"Origin": "http://evil.example"}
-    )
+    response = getattr(client, method)("/no-such-route", headers={"Origin": "http://evil.example"})
 
     assert response.status_code == 403
 
@@ -276,9 +274,7 @@ def _pdf_upload(name: str, payload: bytes = b"%PDF-1.4\n"):
 def test_manual_merge_refuses_more_than_the_file_cap(manual_client):
     from app.core.limits import MAX_MANUAL_MERGE_FILES
 
-    uploads = [
-        _pdf_upload(f"page-{index}.pdf") for index in range(MAX_MANUAL_MERGE_FILES + 1)
-    ]
+    uploads = [_pdf_upload(f"page-{index}.pdf") for index in range(MAX_MANUAL_MERGE_FILES + 1)]
 
     response = manual_client.post("/manual/merge", files=uploads)
 
@@ -298,6 +294,7 @@ def test_manual_merge_refuses_more_than_the_total_byte_cap(manual_client, monkey
 
     assert response.status_code == 422
     assert "total cap" in response.json()["detail"]
+
 
 def test_load_config_is_cached_but_returns_independent_copies(tmp_path):
     cfg_path = _write_cfg(tmp_path)

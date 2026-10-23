@@ -48,9 +48,7 @@ def setup_logging(cfg=None) -> None:
             backupCount=backup_count,
             encoding="utf-8",
         )
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-        )
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
         handler.setLevel(level)
         root_logger.addHandler(handler)
     except Exception as exc:  # pragma: no cover - console logging still works

@@ -71,14 +71,9 @@ def toggle_customs(po_set_id: int, cfg) -> POSet:
 
         # Toggling the gate OFF clears only the state this gate owns. A
         # quarantine or mismatch is a real verdict and stays put.
-        if (
-            not ps.has_customs_toggle
-            and ps.status == POSetStatus.blocked_customs
-        ):
+        if not ps.has_customs_toggle and ps.status == POSetStatus.blocked_customs:
             ps.status = POSetStatus.pending
-            ps.reconcile_reason = (
-                "Customs requirement removed; re-evaluate this set to merge."
-            )
+            ps.reconcile_reason = "Customs requirement removed; re-evaluate this set to merge."
         # Heal the historical inconsistency: `blocked_customs` with the toggle
         # OFF but both documents present. Toggling it ON must not leave the set
         # stuck in a state the gate no longer explains.

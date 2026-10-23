@@ -258,9 +258,7 @@ def _write_merged(ordered: list, out: Path, allow_missing: bool = False) -> int:
                 if allow_missing:
                     missing.append(f"Doc {doc_id} ({doc_name}): unreadable ({e})")
                     continue
-                raise MergeSourceError(
-                    f"Doc {doc_id} ({doc_name}) is unreadable: {e}"
-                ) from e
+                raise MergeSourceError(f"Doc {doc_id} ({doc_name}) is unreadable: {e}") from e
 
         if missing and not allow_missing:
             raise MergeSourceError(f"Missing stored PDF(s) during merge: {'; '.join(missing)}")

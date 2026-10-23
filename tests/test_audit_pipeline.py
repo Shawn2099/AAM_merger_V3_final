@@ -391,9 +391,7 @@ def test_a_second_read_clears_stale_numbers_and_ambiguity(cfg):
                 "document_number": "INV-999",
                 "po_no_raw": "111",
                 "po_reference_ambiguous": True,
-                "line_items": [
-                    {"line_item_no": "1", "description": "A", "quantity": "1"}
-                ],
+                "line_items": [{"line_item_no": "1", "description": "A", "quantity": "1"}],
             },
             s,
             cfg,
@@ -412,9 +410,7 @@ def test_a_second_read_clears_stale_numbers_and_ambiguity(cfg):
                 "document_number": "GDN-2",
                 "po_no_raw": None,
                 "po_reference_ambiguous": False,
-                "line_items": [
-                    {"line_item_no": "1", "description": "A", "quantity": "1"}
-                ],
+                "line_items": [{"line_item_no": "1", "description": "A", "quantity": "1"}],
             },
             s,
             cfg,

@@ -79,9 +79,7 @@ def release_if_stale(ps: POSet, session: Session, cfg: AppConfig) -> bool:
     return True
 
 
-def release_lock(
-    ps: POSet, session: Session, action: str | None = None, observed_at=None
-) -> None:
+def release_lock(ps: POSet, session: Session, action: str | None = None, observed_at=None) -> None:
     """Release active lock held on POSet.
 
     If action is specified, only releases if held by that action. If

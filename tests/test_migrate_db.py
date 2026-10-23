@@ -75,9 +75,7 @@ def _drop_legacy_gap(db_path: Path) -> None:
         conn.execute("ALTER TABLE po_sets DROP COLUMN archived_at")
         conn.execute("ALTER TABLE documents DROP COLUMN po_no_source")
         conn.execute("ALTER TABLE po_sets DROP COLUMN description_match_count")
-        conn.execute(
-            "CREATE UNIQUE INDEX ix_documents_sha256_hash ON documents (sha256_hash)"
-        )
+        conn.execute("CREATE UNIQUE INDEX ix_documents_sha256_hash ON documents (sha256_hash)")
         conn.execute("DROP TABLE IF EXISTS alembic_version")
         conn.commit()
     finally:
@@ -105,8 +103,7 @@ def test_a_fresh_database_is_built_to_head(rig):
     po_cols = {r[1] for r in conn.execute("pragma table_info(po_sets)")}
     assert {"archived_at", "archived_by", "archive_reason", "archive_path"} <= po_cols
     index_sql = {
-        r[0]: r[1]
-        for r in conn.execute("select name, sql from sqlite_master where type='index'")
+        r[0]: r[1] for r in conn.execute("select name, sql from sqlite_master where type='index'")
     }
     assert "archived_at IS NULL" in index_sql["uq_po_sets_open_po_no"]
     assert "archived_at IS NULL" in index_sql["ix_documents_sha256_hash"]

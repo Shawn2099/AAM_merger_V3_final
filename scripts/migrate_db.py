@@ -105,8 +105,7 @@ def detect_stamp(db_path: Path) -> str | None:
         if _has_version(conn):
             return None  # already stamped/versioned
         tables = {
-            row[0]
-            for row in conn.execute("select name from sqlite_master where type='table'")
+            row[0] for row in conn.execute("select name from sqlite_master where type='table'")
         }
         if "documents" not in tables:
             return None  # empty or unrelated file: let alembic build it
@@ -122,9 +121,7 @@ def detect_stamp(db_path: Path) -> str | None:
         known |= set(index_sql)
         # Synthetic markers for facts that are not a column.
         fk = conn.execute("pragma foreign_key_list(audit_log)").fetchall()
-        if any(
-            (row[2] or "") == "po_sets" and (row[6] or "").upper() == "SET NULL" for row in fk
-        ):
+        if any((row[2] or "") == "po_sets" and (row[6] or "").upper() == "SET NULL" for row in fk):
             known.add("audit_fk_set_null")
         if "line_items.dn_no" in known and "documents.part_no" not in known:
             known.add("part_no_dropped")
