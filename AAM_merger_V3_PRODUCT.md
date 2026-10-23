@@ -533,6 +533,44 @@ not quarantine its set or hide anything. The operator resolves it by removing
 or re-scanning the file. Pinned by
 `test_known_limitation_provider_fault_is_retried_every_run`.
 
+### M — a document placed under the wrong PO cannot be moved from the UI
+
+The Unclassified page places a held document under the PO number the operator
+types. If the number is mistyped, the document is attached to that set (or a new
+set is minted for it) and the reclassify route then refuses to move it (409): it
+is no longer held, and moving it would leave the old set's status stale. Re-Extract
+returns a document to Unclassified only when no PO number is printed on it; a
+manually placed document keeps its manual PO through every re-read. If the
+wrong placement makes the set quarantine, the operator Deletes (archives) the
+set and adds the files again; a set that only sits `pending` needs the
+administrator.
+
+**Real-world consequence.** A typo can strand one document in a stray set until an
+administrator fixes it. It cannot cause a wrong merge: the stray set has nothing
+to reconcile against. Pinned by
+`test_known_limitation_an_attached_document_cannot_be_reclassified`.
+
+### L — a packet left behind by a crash quarantines its set
+
+If the process dies after the packet file is written but before the database
+commit, the file exists but no set records it. The next merge attempt finds a
+file at the packet name that nothing owns, refuses to overwrite it, and
+quarantines the set with a message to inspect or remove the file. The operator
+removes the file and presses Re-Match. Overwriting such a file automatically was
+tried and rejected: a matching page count does not prove the file is this set's,
+and a person's own file must never be overwritten. Pinned by
+`test_known_limitation_leftover_packet_after_a_crash_quarantines_the_set`.
+
+### L — a rejected incomplete PDF leaves no row on the dashboard
+
+A file that is not a complete, openable PDF (a truncated copy, a corrupt file or
+a password-protected one) is rejected at ingestion. A file written within the
+last five minutes stays in the input folder to be retried (it may still be
+copying); an older one is moved to `quarantine/_documents` with a `.reason.txt`.
+No database row is created, so it does not appear on the dashboard; it shows in
+the sync's error count and in the log. This matches how a non-PDF input is
+treated. Pinned by `tests/test_ingestion_truncated_pdf.py`.
+
 ### L — locale assumption
 
 `matching.locale` is a fixed value (`en_IN`), never inferred from a document.
