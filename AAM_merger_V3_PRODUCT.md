@@ -711,6 +711,69 @@ simply not have sent it yet, and POs arrive over days. The engine cannot tell
 set, which is what the PO-number step is for. The deliberate asymmetry: an
 incomplete set never merges either way, so leaving it pending risks nothing.
 
+### H — a re-scanned or re-issued DN or SI is summed twice
+
+A second copy of the same delivery note or invoice (a re-scan, or a re-issued
+copy) has different bytes, so it is a second document, not a duplicate. Its
+quantities are added to the first copy's. DN-A for 5 and a re-scan of DN-A for
+5 against a PO of 10 make the DN side 10, and the set reconciles although only 5
+were delivered.
+
+**Real-world consequence.** A packet can merge for a delivery that is only half
+made. The reconciliation compares line quantities only, never document numbers
+across documents.
+
+> Mitigation today: a person reviews the packet. Check the DN and SI numbers
+> printed on every document in the packet before release. Pinned by
+> `test_known_limitation_rescanned_dn_quantities_are_summed`.
+
+### M — a numberless row can match a description that differs by one token
+
+The description fallback accepts token-sort similarity of 85 % or more. One
+token that changes the item, such as a size or rating, still clears it: a
+numberless vendor row `Gate valve 4in CL150` attaches to PO line
+`Gate valve 2in CL150`. The link is recorded only as an advisory
+`description_match` flag, not as a quantity or identification diff, so if the
+quantities agree the set can merge.
+
+**Real-world consequence.** A different-size item can merge against the wrong
+PO line. It is the description-fallback form of the H entry above.
+
+> Mitigation today: a person reviews the packet. The description-match flag
+> names the PO line each row was linked to, and the reviewer checks the item.
+> Pinned by `test_known_limitation_numberless_row_matches_a_size_variant_by_description`.
+
+### L — zeros after a dash, underscore or slash are stripped
+
+`normalize_line_no` strips leading zeros after `-`, `_` and `/`, as its docstring
+states, so `1-05` and `1-5` share a key. A dotted segment keeps its zeros, so
+`1.05` and `1.5` stay distinct.
+
+**Real-world consequence.** Two lines printed as `1-05` and `1-5` would be
+summed as one. Such a pair is not expected from the current vendors.
+
+> Mitigation today: a person reviews the packet. Pinned by
+> `test_known_limitation_zeros_after_a_dash_are_stripped`.
+
+### L — PO separators are flattened, so distinct POs can share a key
+
+`normalize_po_no` drops every separator on purpose, so `D7264-PO-186000-013-01`
+and `D7264-PO186000-013-01-` agree. The cost: `12-345` and `123-45` are the same
+key, `12345`. Two different POs that differ only in where a separator sits would
+be grouped into one set.
+
+> Mitigation today: a person reviews the packet. Pinned by
+> `test_known_limitation_po_separators_are_flattened`.
+
+### L — a PO number that starts with the letters PO loses them
+
+The leading `PO` label is stripped even when it is part of the number, so
+`POST123` keys as `ST123`. A PO printed as `POST123` would group with any
+document that prints `ST123`.
+
+> Mitigation today: a person reviews the packet. Pinned by
+> `test_known_limitation_po_prefix_strip_eats_the_letters_po`.
+
 ---
 
 ## 9. Non-goals
