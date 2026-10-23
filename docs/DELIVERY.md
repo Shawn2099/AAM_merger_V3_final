@@ -65,6 +65,8 @@ What it does, in order:
 3. applies the database schema (`python scripts/migrate_db.py` — handles both a
    fresh database and the existing `create_all`-era database, which has no
    `alembic_version`; a bare `alembic upgrade head` fails on the latter);
+   After upgrading an existing rig, run `python scripts/review_merged_sets.py` (read-only) to list
+   already-merged packets that need manual review.
 4. adds the inbound firewall rule for TCP 8000 (`-OpenFirewall`);
 5. registers the daily 01:00 database backup (`-ScheduleBackup`, no pruning,
    into `data\development\snapshots\db`) and the 01:30 copy-only development
