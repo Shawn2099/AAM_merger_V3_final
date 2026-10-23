@@ -503,6 +503,15 @@ def _recovery_flow_locked(
             if ps_lk is None or not acquire_lock(ps_lk, "sync_customs_append", s_lk, cfg):
                 logger.info("Customs append retry skipping POSet %s: it is locked", ps_id)
                 continue
+            # The flag may have been cleared while we waited for the lock.
+            s_lk.refresh(ps_lk)
+            still_owed = bool(ps_lk.customs_append_pending)
+        if not still_owed:
+            with Session(eng) as s_rel:
+                ps_rel = s_rel.get(_POSet, ps_id)
+                if ps_rel is not None:
+                    release_lock(ps_rel, s_rel, action="sync_customs_append")
+            continue
         try:
             if append_customs_if_complete(ps_id, cfg, source="sync") is None:
                 # Nothing to append any more (requirement off, or a document was

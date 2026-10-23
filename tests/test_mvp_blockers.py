@@ -376,3 +376,41 @@ def test_badge_shows_when_append_pending(cfg, client):
         s.commit()
     assert "Customs append pending" in client.get("/dashboard").text
     assert "customs not yet in packet" in client.get(f"/po_sets/{pid}/view").text
+
+
+def test_reclassify_with_busy_lock_still_records_pending_append(cfg, client):
+
+    from test_business_scenarios_ui import _pdf
+
+    from app.models import POSet
+    from app.services.locking import acquire_lock
+
+    pid = _std(cfg, "BUSY")
+    assert reconcile_po_set(pid, cfg)["status"] == "merged"
+    _doc(cfg, pid, DocType.CUSTOMS, "busy-c.pdf", [], po_no="BUSY", seed="busy-c")
+    assert client.post(f"/po_sets/{pid}/toggle_customs").status_code == 200
+    assert _status(cfg, pid).customs_append_pending is False  # only one of two attached
+
+    sha, stored = _pdf(cfg, "busy-ship")
+    with Session(get_engine(cfg)) as s:
+        d = Document(
+            sha256_hash=sha,
+            original_filename="busy-ship.pdf",
+            stored_path=str(stored),
+            doc_type=DocType.SHIPPING,
+            extraction_status=ExtractionStatus.valid,
+            po_set_id=None,
+        )
+        s.add(d)
+        s.commit()
+        doc_id = d.id
+    with Session(get_engine(cfg)) as s:
+        assert acquire_lock(s.get(POSet, pid), "force_merge", s, cfg)
+
+    r = client.post(
+        f"/unclassified/{doc_id}/reclassify",
+        data={"doc_type": "SHIPPING", "po_no": "PO-BUSY"},
+        follow_redirects=False,
+    )
+    assert r.status_code in (200, 302), r.text
+    assert _status(cfg, pid).customs_append_pending is True

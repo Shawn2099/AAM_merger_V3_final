@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, selectinload
 
+from app.api.routes.po_sets import _scrub_paths
 from app.core.config import load_config
 from app.core.database import get_engine
 from app.models import (
@@ -902,7 +903,8 @@ def _upload_manual_doc_impl(
                 url=(
                     f"/po_sets/{po_set_id}/view?notice="
                     + quote(
-                        f"Documents attached, but the merged packet was not rebuilt: {e}. "
+                        "Documents attached, but the merged packet was not rebuilt: "
+                        f"{_scrub_paths(str(e)) or type(e).__name__}. "
                         "It will retry on the next sync."
                     )
                 ),
@@ -1330,6 +1332,15 @@ def reclassify_document(
                     and ps_target.status == POSetStatus.blocked_customs
                 ):
                     ps_target.status = POSetStatus.pending
+                # A customs document placed on a delivered packet is a debt the
+                # packet owes; record it with the attach so a busy lock cannot
+                # lose it. A successful append clears it.
+                if (
+                    ps_target.status == POSetStatus.merged
+                    and ps_target.has_customs_toggle
+                    and cnt == 2
+                ):
+                    ps_target.customs_append_pending = True
         s.commit()
 
     # A document the operator has just placed must not wait for the next
@@ -1372,7 +1383,7 @@ def reclassify_document(
             except Exception as e:
                 # append_customs_if_complete has already persisted the pending
                 # flag; the operator is told rather than left with a log line.
-                append_failed = str(e) or type(e).__name__
+                append_failed = _scrub_paths(str(e)) or type(e).__name__
                 logger.warning(
                     "Placed document %s but could not rebuild the packet for PO Set %s",
                     doc_id,

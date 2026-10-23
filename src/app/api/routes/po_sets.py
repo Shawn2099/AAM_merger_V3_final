@@ -389,8 +389,8 @@ def toggle_customs(po_set_id: int):
                 except Exception as e:
                     # Persist the debt so the next sync retries it and the UI
                     # shows it, instead of a log line nobody reads.
-                    set_customs_append_pending(po_set_id, cfg, True)
                     append_error = _scrub_paths(str(e)) or type(e).__name__
+                    set_customs_append_pending(po_set_id, cfg, True)
                     logger.warning(
                         "Customs toggled on PO Set %s but the packet could not be rebuilt",
                         po_set_id,

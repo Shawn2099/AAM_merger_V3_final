@@ -113,7 +113,7 @@
       class="btn {% if po_set.has_customs_toggle %}btn-primary{% else %}btn-secondary{% endif %}"
       hx-post="/po_sets/{{ po_set.id }}/toggle_customs"
       hx-swap="none"
-      hx-on::after-request="if (event.detail.successful) location.reload()"
+      hx-on::after-request="if (event.detail.successful) { let b = {}; try { b = JSON.parse(event.detail.xhr.responseText) } catch (e) {} if (!b.append_pending) location.reload() }"
       title="Toggle whether Customs and Shipping documents are required for this PO Set"
       {% if is_locked %}disabled{% endif %}
     >
