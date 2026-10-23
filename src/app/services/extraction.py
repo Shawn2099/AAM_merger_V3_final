@@ -49,18 +49,20 @@ _SYSTEM_PROMPT = (
 
 _PAGE_PROMPT = (
     "STEP 1 — HEADER SCAN (first page top 20% for po_reference/document_number; each page table for rows):\n"
-    "  Locate strings 'PO No'/'P.O. No'/'Purchase Order No'/'Buyers Order No'/'Order No'/'PO Reference' → po_reference "
+    "  For SI and DN (never for a PO): locate strings 'PO No'/'P.O. No'/'Purchase Order No'/'Buyers Order No'/'Order No'/'PO Reference' → po_reference "
     "(strip non-alnum, upper; e.g. PO-210851 → 210851). Never use filename.\n"
     "  If MORE THAN ONE distinct PO number is visible on a document, set po_reference to the first and set "
     "po_reference_ambiguous true — the document will be quarantined rather than guessed at.\n"
     "  Locate 'DN No'/'Delivery Note No'/'GDN No'/'SI No'/'Invoice No'/'PO No' → document_number (its own number; for COMBINED use primary SI No or PO No).\n"
+    "  For a PO document po_reference is null and document_number is its own PO number; a quotation, RFQ, requisition or indent number printed on a PO is never the PO number.\n"
     "  vendor_name = supplier company header.\n\n"
     "STEP 2 — CLASSIFY document_type exactly one of PO, SI, DN, COMBINED, SKIP, UNKNOWN:\n"
     "  PO=Purchase Order, SI=Sales/Tax Invoice, DN=Delivery Note/Packing List, "
     "COMBINED=single PDF that visibly contains PO table + DN table + SI table together (often CA 'Combined' stamp, 3 sections, multi-page), "
     "SKIP=covers/T&C/blank pages, UNKNOWN=unreadable. DN bundles '(2 DNs)'/'(3 DNs)' are DN not COMBINED.\n"
     "  For COMBINED: set has_po_section=true, has_dn_section=true, has_si_section=true if and only if each respective section is visibly present.\n\n"
-    "STEP 3 — LINE ITEMS (only rows with product description AND quantity>0, scan ALL pages sequentially):\n"
+    "STEP 3 — LINE ITEMS (every row that has a product description, scan ALL pages sequentially; "
+    "if a row's quantity is unreadable return quantity null — never drop the row):\n"
     "  line_item_no — MOST IMPORTANT. The vendor's own side column (Sl No / Item No / #) is often just a running "
     "docket counter and repeats '1' on every page or every docket. It is NOT the PO line. Resolution order:\n"
     "    (a) if the description or a nearby note contains a marker like 'Line Item - 3' or 'Line No. 3', use THAT number;\n"
@@ -70,7 +72,9 @@ _PAGE_PROMPT = (
     "  dn_no: only if a delivery-note number is printed against THIS individual row; otherwise null. "
     "Most vendors print the DN number once in the header, not per line.\n"
     "  For COMBINED: DO NOT EXTRACT LINE ITEMS. Leave line_items empty []. The file is split by page range, and each child document will have its line items extracted individually.\n"
-    "  EXCLUDE subtotal, VAT, tax, total, amount-in-words, payment terms, signatures.\n\n"
+    "  QUANTITY COLUMN, PO: quantity is the ORDERED quantity; never a received / delivered-to-date column.\n"
+    "  QUANTITY COLUMN, DN and SI only: if a table prints several quantity columns, quantity is the quantity DELIVERED / SHIPPED / DISPATCHED / INVOICED on THIS document (headers such as Delivered Qty, Qty Shipped, Dispatch Qty, Invoiced Qty, Qty). NEVER use Ordered, Balance, Pending, Outstanding, Previous, Cumulative or To-date columns. If you cannot tell which column is the delivered/invoiced one, return quantity null for those rows rather than guessing.\n"
+    "  EXCLUDE subtotal, VAT, tax, total, amount-in-words, payment terms, signatures, charge rows that have no item number (freight, transport, shipping charges, discount, rounding), and 'carried forward' / 'brought forward' / page-total rows. A goods line whose description merely contains a word like PACKING or HANDLING is an item: keep it.\n\n"
     "STEP 4 — QUANTITY (the NUMBER ONLY; do NOT calculate, do NOT scale):\n"
     '  quantity = the digits as printed, and nothing else. "1", "50", "12.5", "12.45000000".\n'
     "  Strip anything that is not part of the number: unit / UOM (EA, PCS, BOX, KG, M, M3, "
@@ -283,8 +287,10 @@ def _call_vlm(stored_path: str, doc_type: str, cfg) -> dict:
             for c in (resp.components or [])
         ],
         "document_number": resp.document_number,
-        "po_no_raw": resp.po_reference
-        or (resp.document_number if resp.document_type == "PO" else None),
+        # A PO keys on its OWN number first; DN/SI/COMBINED key only on the PO they cite.
+        "po_no_raw": (resp.document_number or resp.po_reference)
+        if resp.document_type == "PO"
+        else resp.po_reference,
         "po_reference": resp.po_reference,
         "po_reference_ambiguous": resp.po_reference_ambiguous,
         "vendor_name": resp.vendor_name,
@@ -681,6 +687,59 @@ def repopulate_from_raw_json(doc_id: int, cfg) -> Document | None:
         return doc
 
 
+_INFRA_STATUS_CODES = frozenset({401, 402, 403, 404, 408, 409, 425, 429})
+_INFRA_CHAIN_DEPTH = 5
+
+
+def _is_infrastructure_leaf(exc: BaseException) -> bool:
+    import httpx
+    import openai
+
+    if isinstance(
+        exc,
+        (
+            openai.APIConnectionError,
+            openai.APITimeoutError,
+            openai.RateLimitError,
+            openai.InternalServerError,
+        ),
+    ):
+        return True
+    if isinstance(exc, openai.APIStatusError):
+        status = getattr(exc, "status_code", None)
+        return isinstance(status, int) and (status in _INFRA_STATUS_CODES or status >= 500)
+    if isinstance(exc, (httpx.TimeoutException, httpx.TransportError, httpx.NetworkError)):
+        return True
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    # Fail-closed config raised by _call_vlm (missing API key or vlm.model).
+    return isinstance(exc, RuntimeError) and "not configured" in str(exc)
+
+
+def _is_infrastructure_error(exc: BaseException | None) -> bool:
+    """True when the failure is the provider or network's fault, not the document's.
+
+    Walks the exception and its __cause__/__context__ chain (bounded depth,
+    cycle-guarded). Content errors (schema or validation failures, a missing
+    stored file, anything unknown) return False, so they keep the document's
+    failed verdict.
+    """
+    frontier: list[tuple[BaseException, int]] = [(exc, 0)] if exc is not None else []
+    seen: set[int] = set()
+    while frontier:
+        current, depth = frontier.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if _is_infrastructure_leaf(current):
+            return True
+        if depth + 1 < _INFRA_CHAIN_DEPTH:
+            for nxt in (current.__cause__, current.__context__):
+                if nxt is not None:
+                    frontier.append((nxt, depth + 1))
+    return False
+
+
 def extract_document(doc_id: int, cfg) -> Document:
     from sqlalchemy import update as _sa_update
 
@@ -842,6 +901,22 @@ def extract_document(doc_id: int, cfg) -> Document:
             s.refresh(doc)
             return doc
         except Exception as e:
+            if _is_infrastructure_error(e):
+                # A provider or network fault says nothing about the document.
+                # Refund the attempt and leave it pending, so Prefect's retry
+                # and the next sync claim it again instead of condemning it.
+                doc.extraction_attempt_count = max(0, (doc.extraction_attempt_count or 1) - 1)
+                doc.extraction_status = ExtractionStatus.pending
+                s.commit()
+                s.refresh(doc)
+                logger.warning(
+                    "VLM infrastructure fault for doc %s (%s): %s. Document stays pending "
+                    "for the next run; attempt not counted.",
+                    doc_id,
+                    doc.original_filename,
+                    type(e).__name__,
+                )
+                raise e
             doc.extraction_status = ExtractionStatus.failed
             s.commit()
             s.refresh(doc)

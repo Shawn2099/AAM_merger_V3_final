@@ -522,6 +522,17 @@ SI that prints a bare `161538`. That document sits visibly unattached for a
 person to place. Safe direction, pinned by
 `test_known_limitation_three_digit_revision_is_not_stripped`.
 
+### M — a document the provider can never serve is retried every run
+
+A provider fault (timeout, 429, 5xx, credit, bad key or model id) leaves the
+document `pending` and is not charged as an attempt, so one outage cannot
+quarantine a batch. The cost: a file the provider can *never* serve (for
+example a scan that always times out) is retried on every sync and never
+reaches `failed`. It shows as "Not read" and each run logs a warning; it does
+not quarantine its set or hide anything. The operator resolves it by removing
+or re-scanning the file. Pinned by
+`test_known_limitation_provider_fault_is_retried_every_run`.
+
 ### L — locale assumption
 
 `matching.locale` is a fixed value (`en_IN`), never inferred from a document.
