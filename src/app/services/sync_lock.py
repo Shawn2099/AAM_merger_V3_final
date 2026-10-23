@@ -11,17 +11,25 @@ release() is a silent no-op (per-thread lock_file_fd) and the OS lock would
 only clear via GC (see filelock how-to: "Use locks with multiple threads").
 
 Stale watchdog: a sidecar file records acquisition time. A lock whose sidecar
-is older than SYNC_STALE_SECONDS (default 3600s — a full 100-PDF + VLM run
-budget on this host) is treated as a dead holder's residue: the files are
-unlinked and the next sync proceeds. Residual race: if the original holder is
-still alive past the threshold, both proceed — accepted, documented tradeoff
-for a single-host LAN tool (alternative is blocking all syncs until restart).
+is older than the stale threshold is treated as a dead holder's residue: the
+files are unlinked and the next sync proceeds. The threshold is
+_stale_seconds(): the SYNC_STALE_SECONDS floor (1200s) or
+extraction.stale_processing_seconds + 60, whichever is larger, so it is raised
+with config. The holder refreshes the sidecar mtime via heartbeat_sync_lock()
+per document and per reconcile set, so a live sync never looks stale; the
+threshold must exceed the worst gap between heartbeats (one document's
+extraction worst case, bounded by config validation, or one set's reconcile
+sweep). Residual race: if the
+original holder is still alive but stopped heartbeating past the threshold,
+both proceed — accepted, documented tradeoff for a single-host LAN tool
+(alternative is blocking all syncs until restart).
 """
 
 from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -31,11 +39,22 @@ from app.core.config import load_config
 
 logger = logging.getLogger(__name__)
 
-#: Stale-break threshold (human decision 2026-09-05).
-SYNC_STALE_SECONDS = 3600
+#: Stale-break floor in seconds. Originally 3600 (human decision 2026-09-05);
+#: set to 1200 on 2026-10-23 and raised with config by _stale_seconds(), since
+#: heartbeat_sync_lock() refreshes the sidecar per document and per set.
+SYNC_STALE_SECONDS = 1200
 
 _LOCK_NAME = ".sync.lock"
 _SIDECAR_NAME = ".sync.started"
+
+
+def _stale_seconds(cfg_path: str | None = None) -> int:
+    """Effective stale threshold: the floor, raised to cover one extraction worst case."""
+    try:
+        cfg = load_config(cfg_path) if cfg_path else load_config()
+        return max(SYNC_STALE_SECONDS, int(cfg.extraction.stale_processing_seconds) + 60)
+    except Exception:
+        return SYNC_STALE_SECONDS
 
 
 def _lock_file(cfg_path: str | None = None, ensure_dirs: bool = True) -> Path:
@@ -60,19 +79,20 @@ def get_sync_lock(cfg_path: str | None = None, ensure_dirs: bool = True) -> File
     )
 
 
-def _break_if_stale(lock: FileLock) -> None:
+def _break_if_stale(lock: FileLock, cfg_path: str | None = None) -> None:
     """Unlink lock + sidecar when the sidecar proves the holder died > threshold ago."""
     sc = _sidecar_for(Path(lock.lock_file))
     try:
         age = time.time() - sc.stat().st_mtime
     except OSError:
         return
-    if age <= SYNC_STALE_SECONDS:
+    threshold = _stale_seconds(cfg_path)
+    if age <= threshold:
         return
     logger.warning(
         "Breaking stale sync lock (age %.0fs > %ds) at %s",
         age,
-        SYNC_STALE_SECONDS,
+        threshold,
         lock.lock_file,
     )
     with contextlib.suppress(OSError):
@@ -89,7 +109,7 @@ def acquire_sync_lock(cfg_path: str | None = None) -> FileLock | None:
     NO sidecar — which is never stale-broken (fail-closed direction).
     """
     lock = get_sync_lock(cfg_path)
-    _break_if_stale(lock)
+    _break_if_stale(lock, cfg_path)
     try:
         lock.acquire(timeout=0)
     except Timeout:
@@ -105,6 +125,18 @@ def release_sync_lock(lock: FileLock) -> None:
         lock.release()
     with contextlib.suppress(OSError):
         _sidecar_for(Path(lock.lock_file)).unlink(missing_ok=True)
+
+
+def heartbeat_sync_lock(cfg_path: str | None = None) -> None:
+    """Refresh the sidecar mtime of a live sync so it is not seen as stale.
+
+    Only touches an existing sidecar: never creates it and never touches the
+    lock file. Never raises, and is cheap enough to call once per document.
+    """
+    with contextlib.suppress(Exception):
+        sc = _sidecar_for(_lock_file(cfg_path, ensure_dirs=False))
+        if sc.exists():
+            os.utime(sc, None)
 
 
 def _is_sync_running(cfg_path: str | None = None) -> bool:
@@ -126,7 +158,7 @@ def _is_sync_running(cfg_path: str | None = None) -> bool:
     sc = _sidecar_for(lock_file)
     try:
         age = time.time() - sc.stat().st_mtime
-        return age <= SYNC_STALE_SECONDS
+        return age <= _stale_seconds(cfg_path)
     except OSError:
         # Sidecar absent → no active holder
         return False

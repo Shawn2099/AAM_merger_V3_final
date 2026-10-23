@@ -13,6 +13,7 @@ from app.core.config import load_config
 from app.core.database import get_engine
 from app.models import ExtractionStatus
 from app.models.base import Base
+from app.services.sync_lock import heartbeat_sync_lock
 
 logger = logging.getLogger(__name__)
 
@@ -378,6 +379,7 @@ def _recovery_flow_locked(
         ]
 
     for doc_id in pending_ids:
+        heartbeat_sync_lock(cfg_path)
         recovered_processed += 1
         try:
             _extract_task_for(cfg)(doc_id, cfg_path=cfg_path)
@@ -439,9 +441,11 @@ def _recovery_flow_locked(
     # Per-PO lock guard: if a UI action (force_merge, redo_extract) holds the
     # lock for this set, we skip it. The UI action calls reconcile_po_set on
     # completion, so the set is reconciled with correct post-action state.
+    heartbeat_sync_lock(cfg_path)
     reconciled_count = 0
     reconciled_set_ids: set[int] = set()
     for ps_id in sorted(touched_po_set_ids):
+        heartbeat_sync_lock(cfg_path)
         try:
             res = _reconcile_with_lock_guard(ps_id)
             if res is not None:
@@ -463,6 +467,7 @@ def _recovery_flow_locked(
             .all()
         )
     for (ps_id,) in open_sets:
+        heartbeat_sync_lock(cfg_path)
         if ps_id in reconciled_set_ids:
             continue
         try:
@@ -558,8 +563,10 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
 
     # Stability poll (FR-4.5) for the whole batch, taken together.
     stable_map = _poll_stability(files, cfg)
+    heartbeat_sync_lock(cfg_path)
 
     for f in files:
+        heartbeat_sync_lock(cfg_path)
         try:
             if not stable_map.get(f, False):
                 continue

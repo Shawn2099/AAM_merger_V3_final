@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -34,6 +35,26 @@ def tmp_db(tmp_path):
     return cfg
 
 
+def _sync_run_threads():
+    """The daemon threads POST /sync starts (`_run_sync`)."""
+    return {t for t in threading.enumerate() if "_run_sync" in t.name}
+
+
+def _join_new_sync_threads(before, timeout=120):
+    """Wait for the `_run_sync` threads a test started, before its patches go.
+
+    POST /sync hands the flow to a daemon thread and returns at once. That
+    thread imports the flow (slow: Prefect, beartype) and then calls
+    `load_config()`. If the test ends first, the monkeypatches are undone and
+    the thread reads the real config, or, while the next test's patches are
+    live, that test's database. Joining here keeps every sync run inside the
+    test that started it.
+    """
+    for t in _sync_run_threads() - before:
+        t.join(timeout)
+        assert not t.is_alive(), f"sync thread {t.name} still running after {timeout}s"
+
+
 @pytest.fixture()
 def client(tmp_db, monkeypatch):
     # ensure sync routes see same DB via config
@@ -45,8 +66,11 @@ def client(tmp_db, monkeypatch):
     monkeypatch.setattr("app.services.sync_lock.load_config", lambda path=None: tmp_db)
     from app.main import app
 
+    before = _sync_run_threads()
     with TestClient(app) as c:
         yield c
+    # Teardown order: this runs before `monkeypatch` is undone (it is a dependency).
+    _join_new_sync_threads(before)
 
 
 def _create_po_set(cfg, po_no="PO9999", status=POSetStatus.pending):
@@ -401,14 +425,18 @@ def test_stale_sync_lock_breaks(tmp_db, monkeypatch):
     assert lock is not None
     sc = sl._sidecar_for(Path(lock.lock_file))
     assert sc.exists()
-    sl.release_sync_lock(lock)  # holder dies, files may remain
-    if sc.exists():
-        old = time.time() - (sl.SYNC_STALE_SECONDS + 10)
-        os.utime(sc, (old, old))
-        assert sl._is_sync_running() is False
-        assert sl.acquire_sync_lock() is not None
-    else:
-        assert sl._is_sync_running() is False
+    # Backdate past the threshold while still holding the lock, then run the
+    # break logic directly so the stale branch really executes. (release_sync_lock
+    # deletes the sidecar, so a post-release check never reaches this path.)
+    old = time.time() - (sl.SYNC_STALE_SECONDS + 10)
+    os.utime(sc, (old, old))
+    sl._break_if_stale(lock)
+    assert not sc.exists()
+    assert sl._is_sync_running() is False
+    sl.release_sync_lock(lock)
+    new = sl.acquire_sync_lock()
+    assert new is not None
+    sl.release_sync_lock(new)
 
 
 def test_sync_flow_skips_when_locked(tmp_db, monkeypatch):
