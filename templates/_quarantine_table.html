@@ -1,4 +1,4 @@
-<div id="quarantine-table" hx-get="/quarantine/table" hx-trigger="every 3s" hx-swap="outerHTML">
+<div id="quarantine-table" hx-get="/quarantine/table" hx-trigger="every 3s [!document.querySelector('#quarantine-table .modal-backdrop.open')]" hx-swap="outerHTML">
   {% if po_sets %}
   <table class="data-table">
     <thead>

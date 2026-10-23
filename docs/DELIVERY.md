@@ -44,6 +44,13 @@ and keep the SQLite file on a local drive.
 
 ## 3. Install
 
+Allow the scripts to run in this PowerShell session and unblock the downloaded files first:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+Get-ChildItem -Recurse *.ps1 | Unblock-File
+```
+
 ```powershell
 .\scripts\setup_test_rig.ps1 -OpenFirewall -ScheduleBackup -WithPrefectServer
 ```

@@ -6,14 +6,17 @@ Run once during initial deployment or updates:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
-# Add src to pythonpath so app can be imported
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+ROOT = Path(__file__).resolve().parent.parent
 
-from app.core.config import load_config
-from app.flows.sync import sync_flow
+# Add src to pythonpath so app can be imported
+sys.path.insert(0, str(ROOT / "src"))
+
+from app.core.config import load_config  # noqa: E402
+from app.flows.sync import sync_flow  # noqa: E402
 
 CRON = "0 0 * * *"
 
@@ -44,8 +47,6 @@ def deploy() -> None:
     of lying to the operator. `AAM_ALLOW_EPHEMERAL_PREFECT=1` is an explicit
     opt-out for a throwaway demo.
     """
-    import os
-
     if not os.getenv("PREFECT_API_URL") and os.getenv("AAM_ALLOW_EPHEMERAL_PREFECT") != "1":
         raise SystemExit(
             "[ERROR] PREFECT_API_URL is not set. Prefect would start a temporary "
@@ -54,7 +55,11 @@ def deploy() -> None:
             "http://127.0.0.1:4200/api) or pass -WithPrefectServer to the installer. "
             "Set AAM_ALLOW_EPHEMERAL_PREFECT=1 only for a throwaway demo."
         )
-    cfg = load_config()
+    # Prefect records the cwd as the deployment's source path; make it the
+    # project root regardless of where the operator ran this script from.
+    os.chdir(ROOT)
+    cfg_path = str(ROOT / "config.yaml")
+    cfg = load_config(cfg_path)
     pool_name = cfg.prefect.work_pool_name
     schedule = _schedule(cfg)
     tz_note = schedule.timezone or "UTC"
@@ -64,6 +69,8 @@ def deploy() -> None:
         schedule=schedule,
         work_pool_name=pool_name,
         description="Nightly automated ingestion scan for AAM Merger V3",
+        parameters={"cfg_path": cfg_path},
+        job_variables={"working_dir": str(ROOT), "env": {"AAM_CONFIG_PATH": cfg_path}},
     )
     deployment_id = deployment.apply()
     print(

@@ -146,7 +146,7 @@ if (-not (Test-Path $logsDir)) {
 $srcDir = Join-Path $ProjectDir "src"
 
 $prefectHome = Join-Path $ProjectDir "data\prefect"
-$extraEnv = "PYTHONPATH=$srcDir`nNO_PROXY=127.0.0.1,localhost,::1`nPYTHONUTF8=1`nPYTHONIOENCODING=utf-8`nPREFECT_HOME=$prefectHome"
+$extraEnv = "PYTHONPATH=$srcDir`nNO_PROXY=127.0.0.1,localhost,::1`nPYTHONUTF8=1`nPYTHONIOENCODING=utf-8`nPREFECT_HOME=$prefectHome`nAAM_CONFIG_PATH=$(Join-Path $ProjectDir 'config.yaml')"
 if (-not [string]::IsNullOrWhiteSpace($prefectApi)) {
     $extraEnv = "$extraEnv`nPREFECT_API_URL=$prefectApi"
 }
@@ -165,7 +165,10 @@ function Install-Or-Update-NssmService {
     $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     if ($existing) {
         Write-Host "Stopping existing service $ServiceName..." -ForegroundColor Yellow
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
         & $NssmPath stop $ServiceName 2>$null | Out-Null
+        $ErrorActionPreference = $prevEap
         Start-Sleep -Seconds 2
         Write-Host "Removing existing service $ServiceName..." -ForegroundColor Yellow
         & $NssmPath remove $ServiceName confirm | Out-Null

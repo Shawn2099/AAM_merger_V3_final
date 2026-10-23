@@ -77,3 +77,44 @@ def test_to_deployment_accepts_the_schedule_object():
     built = deployment.schedules[0].schedule
     assert built.cron == "0 0 * * *"
     assert built.timezone == "Asia/Kolkata"
+
+
+def test_deployment_sets_working_dir_and_config_path(monkeypatch):
+    """The worker must run in the project root with the project's config.
+
+    A process-pool worker started elsewhere would otherwise resolve
+    `config.yaml` and relative paths against its own cwd.
+    """
+    import os
+
+    from app.flows.sync import sync_flow
+
+    module = _load_deploy_module()
+    captured: dict = {}
+
+    class _Deployment:
+        def apply(self):
+            return "dep-id"
+
+    def fake_to_deployment(self, **kwargs):
+        captured.update(kwargs)
+        captured["cwd"] = os.getcwd()
+        return _Deployment()
+
+    cfg = SimpleNamespace(
+        prefect=SimpleNamespace(schedule_timezone="Asia/Kolkata", work_pool_name="pool")
+    )
+    monkeypatch.setenv("PREFECT_API_URL", "http://127.0.0.1:4200/api")
+    monkeypatch.setattr(module, "load_config", lambda *a, **k: cfg)
+    monkeypatch.setattr(type(sync_flow), "to_deployment", fake_to_deployment)
+    monkeypatch.chdir(ROOT / "tests")
+
+    module.deploy()
+
+    root = Path(module.ROOT)
+    assert root == ROOT
+    assert captured["cwd"] == str(ROOT)
+    jv = captured["job_variables"]
+    assert jv["working_dir"] == str(ROOT)
+    assert jv["env"]["AAM_CONFIG_PATH"] == str(ROOT / "config.yaml")
+    assert captured["parameters"]["cfg_path"] == str(ROOT / "config.yaml")

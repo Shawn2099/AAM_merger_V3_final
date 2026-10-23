@@ -158,7 +158,7 @@ if (-not $Force) {
 #    not one of the folders about to be cleared.
 if (Test-Path $dbPath) {
     Write-Host "Backing up database..." -ForegroundColor Cyan
-    & (Join-Path $ScriptDir "backup_db.ps1")
+    & (Join-Path $ScriptDir "backup_db.ps1") -RetentionDays 0
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Database backup failed. Nothing was deleted."
         exit $LASTEXITCODE

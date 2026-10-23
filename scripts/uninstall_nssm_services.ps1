@@ -54,7 +54,10 @@ foreach ($svc in $services) {
     $existing = Get-Service -Name $svc -ErrorAction SilentlyContinue
     if ($existing) {
         Write-Host "Stopping service $svc..." -ForegroundColor Yellow
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
         & $NssmPath stop $svc 2>$null | Out-Null
+        $ErrorActionPreference = $prevEap
         Start-Sleep -Seconds 1
         Write-Host "Removing service $svc..." -ForegroundColor Yellow
         & $NssmPath remove $svc confirm | Out-Null

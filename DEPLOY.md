@@ -12,6 +12,13 @@ This guide details the single-host production and test rig setup for **AAM Merge
 
 Run PowerShell as **Administrator** from the project directory:
 
+Allow the scripts to run in this PowerShell session and unblock the downloaded files first:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+Get-ChildItem -Recurse *.ps1 | Unblock-File
+```
+
 ```powershell
 .\scripts\setup_test_rig.ps1 -OpenFirewall -ScheduleBackup -WithPrefectServer
 ```
