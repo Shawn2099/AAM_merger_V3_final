@@ -637,6 +637,8 @@ def append_customs_to_merged_packet(po_set_id: int, cfg, source: str = "operator
                 source=source,
             )
         )
+        # The debt is paid in the same commit as the audit row.
+        ps.customs_append_pending = False
         s.commit()
         logger.info(
             "Rebuilt merged packet for PO Set %s with customs/shipping documents: %s",
@@ -652,9 +654,28 @@ def append_customs_if_complete(po_set_id: int, cfg, source: str = "operator") ->
     Returns None when the set is not merged, does not require customs, or does
     not yet have both documents. Lets the placement paths (upload, toggle,
     holding-area reclassify) call one function without duplicating the guard.
-    Real failures (missing stored file, unwritable packet) still raise.
+    Real failures (missing stored file, unwritable packet) still raise, after
+    the set is marked `customs_append_pending` so the next sync retries it.
     """
     try:
         return append_customs_to_merged_packet(po_set_id, cfg, source=source)
     except ValueError:
         return None
+    except Exception:
+        set_customs_append_pending(po_set_id, cfg, True)
+        raise
+
+
+def set_customs_append_pending(po_set_id: int, cfg, pending: bool) -> None:
+    """Persist whether a merged set still owes its packet a customs rebuild.
+
+    Best effort on a missing or archived set; never raises for those.
+    """
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        ps = s.get(POSet, po_set_id)
+        if ps is None or ps.archived_at is not None:
+            return
+        if ps.customs_append_pending != pending:
+            ps.customs_append_pending = pending
+            s.commit()

@@ -69,6 +69,10 @@ def toggle_customs(po_set_id: int, cfg) -> POSet:
                 types_present.add(val)
         ps.customs_doc_count = len(types_present)
 
+        # With the requirement off nothing is owed to the packet.
+        if not ps.has_customs_toggle:
+            ps.customs_append_pending = False
+
         # Toggling the gate OFF clears only the state this gate owns. A
         # quarantine or mismatch is a real verdict and stays put.
         if not ps.has_customs_toggle and ps.status == POSetStatus.blocked_customs:

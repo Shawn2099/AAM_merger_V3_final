@@ -281,3 +281,98 @@ def test_empty_dn_reason_names_only_the_empty_file(cfg, client):
     assert reconcile_po_set(pid, cfg)["status"] == "quarantined"
     page = client.get("/quarantine").text
     assert "empty-dn.pdf" in page or "contains no line items" in page
+
+
+# --- B: a failed customs append is persisted and retried ----------------------
+
+
+def _merged_set_awaiting_customs(cfg, po: str) -> int:
+    """A merged set with the requirement off and both customs documents attached."""
+    pid = _std(cfg, po)
+    assert reconcile_po_set(pid, cfg)["status"] == "merged"
+    _doc(cfg, pid, DocType.CUSTOMS, f"{po}-customs.pdf", [], po_no=po, seed=f"{po}-c")
+    _doc(cfg, pid, DocType.SHIPPING, f"{po}-ship.pdf", [], po_no=po, seed=f"{po}-s")
+    return pid
+
+
+def _break_rebuild(monkeypatch):
+    import app.services.merge as merge_service
+
+    real = merge_service._write_merged
+
+    def boom(*a, **k):
+        raise OSError("disk is full")
+
+    monkeypatch.setattr(merge_service, "_write_merged", boom)
+    return lambda: monkeypatch.setattr(merge_service, "_write_merged", real)
+
+
+def test_customs_append_failure_is_persisted_and_retried_by_sync(cfg, client, monkeypatch):
+    from pathlib import Path
+
+    from test_business_scenarios_ui import _page_count
+
+    from app.flows.sync import _recovery_flow_locked
+
+    pid = _merged_set_awaiting_customs(cfg, "PO-RETRY")
+    packet = Path(_status(cfg, pid).merged_output_path)
+    assert _page_count(packet) == 3
+
+    restore = _break_rebuild(monkeypatch)
+    r = client.post(f"/po_sets/{pid}/toggle_customs")
+    assert r.status_code == 200, r.text
+    ps = _status(cfg, pid)
+    assert ps.has_customs_toggle is True
+    assert ps.customs_append_pending is True, "the failure must be persisted"
+    assert _page_count(packet) == 3
+
+    # A sync while the fault persists keeps the debt and does not lose it.
+    _recovery_flow_locked()
+    assert _status(cfg, pid).customs_append_pending is True
+
+    restore()
+    _recovery_flow_locked()
+    ps = _status(cfg, pid)
+    assert ps.customs_append_pending is False
+    assert ps.status == POSetStatus.merged
+    assert _page_count(packet) == 5
+
+    from app.models import AuditAction, AuditLog
+
+    with Session(get_engine(cfg)) as s:
+        assert any(a.action == AuditAction.customs_append for a in s.query(AuditLog).all())
+
+
+def test_toggle_reports_append_failure(cfg, client, monkeypatch):
+    pid = _merged_set_awaiting_customs(cfg, "PO-REPORT")
+    _break_rebuild(monkeypatch)
+    r = client.post(f"/po_sets/{pid}/toggle_customs")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["packet_rebuilt"] is False
+    assert body["append_pending"] is True
+    assert "disk is full" in body["append_error"]
+
+    # Switching the requirement off drops the debt.
+    r = client.post(f"/po_sets/{pid}/toggle_customs")
+    assert r.status_code == 200
+    assert r.json()["append_pending"] is False
+    assert _status(cfg, pid).customs_append_pending is False
+
+
+def test_badge_shows_when_append_pending(cfg, client):
+    pid = _merged_set_awaiting_customs(cfg, "PO-BADGE")
+    with Session(get_engine(cfg)) as s:
+        ps = s.get(type(_status(cfg, pid)), pid)
+        ps.has_customs_toggle = True
+        ps.customs_doc_count = 2
+        ps.customs_append_pending = False
+        s.commit()
+    assert "Customs append pending" not in client.get("/dashboard").text
+    assert "customs not yet in packet" not in client.get(f"/po_sets/{pid}/view").text
+
+    with Session(get_engine(cfg)) as s:
+        s.get(type(_status(cfg, pid)), pid).customs_append_pending = True
+        s.commit()
+    assert "Customs append pending" in client.get("/dashboard").text
+    assert "customs not yet in packet" in client.get(f"/po_sets/{pid}/view").text

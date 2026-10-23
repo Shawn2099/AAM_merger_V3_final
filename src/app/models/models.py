@@ -166,6 +166,11 @@ class POSet(Base):
     status: Mapped[POSetStatus] = mapped_column(Enum(POSetStatus), nullable=False)
     has_customs_toggle: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     customs_doc_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # A merged set whose customs/shipping rebuild failed. Cleared in the same
+    # transaction as the customs_append audit row; the sync retries it.
+    customs_append_pending: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
     merged_output_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Why the set is in its current state, in plain language. Without this the
     # reviewer must re-run reconciliation to find out why a set is stuck, and

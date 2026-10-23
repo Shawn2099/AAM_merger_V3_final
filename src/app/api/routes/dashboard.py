@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from html import escape
 from pathlib import Path
 from urllib.parse import quote
 
@@ -139,6 +140,7 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
                 "is_locked": is_locked(ps, cfg),
                 "has_customs_toggle": ps.has_customs_toggle,
                 "customs_doc_count": ps.customs_doc_count or 0,
+                "customs_append_pending": bool(ps.customs_append_pending),
                 "description_match_count": ps.description_match_count or 0,
             }
         )
@@ -893,10 +895,16 @@ def _upload_manual_doc_impl(
                 po_set_id,
                 exc_info=True,
             )
+            from app.services.merge import set_customs_append_pending
+
+            set_customs_append_pending(po_set_id, cfg, True)
             return RedirectResponse(
                 url=(
                     f"/po_sets/{po_set_id}/view?notice="
-                    + quote(f"Documents attached, but the merged packet was not rebuilt: {e}")
+                    + quote(
+                        f"Documents attached, but the merged packet was not rebuilt: {e}. "
+                        "It will retry on the next sync."
+                    )
                 ),
                 status_code=302,
             )
@@ -1328,6 +1336,7 @@ def reclassify_document(
     # nightly scan to affect its set: attaching it is the trigger. This runs
     # after the session closes — the reconcile opens its own, and SQLite
     # writes cannot overlap two writer sessions on one file.
+    append_failed: str | None = None
     if attached_ps_id is not None:
         lock_ok = False
         with Session(get_engine(cfg)) as s_lock:
@@ -1360,7 +1369,10 @@ def reclassify_document(
                 from app.services.merge import append_customs_if_complete
 
                 append_customs_if_complete(attached_ps_id, cfg)
-            except Exception:
+            except Exception as e:
+                # append_customs_if_complete has already persisted the pending
+                # flag; the operator is told rather than left with a log line.
+                append_failed = str(e) or type(e).__name__
                 logger.warning(
                     "Placed document %s but could not rebuild the packet for PO Set %s",
                     doc_id,
@@ -1372,6 +1384,24 @@ def reclassify_document(
                 ps_rel = s_rel.get(POSet, attached_ps_id)
                 if ps_rel is not None:
                     release_lock(ps_rel, s_rel, "reclassify")
+
+    if append_failed is not None:
+        notice = (
+            "Document placed, but the merged packet was NOT rebuilt with customs/shipping: "
+            f"{append_failed}. It will retry on the next sync."
+        )
+        if request.headers.get("HX-Request") == "true":
+            return HTMLResponse(
+                content=(
+                    f'<tr id="doc-row-{doc_id}"><td colspan="6" '
+                    'style="color:#92400e;background:#fffbeb;padding:8px;">'
+                    f"{escape(notice)}</td></tr>"
+                ),
+            )
+        return RedirectResponse(
+            url=f"/po_sets/{attached_ps_id}/view?notice=" + quote(notice),
+            status_code=302,
+        )
 
     if attached_ps_id is None:
         msg = (

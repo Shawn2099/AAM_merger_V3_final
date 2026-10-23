@@ -144,7 +144,18 @@ document.addEventListener('htmx:afterRequest', function (event) {
 
   if (xhr.status >= 200 && xhr.status < 300) {
     if (path.endsWith('/toggle_customs')) {
-      store.info('🛡️ Customs requirement setting updated.');
+      let tbody = {};
+      try {
+        tbody = JSON.parse(xhr.responseText);
+      } catch (e) {
+        /* non-JSON response; fall through to the generic message */
+      }
+      if (tbody.append_pending) {
+        store.warning('Customs requirement saved, but the merged packet was NOT rebuilt: ' +
+          (tbody.append_error || 'unknown error') + '. It will retry on the next sync.');
+      } else {
+        store.info('🛡️ Customs requirement setting updated.');
+      }
     } else if (path.endsWith('/redo_extract')) {
       store.success('⚡ Document extraction queued.');
     } else if (path.endsWith('/redo_match')) {

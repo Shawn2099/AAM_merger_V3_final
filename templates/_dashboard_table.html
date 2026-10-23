@@ -61,9 +61,9 @@
             <span class="badge badge-gray">{{ status_str }}</span>
           {% endif %}
 
-          {% if status_str == 'merged' and ps.has_customs_toggle and ps.customs_doc_count < 2 %}
+          {% if status_str == 'merged' and ps.has_customs_toggle and (ps.customs_doc_count < 2 or ps.customs_append_pending) %}
             <span class="badge badge-blocked" style="font-size:0.72rem; margin-left:4px;"
-                  title="This set is delivered, but the customs requirement is on and one or more of the two documents is missing. Upload them on the set page; the packet is rebuilt.">
+                  title="This set is delivered, but the customs requirement is on and the customs and shipping documents are not yet in the packet (a document is missing, or the rebuild failed and will retry on the next sync). Upload any missing document on the set page.">
               🛃 Customs append pending
             </span>
           {% endif %}

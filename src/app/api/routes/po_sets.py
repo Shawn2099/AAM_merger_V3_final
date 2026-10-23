@@ -369,6 +369,7 @@ def toggle_customs(po_set_id: int):
 
         updated = svc_toggle(po_set_id, cfg)
         rebuilt = None
+        append_error: str | None = None
         # A merged set whose customs requirement has just been switched on,
         # with both documents already attached: the packet is regenerated so
         # the delivered file contains them. Status stays `merged`.
@@ -378,12 +379,26 @@ def toggle_customs(po_set_id: int):
             and (updated.customs_doc_count or 0) == 2
         ):
             try:
-                from app.services.merge import append_customs_to_merged_packet
+                from app.services.merge import (
+                    append_customs_to_merged_packet,
+                    set_customs_append_pending,
+                )
 
-                rebuilt = str(append_customs_to_merged_packet(po_set_id, cfg))
+                try:
+                    rebuilt = str(append_customs_to_merged_packet(po_set_id, cfg))
+                except Exception as e:
+                    # Persist the debt so the next sync retries it and the UI
+                    # shows it, instead of a log line nobody reads.
+                    set_customs_append_pending(po_set_id, cfg, True)
+                    append_error = _scrub_paths(str(e)) or type(e).__name__
+                    logger.warning(
+                        "Customs toggled on PO Set %s but the packet could not be rebuilt",
+                        po_set_id,
+                        exc_info=True,
+                    )
             except Exception:
                 logger.warning(
-                    "Customs toggled on PO Set %s but the packet could not be rebuilt",
+                    "Could not record the pending customs append for PO Set %s",
                     po_set_id,
                     exc_info=True,
                 )
@@ -392,6 +407,8 @@ def toggle_customs(po_set_id: int):
             "po_set_id": po_set_id,
             "has_customs_toggle": updated.has_customs_toggle,
             "packet_rebuilt": rebuilt is not None,
+            "append_pending": append_error is not None,
+            "append_error": append_error,
             "merged_output_path": rebuilt or updated.merged_output_path,
         }
     except HTTPException:

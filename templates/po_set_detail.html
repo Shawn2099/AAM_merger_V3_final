@@ -53,6 +53,12 @@
         {% else %}
           <span class="badge badge-merged" style="font-size:0.9rem; padding:6px 14px;">Merged &amp; Ready</span>
         {% endif %}
+        {% if po_set.has_customs_toggle and (po_set.customs_append_pending or (po_set.customs_doc_count or 0) < 2) %}
+          <span class="badge badge-blocked" style="font-size:0.9rem; padding:6px 14px;"
+                title="The customs requirement is on, but the customs and shipping documents are not yet in the delivered packet. A failed rebuild is retried on the next sync.">
+            Merged • customs not yet in packet
+          </span>
+        {% endif %}
         {% if po_set.reconcile_reason and po_set.reconcile_reason.startswith('Force-merged') %}
           <span class="badge badge-mismatched" title="Reconciliation and customs gates were bypassed by an operator.">
             Force-merged - review

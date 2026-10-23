@@ -480,6 +480,43 @@ def _recovery_flow_locked(
             logger.warning("Re-reconcile sweep failed for PO Set %s", ps_id, exc_info=True)
             recovered_errors += 1
 
+    # 6. Retry customs appends that failed earlier. Phase 2 skips merged sets,
+    # so a merged set that still owes its packet a customs rebuild would
+    # otherwise never be revisited.
+    from app.services.merge import append_customs_if_complete, set_customs_append_pending
+
+    with Session(eng) as s_app:
+        owing_ids = [
+            r[0]
+            for r in s_app.query(_POSet.id)
+            .filter(
+                _POSet.status == POSetStatus.merged,
+                _POSet.archived_at.is_(None),
+                _POSet.customs_append_pending.is_(True),
+            )
+            .all()
+        ]
+    for ps_id in owing_ids:
+        heartbeat_sync_lock(cfg_path)
+        with Session(eng) as s_lk:
+            ps_lk = s_lk.get(_POSet, ps_id)
+            if ps_lk is None or not acquire_lock(ps_lk, "sync_customs_append", s_lk, cfg):
+                logger.info("Customs append retry skipping POSet %s: it is locked", ps_id)
+                continue
+        try:
+            if append_customs_if_complete(ps_id, cfg, source="sync") is None:
+                # Nothing to append any more (requirement off, or a document was
+                # removed): the debt no longer exists, the badge covers the rest.
+                set_customs_append_pending(ps_id, cfg, False)
+        except Exception:
+            logger.warning("Customs append retry failed for PO Set %s", ps_id, exc_info=True)
+            recovered_errors += 1
+        finally:
+            with Session(eng) as s_rel:
+                ps_rel = s_rel.get(_POSet, ps_id)
+                if ps_rel is not None:
+                    release_lock(ps_rel, s_rel, action="sync_customs_append")
+
     return {
         "processed": recovered_processed,
         "extracted": recovered_extracted,
