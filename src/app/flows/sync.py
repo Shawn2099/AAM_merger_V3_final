@@ -17,9 +17,10 @@ from app.services.sync_lock import heartbeat_sync_lock
 
 logger = logging.getLogger(__name__)
 
-#: Doc types allowed to mint a new PO Set (BLOCKER-5). DN/SI/UNKNOWN docs
-#: attach to an already-open set or wait visibly unattached — they must
-#: never mint orphan sets from decoy/secondary PO codes.
+#: Doc types allowed to mint a new PO Set (BLOCKER-5). DN/SI docs attach to
+#: an already-open set or wait visibly unattached — they must never mint
+#: orphan sets from decoy/secondary PO codes. A type outside PO/DN/SI never
+#: attaches at all until an operator reclassifies it (grouping._ATTACHABLE).
 _ANCHOR_TYPES = ("PO",)
 
 #: How many files are stability-polled at the same time. The poll is pure

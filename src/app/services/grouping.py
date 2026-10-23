@@ -124,6 +124,13 @@ ANCHOR_TYPES = ("PO",)
 #: it failed would hide it from the sweeps that could still place it.
 NEEDS_PO_REFERENCE = ("PO", "DN", "SI")
 
+#: The only types a PO Set is formed from. Every other type (UNKNOWN, split
+#: parents) is never attached by any sweep, whatever PO number it carries: it
+#: stays in the Unclassified view (keeping its po_no) until an operator
+#: reclassifies it to PO/DN/SI. Customs/shipping documents are separate add-ons placed
+#: by their own route.
+_ATTACHABLE = frozenset({"PO", "DN", "SI"})
+
 
 def group_document(doc, cfg) -> tuple[int | None, str | None]:
     """Place a freshly-read document in its PO Set.
@@ -147,6 +154,8 @@ def group_document(doc, cfg) -> tuple[int | None, str | None]:
                                the others. It waits for a human.
     """
     dtype = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
+    if dtype not in _ATTACHABLE:
+        return None, None
     if not doc.po_no_normalized:
         if dtype in NEEDS_PO_REFERENCE:
             return None, "missing_po_number"
@@ -235,7 +244,7 @@ def attach_unattached_to_open_sets(cfg) -> set[int]:
     from sqlalchemy.orm import Session
 
     from app.core.database import get_engine
-    from app.models import Document, ExtractionStatus, POSet, POSetStatus
+    from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus
 
     eng = get_engine(cfg)
     touched: set[int] = set()
@@ -247,6 +256,7 @@ def attach_unattached_to_open_sets(cfg) -> set[int]:
                 Document.extraction_status == ExtractionStatus.valid,
                 Document.po_no_normalized.isnot(None),
                 Document.is_split_parent.is_(False),
+                Document.doc_type.in_([DocType.PO, DocType.DN, DocType.SI]),
             )
             .all()
         )
@@ -352,7 +362,7 @@ def resolve_unattached_documents(cfg) -> set[int]:
     from sqlalchemy.orm import Session
 
     from app.core.database import get_engine
-    from app.models import Document, ExtractionStatus, POSet, POSetStatus
+    from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus
 
     eng = get_engine(cfg)
     touched: set[int] = set()
@@ -364,6 +374,7 @@ def resolve_unattached_documents(cfg) -> set[int]:
                 Document.po_set_id.is_(None),
                 Document.extraction_status == ExtractionStatus.valid,
                 Document.is_split_parent.is_(False),
+                Document.doc_type.in_([DocType.PO, DocType.DN, DocType.SI]),
             )
             .all()
         )
