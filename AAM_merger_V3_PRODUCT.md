@@ -55,6 +55,9 @@ waits for a human rather than being placed on a guess.
 1. Group BOTH sides by line_item_no, summing each group.
    Line numbers are normalised first: whitespace stripped, leading zeros
    removed ('01' -> '1'). Alphanumeric forms survive verbatim ('1a', '1-1').
+   A '.' segment is kept verbatim ('1.05' stays '1.05', never '1.5'): dotted
+   numbers are sub-line identifiers and collapsing them can merge distinct
+   lines. Zeros after '-', '_' and '/' are still stripped ('01-01' -> '1-1').
 
 2. A vendor row with no usable line number may fall back to its description,
    and only then. It never overrides a real line number.
@@ -508,6 +511,16 @@ caught. But `"17.200"` is indistinguishable from a legitimate `17.2` and is
 still read as 17.2. Since real quantities are whole units or occasional `.50`,
 this shape is not expected from our vendors — accepted as an open risk rather
 than solved (§5).
+
+### L — three-digit PO revision counters split the set
+
+`normalize_po_no` strips a trailing `,N` only when N is `0` or one or two digits
+(a SAP revision such as `161538,0`). A three-digit tail is treated as thousands
+grouping and kept, so `12,345` is PO 12345 and never PO 12. The cost: a PO
+printed with a three-digit revision (`161538,100`) no longer groups with a DN or
+SI that prints a bare `161538`. That document sits visibly unattached for a
+person to place. Safe direction, pinned by
+`test_known_limitation_three_digit_revision_is_not_stripped`.
 
 ### L — locale assumption
 

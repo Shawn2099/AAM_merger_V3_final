@@ -32,7 +32,8 @@ contract is pinned by `tests/test_business_scenarios_ui.py`.
 ## 3. Matching and comparison
 
 **Line key first.** Group **both sides** by `line_item_no`, normalised
-(whitespace and leading zeros: `01` = `1`; `1-1` stays `1-1`). Sum all rows in
+(whitespace and leading zeros: `01` = `1`; `1-1` stays `1-1`; a dotted
+sub-line keeps its zeros, `1.05` is not `1.5`). Sum all rows in
 a group. A PO line delivered or invoiced in several rows reconciles by sum — it
 is an aggregate comparison, not a one-to-one pairing.
 

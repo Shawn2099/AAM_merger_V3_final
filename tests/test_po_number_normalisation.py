@@ -132,6 +132,45 @@ def test_a_revision_suffix_never_collides_with_a_different_po():
     assert normalize_po_no("1,000") != normalize_po_no("1")
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # A thousands group is always 3 digits and is a number, not a revision.
+        ("12,345", "12345"),
+        ("1,234", "1234"),
+        ("1,00,500", "100500"),
+    ],
+)
+def test_thousands_grouping_is_not_truncated(raw, expected):
+    assert normalize_po_no(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # A SAP revision counter is 1-2 digits and is stripped.
+        ("PO, Rev # 161538,0", "161538"),
+        ("161538,0", "161538"),
+        ("PO 161538", "161538"),
+        ("161538,10", "161538"),
+    ],
+)
+def test_short_revision_counter_is_still_stripped(raw, expected):
+    assert normalize_po_no(raw) == expected
+
+
+def test_known_limitation_three_digit_revision_is_not_stripped():
+    # A 3-digit tail is read as thousands grouping, never as a revision. A PO
+    # printed "161538,100" therefore splits from a DN printing "161538": the DN
+    # sits visibly unattached for a person to place (PRODUCT section 8).
+    assert normalize_po_no("161538,100") != normalize_po_no("161538")
+
+
+def test_thousands_grouping_never_collides_with_truncated_po():
+    assert normalize_po_no("12,345") != normalize_po_no("12")
+    assert normalize_po_no("1,234") != normalize_po_no("1")
+
+
 def test_blank_and_none_are_safe():
     assert normalize_po_no("") == ""
     assert normalize_po_no("   ") == ""

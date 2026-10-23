@@ -84,13 +84,12 @@ def normalize_po_no(raw: str) -> str:
     # A trailing revision counter: "161538 Rev 2" -> "161538".
     s = _REVISION_RE.sub(" ", s)
     # SAP revision counter: "PO, Rev # 161538,0" -> "PO, Rev # 161538".
-    # Only a plausible revision is stripped: "1,000" is a printed one thousand,
-    # not PO 1 revision 000 (the old `\d{1,3}` did exactly that, keying the PO
-    # as "1" and colliding with a different PO numbered 1). Indian grouping
-    # ("1,00,000") is preserved for the same reason.
+    # A revision counter is 1-2 digits. A 3-digit tail is thousands grouping
+    # ("12,345", "1,000", "1,00,000") and is kept, not stripped: stripping it
+    # keyed "12,345" as "12" and "1,234" as "1", colliding with other POs.
     if "," in s:
         before, after = s.rsplit(",", 1)
-        if re.search(r"\d", before) and re.match(r"^\s*(?:0|[1-9]\d{0,2})\s*$", after):
+        if re.search(r"\d", before) and re.match(r"^\s*(?:0|[1-9]\d?)\s*$", after):
             s = before
     toks = [t for t in re.split(r"[^A-Za-z0-9]+", s) if t]
     kept: list[str] = []

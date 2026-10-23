@@ -43,6 +43,10 @@ def normalize_line_no(s: str | None) -> str:
 
     Strips whitespace and leading zeros ('01' -> '1', ' 001 ' -> '1', '01-01' -> '1-1')
     but compares as a string so alphanumeric forms ('1a', '1-1') survive intact.
+    Zeros are stripped only at the start and after '-', '_' or '/'. A '.' segment is
+    kept verbatim ('1.05' stays '1.05'): dotted numbers are sub-line identifiers, and
+    collapsing them ('1.05' -> '1.5') can merge distinct lines. A false quarantine is
+    the safe direction.
     '' / None -> '' (no usable number).
     """
     if s is None:
@@ -50,7 +54,7 @@ def normalize_line_no(s: str | None) -> str:
     t = str(s).strip()
     if not t:
         return ""
-    return re.sub(r"(^|[-._/])0+(\d+)", r"\1\2", t)
+    return re.sub(r"(^|[-_/])0+(\d+)", r"\1\2", t)
 
 
 #: Synthetic keys for PO lines that carry no number. The description is the
