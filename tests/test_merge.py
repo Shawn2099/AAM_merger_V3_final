@@ -354,12 +354,13 @@ def test_force_merge_audit_carries_evidence(tmp_path):
 
 def test_zero_evidence_auto_merge_refused(tmp_path):
     """W-22: auto-merge with zero line items refuses, status untouched."""
+    import pytest
     from sqlalchemy.orm import Session
 
     from app.core.database import get_engine
     from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus
     from app.models.base import Base
-    from app.services.merge import merge_po_set
+    from app.services.merge import MergeEmptyError, merge_po_set
 
     cfg = _cfg_with_tmp(tmp_path)
     eng = get_engine(cfg)
@@ -385,7 +386,8 @@ def test_zero_evidence_auto_merge_refused(tmp_path):
         )
         s.commit()
 
-    assert merge_po_set(ps_id, cfg) is None
+    with pytest.raises(MergeEmptyError):
+        merge_po_set(ps_id, cfg)
     with Session(eng) as s:
         ps_after = s.get(POSet, ps_id)
         assert ps_after.status == POSetStatus.pending

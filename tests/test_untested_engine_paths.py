@@ -324,7 +324,9 @@ def test_output_name_collision_quarantines_instead_of_overwriting(env, vlm):
     # a pre-existing packet belonging to nobody in this DB
     squatter = Path(cfg.paths.output_folder) / f"{INVOICE_NO}.pdf"
     squatter.parent.mkdir(parents=True, exist_ok=True)
-    PdfWriter().write(str(squatter))
+    w = PdfWriter()
+    w.add_blank_page(width=100, height=100)
+    w.write(str(squatter))
     original_bytes = squatter.read_bytes()
 
     inp = Path(cfg.paths.input_folder)
@@ -377,8 +379,17 @@ def test_missing_stored_pdf_at_merge_time_writes_nothing(env, vlm):
     for p in Path(cfg.paths.output_folder).iterdir():
         p.unlink()
 
-    out = merge_po_set(pid, cfg)
-    assert out is None, "must not report a path when a source file is missing"
+    import pytest
+
+    from app.services.merge import MergeSourceError
+
+    with pytest.raises(MergeSourceError):
+        merge_po_set(pid, cfg)
+    assert list(Path(cfg.paths.output_folder).iterdir()) == []
+    with Session(get_engine(cfg)) as s:
+        ps = s.get(POSet, pid)
+        assert ps.status != POSetStatus.merged
+        assert ps.merged_output_path is None
     assert not list(Path(cfg.paths.output_folder).iterdir()), "a partial packet was written"
     with Session(get_engine(cfg)) as s:
         assert s.get(POSet, pid).status != POSetStatus.merged
@@ -407,7 +418,7 @@ def test_one_unreadable_document_does_not_stop_the_run(env, vlm):
     _pdf(inp / "PO.pdf", W_PO)
     _pdf(inp / "DN.pdf", W_DN)
     _pdf(inp / "SI.pdf", W_SI)
-    (inp / "corrupt.pdf").write_bytes(b"this is definitely not a PDF")
+    (inp / "corrupt.pdf").write_bytes(b"%PDF-1.4\nthis is definitely not a PDF")
 
     result = sync_flow()
 
@@ -463,7 +474,7 @@ def test_a_permanently_failed_document_is_counted_as_an_error_in_the_summary(env
     _pdf(inp / "PO.pdf", W_PO)
     _pdf(inp / "DN.pdf", W_DN)
     _pdf(inp / "SI.pdf", W_SI)
-    (inp / "corrupt.pdf").write_bytes(b"not a pdf at all")
+    (inp / "corrupt.pdf").write_bytes(b"%PDF-1.4\nnot a pdf at all")
 
     result = sync_flow()
 

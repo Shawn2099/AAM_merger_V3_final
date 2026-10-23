@@ -208,8 +208,14 @@ def test_delete_quarantined_clears_the_input_folder_copy(tmp_path):
         s.commit()
         ps = s.get(POSet, ps_id)
         ps.status = POSetStatus.quarantined
+        # The helper uses synthetic hashes for uniqueness in tests; this test
+        # exercises content matching, so give the row its real stored hash.
+        import hashlib
+
+        doc = s.query(Document).filter_by(po_set_id=ps_id).one()
+        doc.sha256_hash = hashlib.sha256(Path(doc.stored_path).read_bytes()).hexdigest()
+        stored = doc.stored_path
         s.commit()
-        stored = s.get(Document, ps_id).stored_path
 
     # the operator's file is still sitting in the input folder
     input_copy = Path(cfg.paths.input_folder) / "po.pdf"
@@ -221,8 +227,11 @@ def test_delete_quarantined_clears_the_input_folder_copy(tmp_path):
 
     assert audit.action == AuditAction.quarantine_delete
     assert not list(Path(cfg.paths.input_folder).glob("*.pdf")), "input copy still present"
-    moved = Path(cfg.paths.quarantine_folder) / "deleted_inputs" / "po.pdf"
-    assert moved.exists(), "the file must be kept, not deleted"
+    with Session(eng) as s:
+        archived = s.get(POSet, ps_id)
+        assert archived is not None and archived.archived_at is not None
+        moved = Path(archived.archive_path) / "input" / "po.pdf"
+    assert moved.exists(), "the file must be kept in the archive, not deleted"
 
 
 # ---------------------------------------------------------------------------
@@ -733,7 +742,8 @@ def test_delete_quarantined_survives_a_missing_input_file(tmp_path):
     )
     assert audit.action == AuditAction.quarantine_delete
     with Session(eng) as s:
-        assert s.get(POSet, ps_id) is None
+        archived = s.get(POSet, ps_id)
+        assert archived is not None and archived.archived_at is not None
 
 
 def test_the_reclaim_leaves_finished_documents_alone(tmp_path):
@@ -1276,7 +1286,9 @@ def test_a_read_document_is_not_scheduled_for_extraction(tmp_path, monkeypatch):
     input_dir = Path(cfg.paths.input_folder)
     input_dir.mkdir(parents=True, exist_ok=True)
     pdf = input_dir / "read.pdf"
-    PdfWriter().write(str(pdf))
+    w = PdfWriter()
+    w.add_blank_page(width=100, height=100)
+    w.write(str(pdf))
     data = pdf.read_bytes()
     digest = hashlib.sha256(data).hexdigest()
     stored = Path(cfg.paths.stored_documents_folder) / f"{digest}.pdf"

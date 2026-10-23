@@ -149,7 +149,11 @@ $dataDirs = @(
     "data\combined",
     "data\logs",
     "data\backup",
-    "data\samples"
+    "data\samples",
+    "data\raw_extractions",
+    "data\development\archived_sets",
+    "data\development\snapshots\db",
+    "data\prefect"
 )
 foreach ($dir in $dataDirs) {
     $fullPath = Join-Path $ProjectRoot $dir
@@ -160,9 +164,12 @@ foreach ($dir in $dataDirs) {
 Write-Host "  Data directories verified." -ForegroundColor Green
 
 # 3. Database Migration
+# NOT a bare `alembic upgrade head`: the live DB was created by create_all and
+# has no alembic_version, so Alembic would start from base and fail on the
+# existing tables. migrate_db.py stamps the proven revision first, and refuses
+# to report success unless the columns the code needs are present.
 Write-Host "[3/8] Applying SQLite Database Migrations..." -ForegroundColor Cyan
-$alembicScript = "import sys; from pathlib import Path; sys.path.insert(0, 'src'); from alembic.config import main; main(argv=['upgrade', 'head'])"
-& $venvPython -c $alembicScript
+& $venvPython "scripts\migrate_db.py"
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Database migration failed."
     exit $LASTEXITCODE
@@ -175,7 +182,7 @@ if ($OpenFirewall) {
     $ruleName = "AAM Merger V3 Web ($Port)"
     $existingRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
     if (-not $existingRule) {
-        New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -LocalPort $Port -Protocol TCP -Action Allow | Out-Null
+        New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -LocalPort $Port -Protocol TCP -Action Allow -Profile Domain,Private -RemoteAddress LocalSubnet | Out-Null
         Write-Host "  Firewall rule created for TCP port $Port." -ForegroundColor Green
     } else {
         Write-Host "  Firewall rule '$ruleName' already exists." -ForegroundColor Green
@@ -189,20 +196,65 @@ if ($ScheduleBackup) {
     Write-Host "[5/8] Configuring Scheduled Task for Daily Database Backups..." -ForegroundColor Cyan
     $taskName = "AAMMerger-DailyBackup"
     $backupScript = Join-Path $ProjectRoot "scripts\backup_db.ps1"
-    $action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$backupScript`"" -WorkingDirectory $ProjectRoot
+    $backupDir = Join-Path $ProjectRoot "data\development\snapshots\db"
+    $backupArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$backupScript`" -RetentionDays 0 -BackupDir `"$backupDir`""
+    $action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument $backupArgs -WorkingDirectory $ProjectRoot
     $trigger = New-ScheduledTaskTrigger -Daily -At 1am
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
-    Write-Host "  Registered scheduled task '$taskName' at 01:00 AM daily." -ForegroundColor Green
+    Write-Host "  Registered scheduled task '$taskName' at 01:00 AM daily (no pruning)." -ForegroundColor Green
+
+    # The development snapshot runs after the DB backup and copies logs/files.
+    $snapshotTask = "AAMMerger-DevelopmentSnapshot"
+    $snapshotScript = Join-Path $ProjectRoot "scripts\development_snapshot.ps1"
+    $snapshotArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$snapshotScript`""
+    $snapshotAction = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument $snapshotArgs -WorkingDirectory $ProjectRoot
+    $snapshotTrigger = New-ScheduledTaskTrigger -Daily -At 1:30am
+    Unregister-ScheduledTask -TaskName $snapshotTask -Confirm:$false -ErrorAction SilentlyContinue
+    Register-ScheduledTask -TaskName $snapshotTask -Action $snapshotAction -Trigger $snapshotTrigger -Principal $principal -Settings $settings | Out-Null
+    Write-Host "  Registered scheduled task '$snapshotTask' at 01:30 AM daily (copy-only)." -ForegroundColor Green
 } else {
     Write-Host "[5/8] Skipping Scheduled Backup Task registration (-ScheduleBackup not set)." -ForegroundColor Gray
 }
 
+# Prefect state belongs with the pilot data, not in the service account profile.
+$env:PREFECT_HOME = Join-Path $ProjectRoot "data\prefect"
+if (-not (Test-Path $env:PREFECT_HOME)) {
+    New-Item -ItemType Directory -Path $env:PREFECT_HOME -Force | Out-Null
+}
+
 # 6. Install NSSM Services (must exist before the Prefect pool/deployment is
 #    registered: the worker and the CLI have to point at the same API).
+#
+# Resolve the API URL BEFORE installing anything. `prefect worker start` exits
+# immediately when PREFECT_API_URL is unset ("must be set to start a Worker"),
+# and NSSM restarts it every 2 s forever. Installing the worker without an API
+# produced exactly that crash loop on the documented install command.
+$prefectApi = $PrefectApiUrl
+if ([string]::IsNullOrWhiteSpace($prefectApi) -and $WithPrefectServer) {
+    $prefectApi = "http://127.0.0.1:4200/api"
+}
+if ([string]::IsNullOrWhiteSpace($prefectApi) -and $env:PREFECT_API_URL) {
+    $prefectApi = $env:PREFECT_API_URL
+}
+if (-not $SkipServices -and [string]::IsNullOrWhiteSpace($prefectApi)) {
+    Write-Error "Refusing to install the worker service: no Prefect API URL. Re-run with -WithPrefectServer (single host) or -PrefectApiUrl <url>; -SkipServices installs only the web app."
+    exit 1
+}
+
+# The work-pool name comes from config.yaml. Compute it before installing: the
+# worker command used to hardcode "aam-merger-process-pool" while setup created
+# the pool named in config, so changing the key silently left the worker polling
+# a pool nobody created.
+$poolName = (& $venvPython -c "import sys; sys.path.insert(0,'src'); from app.core.config import load_config; print(load_config().prefect.work_pool_name)").Trim()
+if ([string]::IsNullOrWhiteSpace($poolName)) {
+    Write-Error "prefect.work_pool_name is blank in config.yaml."
+    exit 1
+}
+
 if (-not $SkipServices) {
     Write-Host "[6/8] Installing Windows Services via NSSM..." -ForegroundColor Cyan
     $installScript = Join-Path $ProjectRoot "scripts\install_nssm_services.ps1"
@@ -212,12 +264,15 @@ if (-not $SkipServices) {
         Port              = $Port
         HostAddress       = $HostAddress
         StartServices     = $true
+        WorkPoolName      = $poolName
     }
     if ($WithPrefectServer) {
         $installParams["WithPrefectServer"] = $true
     }
-    if (-not [string]::IsNullOrWhiteSpace($PrefectApiUrl)) {
-        $installParams["PrefectApiUrl"] = $PrefectApiUrl
+    if (-not [string]::IsNullOrWhiteSpace($prefectApi)) {
+        # Always propagate the resolved URL, not only when -PrefectApiUrl was
+        # passed explicitly: the worker and the CLI must talk to the same API.
+        $installParams["PrefectApiUrl"] = $prefectApi
     }
     & $installScript @installParams
 } else {
@@ -238,7 +293,6 @@ if ([string]::IsNullOrWhiteSpace($prefectApi) -and $env:PREFECT_API_URL) {
     $prefectApi = $env:PREFECT_API_URL
 }
 
-$poolName = (& $venvPython -c "import sys; sys.path.insert(0,'src'); from app.core.config import load_config; print(load_config().prefect.work_pool_name)").Trim()
 $apiUp = $false
 if (-not [string]::IsNullOrWhiteSpace($prefectApi)) {
     $env:PREFECT_API_URL = $prefectApi
@@ -288,7 +342,10 @@ if ($apiUp) {
 Write-Host "[8/8] Performing Smoke Test & Health Check..." -ForegroundColor Cyan
 if (-not $SkipServices) {
     $healthy = $false
-    $testUrl = "http://127.0.0.1:${Port}/health"
+    # 0.0.0.0 / :: is not a dialable address; loopback is. A service bound to a
+    # specific LAN address must be checked there, not on 127.0.0.1.
+    $probeHost = if ($HostAddress -eq "0.0.0.0" -or $HostAddress -eq "::") { "127.0.0.1" } else { $HostAddress }
+    $testUrl = "http://${probeHost}:${Port}/health"
     for ($i = 1; $i -le 15; $i++) {
         Start-Sleep -Seconds 1
         try {

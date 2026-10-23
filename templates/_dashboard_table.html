@@ -31,15 +31,32 @@
 
         <td>
           {% if status_str == 'merged' %}
-            <span class="badge badge-merged">✅ Merged &amp; Ready</span>
+            {% if not ps.has_merged_file %}
+              <span class="badge badge-quarantined" title="The database says merged, but the packet file is missing from the output folder.">Merged - packet missing</span>
+            {% elif ps.description_match_count and ps.description_match_count > 0 %}
+              <span class="badge badge-desc"
+                    title="The packet merged, but at least one vendor line was attached by DESCRIPTION rather than a printed line number. Check those item descriptions.">
+                Merged • review
+              </span>
+              <span class="badge badge-desc" style="font-size:0.72rem; margin-left:4px;"
+                    title="Number of vendor lines linked by the description fallback.">
+                description match ×{{ ps.description_match_count }}
+              </span>
+            {% else %}
+              <span class="badge badge-merged">Merged &amp; Ready</span>
+            {% endif %}
+            {% if ps.reconcile_reason and ps.reconcile_reason.startswith('Force-merged') %}
+              <span class="badge badge-mismatched" style="font-size:0.72rem; margin-left:4px;"
+                    title="Reconciliation and customs gates were bypassed by an operator.">Force-merged</span>
+            {% endif %}
           {% elif status_str == 'mismatched' %}
-            <span class="badge badge-mismatched">⚠️ Needs Review</span>
+            <span class="badge badge-mismatched">Needs Review</span>
           {% elif status_str == 'blocked_customs' %}
             <span class="badge badge-blocked">🔒 Awaiting Customs</span>
           {% elif status_str == 'quarantined' %}
             <span class="badge badge-quarantined">🚨 Quarantined</span>
           {% elif status_str == 'pending' %}
-            <span class="badge badge-pending">⏳ Ingesting / Pending</span>
+            <span class="badge badge-pending">Pending / Waiting</span>
           {% else %}
             <span class="badge badge-gray">{{ status_str }}</span>
           {% endif %}
@@ -72,8 +89,8 @@
         </td>
 
         <td class="muted" style="font-size:0.85rem; white-space:nowrap;">
-          {% if ps.updated_at and now_ts %}
-            {% set age = now_ts - ps.updated_at.timestamp() %}
+          {% if ps.age_seconds is not none %}
+            {% set age = ps.age_seconds %}
             {% if age < 90 %}
               just now
             {% elif age < 3600 %}

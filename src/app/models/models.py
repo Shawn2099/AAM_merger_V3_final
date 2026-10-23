@@ -10,7 +10,7 @@ from __future__ import annotations
 import enum
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -59,13 +59,20 @@ class Document(Base):
     __tablename__ = "documents"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    sha256_hash: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
+    # Uniqueness is enforced by the partial index below, not by a global
+    # constraint: an archived document must not block re-ingesting the same
+    # bytes after its set is archived. See POSet.archived_at.
+    sha256_hash: Mapped[str] = mapped_column(String, nullable=False)
     original_filename: Mapped[str] = mapped_column(Text, nullable=False)
     stored_path: Mapped[str] = mapped_column(Text, nullable=False)
     doc_type: Mapped[DocType] = mapped_column(Enum(DocType), nullable=False)
     raw_extraction_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     po_no_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     po_no_normalized: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # "manual" when an operator named the PO on the Unclassified page, NULL
+    # when it came from the VLM. Re-extraction must clear VLM-derived numbers
+    # but must not erase an explicit human placement.
+    po_no_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # True when the VLM saw more than one distinct PO number on this document.
     # The attach sweeps refuse to guess from such a document (see grouping);
     # it must resolve to a single PO before it may join a set.
@@ -97,6 +104,12 @@ class Document(Base):
     split_completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    # Set when the document's PO Set is archived. The row and its file remain
+    # for audit/analysis, but it is no longer "the" document with this hash:
+    # re-uploading the same bytes creates a fresh active row.
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )
@@ -112,6 +125,15 @@ class Document(Base):
     __table_args__ = (
         Index("ix_documents_po_no_normalized", "po_no_normalized"),
         Index("ix_documents_parent_document_id", "parent_document_id"),
+        Index("ix_documents_po_set_id", "po_set_id"),
+        # One ACTIVE document per content hash. Archived rows stay in the DB
+        # (and in the archive manifest) but do not reserve the hash forever.
+        Index(
+            "ix_documents_sha256_hash",
+            "sha256_hash",
+            unique=True,
+            sqlite_where=text("archived_at IS NULL"),
+        ),
     )
 
 
@@ -133,6 +155,8 @@ class LineItem(Base):
 
     document: Mapped[Document] = relationship(back_populates="line_items")
 
+    __table_args__ = (Index("ix_line_items_document_id", "document_id"),)
+
 
 class POSet(Base):
     __tablename__ = "po_sets"
@@ -147,6 +171,23 @@ class POSet(Base):
     # reviewer must re-run reconciliation to find out why a set is stuck, and
     # the reason is lost entirely on restart.
     reconcile_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # How many vendor lines were attached to a PO line by the DESCRIPTION
+    # fallback rather than by a printed line number. The engine's link is a
+    # guess in that case; the UI shows an amber review tag on a merged set so
+    # the reviewer knows which lines to check. It does NOT change the verdict.
+    description_match_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    # Archive, not delete. The row, its documents and its line items remain
+    # queryable for audit/analysis; worklists and grouping ignore archived
+    # sets. Keeping the row is why the open-set unique index and the document
+    # hash unique index are partial.
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None, index=True
+    )
+    archived_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    archive_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    archive_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     locked_by_action: Mapped[str | None] = mapped_column(Text, nullable=True)  # FR-CONC-1, SPEC §9
     locked_at: Mapped[datetime | None] = mapped_column(
@@ -160,6 +201,23 @@ class POSet(Base):
     )
 
     documents: Mapped[list[Document]] = relationship(back_populates="po_set")
+
+    # One open set per PO key. A completed set is excluded: a duplicate PO
+    # arriving after delivery must be able to form its own set (and be named
+    # apart/flagged), not collide with the historical one. An ARCHIVED set is
+    # excluded for the same reason: Delete keeps its rows, so without this
+    # predicate the archived row would reserve the PO forever and a new set
+    # could never be created. Without the index, concurrent sync/reclassify
+    # could both pass the SELECT and mint two open sets that share a
+    # quarantine folder and overwrite each other.
+    __table_args__ = (
+        Index(
+            "uq_po_sets_open_po_no",
+            "po_no_normalized",
+            unique=True,
+            sqlite_where=text("status != 'merged' AND archived_at IS NULL"),
+        ),
+    )
 
 
 class AuditLog(Base):
@@ -181,3 +239,5 @@ class AuditLog(Base):
         DateTime(timezone=True), default=utcnow, nullable=False
     )
     source: Mapped[str] = mapped_column(Text, default="system", nullable=False)
+
+    __table_args__ = (Index("ix_audit_log_po_set_id", "po_set_id"),)

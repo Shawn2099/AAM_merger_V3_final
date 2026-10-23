@@ -22,6 +22,7 @@
           <th>Administrative Action</th>
           <th>PO Set ID</th>
           <th>Event Detail</th>
+          <th>Operator Justification</th>
           <th>Initiator</th>
         </tr>
       </thead>
@@ -53,13 +54,16 @@
           <td style="max-width:380px; font-size:0.88rem; color:var(--text-main);">
             <code>{{ e.detail or '—' }}</code>
           </td>
+          {# The durable "why" the operator typed. This is the accountability
+             record the page exists for; showing only the JSON detail hid it. #}
+          <td style="max-width:320px; font-size:0.88rem;">{{ e.justification or '—' }}</td>
           <td class="muted" style="font-size:0.85rem;">
             {{ e.source }}
           </td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="5" style="text-align:center; padding:36px; color:var(--text-muted);">
+          <td colspan="6" style="text-align:center; padding:36px; color:var(--text-muted);">
             <div style="font-size:1.8rem; margin-bottom:6px;">📝</div>
             <div style="font-weight:600; color:var(--text-main);">Audit log is clean</div>
             <div style="font-size:0.85rem; margin-top:4px;">No override actions or manual interventions have been executed.</div>

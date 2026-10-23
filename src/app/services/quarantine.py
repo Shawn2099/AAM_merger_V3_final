@@ -28,6 +28,20 @@ _RESERVED_NAMES = (
 _MAX_FOLDER_LEN = 80
 
 
+def _source_file(doc) -> Path | None:
+    """The document's stored PDF, or None when the row cannot name a file.
+
+    `Path("")` is `"."`, which exists and would make `shutil.copy` try to copy
+    the working directory. A malformed/blank stored_path is a missing source,
+    not the cwd.
+    """
+    raw = getattr(doc, "stored_path", None)
+    if not raw:
+        return None
+    p = Path(raw)
+    return p if p.is_file() else None
+
+
 def _set_fingerprint(po_set) -> str:
     """A stable, collision-free discriminator for one PO set.
 
@@ -166,6 +180,58 @@ def _po_line_quantities(po_set) -> dict[str, int]:
     return out
 
 
+def _quarantine_set_folder(ps, cfg) -> Path:
+    """The folder for one set, disambiguated when a PO key is reused.
+
+    A duplicate PO after a merged set is allowed (the merged set is
+    historical), so two sets can share a PO number. Keying the folder only by
+    the number made the second set overwrite the first set's PDFs and
+    QUARANTINE.txt. The marker records the owner; a different owner gets the
+    content fingerprint appended. Re-quarantining the same set reuses its
+    folder.
+    """
+    base = Path(cfg.paths.quarantine_folder)
+    name = _safe_po_folder(ps.po_no_normalized, ps.id, _set_fingerprint(ps))
+    folder = base / name
+    marker = folder / ".po_set_id"
+    if folder.exists():
+        try:
+            owner = marker.read_text(encoding="utf-8").strip() if marker.is_file() else None
+        except OSError:
+            owner = None
+        if owner != str(ps.id):
+            # A third set can share both the PO and the content fingerprint
+            # (archive -> re-upload identical bytes -> quarantine). Keep
+            # incrementing until the folder is either free or already ours.
+            fp = (_set_fingerprint(ps) or str(ps.id))[:8]
+            counter = 2
+            while True:
+                suffix = f"__{fp}" if counter == 2 else f"__{fp}_{counter}"
+                candidate = base / f"{name[:70]}{suffix}"
+                if not candidate.exists():
+                    folder = candidate
+                    break
+                candidate_marker = candidate / ".po_set_id"
+                try:
+                    candidate_owner = (
+                        candidate_marker.read_text(encoding="utf-8").strip()
+                        if candidate_marker.is_file()
+                        else None
+                    )
+                except OSError:
+                    candidate_owner = None
+                if candidate_owner == str(ps.id):
+                    folder = candidate
+                    break
+                counter += 1
+    folder.mkdir(parents=True, exist_ok=True)
+    try:
+        marker.write_text(str(ps.id), encoding="utf-8")
+    except OSError:
+        logger.warning("Could not write quarantine owner marker in %s", folder)
+    return folder
+
+
 def quarantine_copy(
     po_set, cfg, reason: str | None = None, detail: str | None = None, flags: list | None = None
 ) -> Path:
@@ -185,14 +251,11 @@ def quarantine_copy(
                 raise ValueError(f"POSet {po_set} not found")
             s.refresh(ps, attribute_names=["documents"])
             # copy within session context while documents are loaded
-            folder = Path(cfg.paths.quarantine_folder) / _safe_po_folder(
-                ps.po_no_normalized, ps.id, _set_fingerprint(ps)
-            )
-            folder.mkdir(parents=True, exist_ok=True)
+            folder = _quarantine_set_folder(ps, cfg)
             docs = list(ps.documents or [])
             for doc in docs:
-                src = Path(doc.stored_path)
-                if not src.exists():
+                src = _source_file(doc)
+                if src is None:
                     continue
                 dst = folder / src.name
                 shutil.copy(str(src), str(dst))
@@ -200,13 +263,10 @@ def quarantine_copy(
             po_no = ps.po_no_normalized
             po_line_qty = _po_line_quantities(ps)
     else:
-        folder = Path(cfg.paths.quarantine_folder) / _safe_po_folder(
-            po_set.po_no_normalized, po_set.id, _set_fingerprint(po_set)
-        )
-        folder.mkdir(parents=True, exist_ok=True)
+        folder = _quarantine_set_folder(po_set, cfg)
         for doc in po_set.documents or []:
-            src = Path(doc.stored_path)
-            if not src.exists():
+            src = _source_file(doc)
+            if src is None:
                 continue
             dst = folder / src.name
             shutil.copy(str(src), str(dst))
@@ -246,12 +306,27 @@ def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
         original = doc.original_filename
         doc_id_out = doc.id
         attempts = doc.extraction_attempt_count or 0
+        sha = doc.sha256_hash
         s.expunge(doc)
 
     folder = Path(cfg.paths.quarantine_folder) / "_documents" / name.replace(".pdf", "")
     folder.mkdir(parents=True, exist_ok=True)
     if stored.exists():
         shutil.copy(str(stored), str(folder / name))
+    # Remove the input copy here, not only in the sync caller: the report below
+    # tells the operator it was removed, and `extraction._handle_combined`
+    # calls this directly. Match on content, so a same-named unrelated file is
+    # never swept away.
+    if original:
+        input_copy = Path(cfg.paths.input_folder) / original
+        if input_copy.is_file():
+            try:
+                import hashlib
+
+                if hashlib.sha256(input_copy.read_bytes()).hexdigest() == sha:
+                    input_copy.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Could not remove input copy %s", input_copy, exc_info=True)
     (folder / "QUARANTINE.txt").write_text(
         "\n".join(
             [
@@ -295,14 +370,255 @@ def validate_justification(text: str | None) -> str | None:
     return cleaned
 
 
-def delete_quarantined(
+def _json_default(value):
+    """Serialize DB values without losing the archive's audit detail."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if hasattr(value, "value"):
+        return value.value
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError(f"not JSON serializable: {type(value)!r}")
+
+
+def _write_json(path: Path, payload) -> None:
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False, default=_json_default),
+        encoding="utf-8",
+    )
+
+
+def _archive_file_name(doc: Document) -> str:
+    """A collision-free archive filename.
+
+    Two documents can legitimately share an original filename (batch exports
+    reuse names), so the archive uses the immutable document id and a hash
+    prefix rather than trusting the vendor's name.
+    """
+    source_name = Path(doc.stored_path).name if doc.stored_path else "missing.pdf"
+    prefix = f"{doc.id:06d}_{(doc.sha256_hash or '')[:12]}"
+    return f"{prefix}_{source_name}"
+
+
+def _copy_doc_to_archive(
+    doc: Document,
+    files_dir: Path,
+    file_rows: list[dict],
+    missing_files: list[dict],
+) -> None:
+    """Copy one document's stored PDF and append its manifest row."""
+    source_path = _source_file(doc)
+    row = {
+        "document_id": doc.id,
+        "sha256_hash": doc.sha256_hash,
+        "original_filename": doc.original_filename,
+        "stored_path": doc.stored_path,
+        "archived_name": None,
+    }
+    if source_path is None:
+        missing_files.append({"document_id": doc.id, "stored_path": doc.stored_path})
+        file_rows.append(row)
+        return
+    dest = files_dir / _archive_file_name(doc)
+    shutil.copy2(source_path, dest)
+    row["archived_name"] = dest.name
+    file_rows.append(row)
+
+
+def _find_existing_archive(
+    archive_root: Path, po_set_id: int, po_no: str | None
+) -> Path | None:
+    """A complete archive left by a previous attempt whose DB commit failed.
+
+    Reusing it makes a retry idempotent instead of writing a second copy of
+    every PDF. Only folders with both manifests AND a matching manifest count;
+    a half-written staging folder or another database's folder with the same
+    numeric id is ignored.
+    """
+    if not archive_root.exists():
+        return None
+    for candidate in sorted(archive_root.iterdir(), reverse=True):
+        if not candidate.is_dir() or not candidate.name.endswith(f"_{po_set_id}"):
+            continue
+        if not ((candidate / "ARCHIVE.txt").is_file() and (candidate / "manifest.json").is_file()):
+            continue
+        try:
+            manifest = json.loads((candidate / "manifest.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if manifest.get("po_set_id") != po_set_id:
+            continue
+        if manifest.get("po_no_normalized") != (po_no or ""):
+            continue
+        # A manifest is not proof that its files survived. A partially deleted
+        # export must not be adopted as the archive.
+        if any(
+            row.get("archived_name")
+            and not (candidate / "files" / row["archived_name"]).is_file()
+            for row in manifest.get("files", [])
+        ):
+            continue
+        return candidate
+    return None
+
+
+def _write_archive_manifest(
+    folder: Path,
+    ps: POSet,
+    docs: list[Document],
+    line_items: list[LineItem],
+    audits: list[AuditLog],
+    *,
+    source: str,
+    note: str | None,
+    archived_at: datetime,
+    archive_path: Path,
+    file_rows: list[dict],
+    missing_files: list[dict],
+) -> None:
+    """Write the self-describing export next to the copied PDFs."""
+    po_no = ps.po_no_normalized
+    status = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
+    reason = ps.reconcile_reason or note or "operator archive"
+
+    _write_json(
+        folder / "po_set.json",
+        {
+            "id": ps.id,
+            "po_no_normalized": po_no,
+            "status": status,
+            "has_customs_toggle": ps.has_customs_toggle,
+            "customs_doc_count": ps.customs_doc_count,
+            "merged_output_path": ps.merged_output_path,
+            "reconcile_reason": ps.reconcile_reason,
+            "description_match_count": ps.description_match_count,
+            "merged_at": ps.merged_at,
+            "locked_by_action": ps.locked_by_action,
+            "locked_at": ps.locked_at,
+            "created_at": ps.created_at,
+            "updated_at": ps.updated_at,
+            "archived_at": archived_at,
+            "archived_by": source,
+            "archive_reason": reason,
+            "archive_path": str(archive_path),
+        },
+    )
+    _write_json(
+        folder / "documents.json",
+        [
+            {
+                "id": d.id,
+                "sha256_hash": d.sha256_hash,
+                "original_filename": d.original_filename,
+                "stored_path": d.stored_path,
+                "doc_type": d.doc_type,
+                "raw_extraction_json": d.raw_extraction_json,
+                "po_no_raw": d.po_no_raw,
+                "po_no_normalized": d.po_no_normalized,
+                "po_no_source": d.po_no_source,
+                "po_reference_ambiguous": d.po_reference_ambiguous,
+                "dn_no": d.dn_no,
+                "si_no": d.si_no,
+                "invoice_no": d.invoice_no,
+                "extraction_status": d.extraction_status,
+                "extraction_attempt_count": d.extraction_attempt_count,
+                "po_set_id": d.po_set_id,
+                "parent_document_id": d.parent_document_id,
+                "is_split_parent": d.is_split_parent,
+                "split_completed_at": d.split_completed_at,
+                "archived_at": archived_at,
+                "created_at": d.created_at,
+                "updated_at": d.updated_at,
+            }
+            for d in docs
+        ],
+    )
+    _write_json(
+        folder / "line_items.json",
+        [
+            {
+                "id": li.id,
+                "document_id": li.document_id,
+                "line_item_no": li.line_item_no,
+                "description": li.description,
+                "quantity": li.quantity,
+                "unit_price": li.unit_price,
+                "dn_no": li.dn_no,
+            }
+            for li in line_items
+        ],
+    )
+    _write_json(
+        folder / "audit_log.json",
+        [
+            {
+                "id": a.id,
+                "po_set_id": a.po_set_id,
+                "action": a.action,
+                "detail": a.detail,
+                "justification": a.justification,
+                "timestamp": a.timestamp,
+                "source": a.source,
+            }
+            for a in audits
+        ],
+    )
+    _write_json(
+        folder / "manifest.json",
+        {
+            "po_no_normalized": po_no,
+            "po_set_id": ps.id,
+            "archived_at": archived_at,
+            "archived_by": source,
+            "archive_reason": reason,
+            "document_count": len(docs),
+            "line_item_count": len(line_items),
+            "audit_count": len(audits),
+            "files": file_rows,
+            "missing_files": missing_files,
+        },
+    )
+    lines = [
+        "ARCHIVED PO SET",
+        "=" * 60,
+        f"PO number      : {po_no or '(none)'}",
+        f"PO Set id      : {ps.id}",
+        f"Status         : {status}",
+        f"Reason         : {reason}",
+        f"Archived at    : {archived_at.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        f"Archived by    : {source}",
+        f"Justification  : {note or '(none)'}",
+        f"Documents      : {len(docs)}",
+        f"Line items     : {len(line_items)}",
+        f"Audit rows     : {len(audits)}",
+        f"Files copied   : {len(file_rows)}",
+        f"Files missing  : {len(missing_files)}",
+        "",
+        "This set is NOT deleted. The database rows remain and are hidden from",
+        "the active worklists. Re-ingesting these exact bytes creates a new",
+        "active document; the archived row no longer reserves the hash.",
+    ]
+    if missing_files:
+        lines += ["", "Missing stored files (recorded, not silently ignored):"]
+        for item in missing_files:
+            lines.append(f"  - document {item['document_id']}: {item['stored_path']}")
+    (folder / "ARCHIVE.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def archive_quarantined(
     po_set_id: int, cfg, justification: str | None = None, source: str = "system"
 ) -> AuditLog:
-    """Delete quarantined POSet DB rows only, keep files, write audit_log (FR-13.6-13.7).
+    """Archive a quarantined PO Set without deleting a single row.
 
-    Removes po_sets + documents + line_items rows scoped to po_set_id.
-    Does NOT delete stored_path files nor quarantine folder copies.
-    Inserts AuditLog(action=quarantine_delete). Verified status==quarantined.
+    The exported folder contains every stored PDF (copied, never moved), the
+    full PO Set/document/line-item/audit rows as JSON, a hash manifest and a
+    human-readable ARCHIVE.txt. The set's documents and the set itself are
+    marked `archived_at`; worklists and grouping ignore them.
+
+    Input-folder copies whose CONTENT matches one of the set's documents are
+    moved into the export's ``input/`` folder so the next sync cannot
+    resurrect the set. A newer active document with the same bytes is left
+    alone: re-uploading after an archive is a supported workflow.
     """
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
@@ -310,29 +626,252 @@ def delete_quarantined(
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise ValueError(f"POSet {po_set_id} not found")
+
+        # Idempotent: a second Delete click must not write a second export.
+        if ps.archived_at is not None:
+            existing = (
+                s.query(AuditLog)
+                .filter(
+                    AuditLog.po_set_id == po_set_id,
+                    AuditLog.action == AuditAction.quarantine_delete,
+                )
+                .order_by(AuditLog.id.desc())
+                .first()
+            )
+            if existing is not None:
+                return existing
+            audit = AuditLog(
+                po_set_id=po_set_id,
+                action=AuditAction.quarantine_delete,
+                detail=json.dumps(
+                    {
+                        "archived": True,
+                        "already_archived": True,
+                        "archive_path": ps.archive_path,
+                    }
+                ),
+                source=source,
+                justification=validate_justification(justification),
+            )
+            s.add(audit)
+            s.commit()
+            s.refresh(audit)
+            return audit
+
         note = validate_justification(justification)
-        # verify quarantined status (handle both enum and string)
         status_val = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
         if status_val != POSetStatus.quarantined.value:
             raise ValueError(f"POSet {po_set_id} is not quarantined (status={status_val})")
-        po_no = ps.po_no_normalized
-        # collect doc ids for line_items deletion
-        docs = s.query(Document).filter_by(po_set_id=po_set_id).all()
+
+        docs = s.query(Document).filter_by(po_set_id=po_set_id).order_by(Document.id).all()
         doc_ids = [d.id for d in docs]
-        # Snapshot the file identity NOW. After the delete and the commit
-        # these rows are gone and their attributes are expired, so reading
-        # them raises ObjectDeletedError — which is what used to leave the
-        # operator's file in the input folder, to be re-ingested by the next
-        # sync and resurrect the set that was just deleted.
+        line_items = (
+            s.query(LineItem)
+            .filter(LineItem.document_id.in_(doc_ids))
+            .order_by(LineItem.id)
+            .all()
+            if doc_ids
+            else []
+        )
+        audits = (
+            s.query(AuditLog)
+            .filter(AuditLog.po_set_id == po_set_id)
+            .order_by(AuditLog.id)
+            .all()
+        )
+
+        archive_root = Path(cfg.paths.archive_folder)
+        archive_root.mkdir(parents=True, exist_ok=True)
+        archived_at = datetime.now(UTC)
+
+        file_rows: list[dict] = []
+        missing_files: list[dict] = []
+
+        final_folder = _find_existing_archive(
+            archive_root, po_set_id, ps.po_no_normalized
+        )
+        if final_folder is None:
+            import uuid
+
+            staging = archive_root / f".tmp-{uuid.uuid4().hex}"
+            files_dir = staging / "files"
+            files_dir.mkdir(parents=True, exist_ok=True)
+
+            try:
+                for doc in docs:
+                    _copy_doc_to_archive(doc, files_dir, file_rows, missing_files)
+
+                # A concurrent sync/reclassify can attach a document while the
+                # copy runs. Re-read and include late arrivals so the manifest
+                # does not describe a different set than the DB commit marks.
+                for _ in range(2):
+                    current_docs = (
+                        s.query(Document)
+                        .filter_by(po_set_id=po_set_id)
+                        .order_by(Document.id)
+                        .all()
+                    )
+                    seen = {row["document_id"] for row in file_rows}
+                    late = [d for d in current_docs if d.id not in seen]
+                    if not late:
+                        docs = current_docs
+                        break
+                    for doc in late:
+                        _copy_doc_to_archive(doc, files_dir, file_rows, missing_files)
+                    docs = current_docs
+
+                doc_ids = [d.id for d in docs]
+                line_items = (
+                    s.query(LineItem)
+                    .filter(LineItem.document_id.in_(doc_ids))
+                    .order_by(LineItem.id)
+                    .all()
+                    if doc_ids
+                    else []
+                )
+                audits = (
+                    s.query(AuditLog)
+                    .filter(AuditLog.po_set_id == po_set_id)
+                    .order_by(AuditLog.id)
+                    .all()
+                )
+
+                safe = _safe_po_folder(ps.po_no_normalized, ps.id)
+                stamp = archived_at.strftime("%Y%m%dT%H%M%SZ")
+                final_folder = archive_root / f"{safe}_{stamp}_{ps.id}"
+                if final_folder.exists():
+                    # Keep the id LAST: _find_existing_archive matches the
+                    # suffix, and a post-commit retry must find this folder.
+                    final_folder = (
+                        archive_root / f"{safe}_{stamp}_{uuid.uuid4().hex[:6]}_{ps.id}"
+                    )
+                _write_archive_manifest(
+                    staging,
+                    ps,
+                    docs,
+                    line_items,
+                    audits,
+                    source=source,
+                    note=note,
+                    archived_at=archived_at,
+                    archive_path=final_folder,
+                    file_rows=file_rows,
+                    missing_files=missing_files,
+                )
+                staging.rename(final_folder)
+            except Exception:
+                # No DB row has changed yet; remove only the half-written
+                # staging folder. A complete folder is left for a safe retry.
+                shutil.rmtree(staging, ignore_errors=True)
+                raise
+        else:
+            # Retry after a commit failure: reuse the completed export and
+            # recover its file/missing counts for the audit row.
+            try:
+                manifest = json.loads(
+                    (final_folder / "manifest.json").read_text(encoding="utf-8")
+                )
+                file_rows = list(manifest.get("files", []))
+                missing_files = list(manifest.get("missing_files", []))
+            except (OSError, ValueError):
+                file_rows = []
+                missing_files = []
+
+        # Recompute against the rows that exist now, not the snapshot taken
+        # before the copy. The bulk mark below is the authority for the DB.
+        doc_ids = [d.id for d in docs]
         valid_hashes = {d.sha256_hash for d in docs if d.sha256_hash}
-        valid_names = {d.original_filename for d in docs if d.original_filename}
-        if doc_ids:
-            s.query(LineItem).filter(LineItem.document_id.in_(doc_ids)).delete(
-                synchronize_session=False
+        # A newer active document with the same bytes is NOT part of this
+        # archive's input sweep. Re-uploading identical content after archiving
+        # is intentional; sweeping it away would ingest the new file and then
+        # immediately remove it, looking like data loss.
+        active_hashes = {
+            h
+            for (h,) in s.query(Document.sha256_hash)
+            .filter(
+                Document.sha256_hash.in_(valid_hashes),
+                Document.archived_at.is_(None),
+                ~Document.id.in_(doc_ids),
             )
-        # audit FIRST with the real po_set_id (FK-valid at insert); the
-        # ON DELETE SET NULL below preserves the row with full detail (W-14).
-        detail = json.dumps({"po_no_normalized": po_no, "document_count": len(doc_ids)})
+            .all()
+            if h
+        }
+
+        # Move content-matched input copies into the archive. This runs for a
+        # fresh export AND for a retry that reuses a complete folder, so a
+        # commit failure cannot leave the input file able to re-create the set.
+        moved: list[tuple[Path, Path]] = []
+        input_dir = final_folder / "input"
+        input_dir.mkdir(parents=True, exist_ok=True)
+        input_root = Path(cfg.paths.input_folder)
+        if input_root.exists():
+            import hashlib
+
+            for source_file in list(input_root.iterdir()):
+                if not source_file.is_file() or source_file.suffix.lower() != ".pdf":
+                    continue
+                try:
+                    digest = hashlib.sha256(source_file.read_bytes()).hexdigest()
+                except Exception:
+                    continue
+                # Never sweep a file that a newer ACTIVE document still
+                # claims: re-uploading identical bytes after archive is
+                # supported, and moving its input copy would look like loss.
+                if digest not in valid_hashes or digest in active_hashes:
+                    continue
+                dest = input_dir / source_file.name
+                counter = len(moved) + 1
+                while dest.exists():
+                    dest = input_dir / (
+                        f"{source_file.stem}_{counter}{source_file.suffix}"
+                    )
+                    counter += 1
+                try:
+                    shutil.move(str(source_file), str(dest))
+                except Exception:
+                    for original, moved_to in reversed(moved):
+                        try:
+                            if moved_to.exists() and not original.exists():
+                                shutil.move(str(moved_to), str(original))
+                        except Exception:
+                            logger.warning(
+                                "Could not restore input file %s", original, exc_info=True
+                            )
+                    raise
+                moved.append((source_file, dest))
+
+        # Re-read through the same session: the folder is complete now.
+        ps.archived_at = archived_at
+        ps.archived_by = source
+        ps.archive_reason = ps.reconcile_reason or note or "operator archive"
+        ps.archive_path = str(final_folder)
+        # One UPDATE, not a loop over the stale snapshot: a document attached
+        # during the copy above must not stay ACTIVE inside an archived set
+        # (it would reserve its hash and be invisible in every worklist).
+        s.query(Document).filter(
+            Document.po_set_id == po_set_id,
+            Document.archived_at.is_(None),
+        ).update({Document.archived_at: archived_at}, synchronize_session=False)
+
+        document_count = s.query(Document).filter_by(po_set_id=po_set_id).count()
+        line_item_count = (
+            s.query(LineItem)
+            .filter(LineItem.document_id.in_(doc_ids))
+            .count()
+            if doc_ids
+            else 0
+        )
+        detail = json.dumps(
+            {
+                "archived": True,
+                "po_no_normalized": ps.po_no_normalized,
+                "document_count": document_count,
+                "line_item_count": line_item_count,
+                "archive_path": str(final_folder),
+                "missing_files": len(missing_files),
+                "moved_input_count": len(moved),
+            }
+        )
         audit = AuditLog(
             po_set_id=po_set_id,
             action=AuditAction.quarantine_delete,
@@ -341,50 +880,18 @@ def delete_quarantined(
             justification=note,
         )
         s.add(audit)
-        s.flush()
-        # delete documents scoped to this POSet
-        s.query(Document).filter_by(po_set_id=po_set_id).delete(synchronize_session=False)
-        # delete po_set row itself (SET NULL fires on the audit row)
-        s.delete(ps)
         s.commit()
         s.refresh(audit)
-
-        # Move source files out of input_folder to prevent re-ingestion loop
-        try:
-            import contextlib
-            import hashlib
-            import time
-
-            input_dir = Path(cfg.paths.input_folder)
-            if input_dir.exists():
-                deleted_dir = Path(cfg.paths.quarantine_folder) / "deleted_inputs"
-                deleted_dir.mkdir(parents=True, exist_ok=True)
-                for f in list(input_dir.iterdir()):
-                    if not f.is_file() or f.suffix.lower() != ".pdf":
-                        continue
-                    should_move = False
-                    with contextlib.suppress(Exception):
-                        f_hash = hashlib.sha256(f.read_bytes()).hexdigest()
-                        if f_hash in valid_hashes or f.name in valid_names:
-                            should_move = True
-                    if should_move:
-                        dest = deleted_dir / f.name
-                        if dest.exists():
-                            dest = deleted_dir / f"{f.stem}_{int(time.time())}{f.suffix}"
-                        with contextlib.suppress(Exception):
-                            shutil.move(str(f), str(dest))
-        except Exception:
-            # The rows are already deleted, so the file may survive in the
-            # input folder. That is visible — the next sync re-ingests it and
-            # the set comes back — but it must not be silent.
-            logger.warning(
-                "Could not clear the input folder after deleting PO Set %s — the file may "
-                "be picked up again by the next sync",
-                po_set_id,
-                exc_info=True,
-            )
-
         return audit
+
+
+def delete_quarantined(
+    po_set_id: int, cfg, justification: str | None = None, source: str = "system"
+) -> AuditLog:
+    """Backward-compatible name for the Delete route: archive, never delete."""
+    return archive_quarantined(
+        po_set_id, cfg, justification=justification, source=source
+    )
 
 
 def manual_merge(

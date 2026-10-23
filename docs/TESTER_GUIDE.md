@@ -60,7 +60,7 @@ Press **⚡ Scan Input Folder** on the dashboard.
 | **Merged & Ready** | PO = DN total = SI total; the packet is written | Download it from the set's page |
 | **Needs Review** | The quantities do not add up | Open the set, read the matrix, fix the paperwork or Force Merge with a note |
 | **Awaiting Customs** | The customs/shipping requirement is switched on but documents are missing | Upload the customs and shipping PDFs on the set page |
-| **Quarantined** | A critical problem (e.g. zero quantity, two POs in one set) | Read the reason on the Quarantine page |
+| **Quarantined** | A critical problem (e.g. zero quantity, PO reference mismatch) | Read the reason on the Quarantine page |
 
 ---
 
@@ -113,9 +113,12 @@ human to say which PO it belongs to.
 The **🚨 Quarantine** page lists sets that failed a critical check and documents
 that could not be read at all. Each row states the reason in plain language.
 
-Deleting a quarantined set removes its database records **but keeps the files**
-and writes an audit entry. If you need the documents again, they are still on
-disk — ask the server operator.
+**Delete is an archive action.** It moves the set to
+`data/development/archived_sets`, keeps every database record and every stored
+PDF, and writes an audit entry. The set disappears from the quarantine and
+dashboard lists, but nothing is destroyed. If you need the documents again, they
+are still on disk — ask the server operator. The same PDF can be uploaded again
+after a set is archived; the new upload becomes a fresh active document.
 
 ---
 
@@ -127,8 +130,8 @@ These are deliberate limits of the current version, not bugs:
   SKU are not compared. Two different items on the same line number with the
   same quantity would be treated as equal — so a human review of every merge is
   required, not optional.
-- **One PO per set.** A second PO document under the same number quarantines the
-  set rather than doubling the quantities.
+- **One PO per set.** A second PO document under the same number holds the set
+  pending for review; the engine never sums them or auto-merges.
 - **Content only.** A promising filename is ignored on purpose.
 - **A document with no readable PO number waits** in the holding area for a
   human; it is not quarantined.

@@ -301,7 +301,7 @@ def test_no_invoice_number_falls_back_to_po_name(tmp_path):
     assert reason and "No invoice number" in reason, reason
 
 
-def test_two_pos_in_one_set_quarantine(tmp_path):
+def test_two_pos_in_one_set_are_pending(tmp_path):
     cfg = _cfg(tmp_path, "twopo.db")
     ps_id = _build(
         tmp_path,
@@ -315,7 +315,7 @@ def test_two_pos_in_one_set_quarantine(tmp_path):
         ],
     )
     res = reconcile_po_set(ps_id, cfg)
-    assert res["status"] == "quarantined", res
+    assert res["status"] == "pending", res
     assert res["reason"] == "multiple_po_documents", res
 
 
@@ -448,8 +448,13 @@ def test_missing_si_document_stays_pending_with_reason(tmp_path):
     assert reason and "invoice" in reason.lower(), reason
 
 
-def test_dn_doc_with_no_lines_is_partial_not_mismatch(tmp_path):
-    """A DN row that delivered nothing is outstanding delivery, not disagreement."""
+def test_dn_doc_with_no_lines_is_quarantined_not_a_wait(tmp_path):
+    """A valid DN that produced no lines is broken data, not a delivery in transit.
+
+    Treating it as `pending/partial_fulfillment` created a state no later sweep
+    could leave: all three document types were present, the DN was `valid`, and
+    re-extraction was never scheduled.
+    """
     cfg = _cfg(tmp_path, "dnempty.db")
     ps_id = _build(
         tmp_path,
@@ -462,11 +467,8 @@ def test_dn_doc_with_no_lines_is_partial_not_mismatch(tmp_path):
         ],
     )
     res = reconcile_po_set(ps_id, cfg)
-    assert res["status"] == "pending", res
-    assert res["reason"] == "partial_fulfillment", res
-    dn_flags = [f for f in res["flags"] if f.get("pool") == "DN"]
-    assert dn_flags, res
-    assert all((f.get("vendor_quantity") or 0) == 0 for f in dn_flags), res
+    assert res["status"] == "quarantined", res
+    assert res["reason"] == "vendor_document_has_no_line_items", res
     assert not list(Path(cfg.paths.output_folder).glob("*.pdf"))
 
 

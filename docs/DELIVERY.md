@@ -52,10 +52,15 @@ What it does, in order:
 
 1. syncs the Python environment (`uv sync --no-dev`, or `pip install -e .`);
 2. creates `config.yaml` if missing and the data folders;
-3. applies the database schema (`alembic upgrade head`);
+3. applies the database schema (`python scripts/migrate_db.py` — handles both a
+   fresh database and the existing `create_all`-era database, which has no
+   `alembic_version`; a bare `alembic upgrade head` fails on the latter);
 4. adds the inbound firewall rule for TCP 8000 (`-OpenFirewall`);
-5. registers the daily 01:00 database backup (`-ScheduleBackup`);
-6. installs and starts three Windows services:
+5. registers the daily 01:00 database backup (`-ScheduleBackup`, no pruning,
+   into `data\development\snapshots\db`) and the 01:30 copy-only development
+   snapshot task for logs and PDFs;
+6. installs and starts three Windows services (NSSM log rotation is disabled;
+   `PREFECT_HOME` is pinned to `data\prefect`):
    `AAMMerger-PrefectServer`, `AAMMerger-Worker`, `AAMMerger-Web`;
 7. waits for the Prefect API, creates the `aam-merger-process-pool` work pool,
    registers the **midnight sync** deployment, and restarts the worker;
@@ -83,7 +88,9 @@ scheduled sync without touching data. That is also the upgrade path (section 8).
    packet appears in `data\output`.
 4. `.\scripts\manage_services.ps1 -Action status` shows all three services
    `Running`.
-5. `.\scripts\backup_db.ps1` creates a file in `data\backup`.
+5. `.\scripts\backup_db.ps1 -RetentionDays 0` creates a file in
+   `data\development\snapshots\db`, and the `AAMMerger-DevelopmentSnapshot`
+   task has copied logs/files into `data\development\snapshots`.
 
 ---
 
@@ -113,18 +120,32 @@ fine, pointing the app at a UNC path is not required and adds failure modes.
   `config.example.yaml` sets `prefect.schedule_timezone: "Asia/Kolkata"`, so
   this is **IST midnight**. Change it to the office's IANA zone if the client
   is elsewhere, and re-run the installer to re-register the schedule.
-- **Backups** run at 01:00 via the `AAMMerger-DailyBackup` scheduled task, keep
-  30 days, and live in `data\backup\`.
+- **Backups** run at 01:00 via the `AAMMerger-DailyBackup` scheduled task with
+  `-RetentionDays 0` and `-BackupDir data\development\snapshots\db`. Nothing is
+  pruned.
+- **Development snapshot** runs at 01:30 via
+  `AAMMerger-DevelopmentSnapshot`. It copies logs, raw JSON, `stored`,
+  `quarantine`, `output` and `combined` into `data\development\snapshots` with
+  `robocopy /E /XO` (copy-only; never deletes).
 - **Logs** are in `data\logs\` (`aam_merger.log` plus NSSM stdout/stderr).
+  `logging.backup_count: 0` and NSSM `AppRotateFiles 0` keep one growing file.
+- **Delete is archive.** A quarantined set's rows and PDFs are kept; the export
+  is under `data\development\archived_sets`.
 - **Manual scan** is the same button users press: it is safe to run at any time;
   a second request while one is running is refused with 409.
 
 Restore a backup: stop the services, replace `data\aam_merger.db` with a file
-from `data\backup`, delete any `-wal`/`-shm` beside it, start the services.
+from `data\development\snapshots\db`, delete any `-wal`/`-shm` beside it, start
+the services. Keep `data\stored`, `data\output`, `data\combined` and
+`data\quarantine` with the restored DB — the rows point at those files.
 
 ---
 
 ## 7. Clearing data between test rounds
+
+> **Do not run this on the pilot PC.** The pilot exists to collect data; a reset
+> destroys the DB, the ingested PDFs and the generated packets. Use it only on a
+> throwaway test rig, after copying `data\development` to external media.
 
 ```powershell
 .\scripts\reset_data.ps1          # asks you to type RESET
@@ -132,7 +153,14 @@ from `data\backup`, delete any `-wal`/`-shm` beside it, start the services.
 
 It refuses while port 8000 is in use, backs the database up first, deletes the
 database and every ingested/generated file, then recreates the schema. It keeps
-`config.yaml`, `.env`, `data\backup` and the logs.
+`config.yaml`, `.env`, `data\backup` and the logs. It does not preserve
+`data\development`; copy that folder first if you need it.
+
+It also refuses to touch any path that is outside `<project>\data`, or that is
+the backup folder (or one of its parents): a typo in `config.yaml` cannot make
+it empty a system folder, and the snapshot it just wrote is never deleted by
+the same run. A production layout under `C:\AAM` is therefore out of scope for
+this test-rig script — use `scripts\backup_db.py` and a manual cleanup there.
 
 ---
 
@@ -161,7 +189,7 @@ run the same command.
 | Nightly sync does not run | `PREFECT_API_URL` and the pool must exist. Check `AAMMerger-PrefectServer` is Running, then re-run the installer (step 7). |
 | Documents stay "Not read" | The server has no internet, or the key is out of quota. Check `data\logs\aam_merger.log`. |
 | Database errors on a network drive | Move the database back to a local disk. SQLite WAL does not work over SMB. |
-| Port 8000 already in use | Stop whatever owns it (`Get-NetTCPConnection -LocalPort 8000`), or change `server.port` in `config.yaml` and re-run the installer. |
+| Port 8000 already in use | Stop whatever owns it (`Get-NetTCPConnection -LocalPort 8000`), or re-run the installer with `-Port <free port>`. The bind port comes from the installer parameter; `server.port` in `config.yaml` is not read by the service. |
 
 ---
 
@@ -172,10 +200,14 @@ run the same command.
 - [ ] Firewall rule present; dashboard opens from a second PC
 - [ ] One real PO/DN/SI set merged end-to-end; packet in `data\output`
 - [ ] Intake folder shared (or an agreed way to deliver PDFs)
-- [ ] Daily backup task registered; one backup exists
+- [ ] Daily backup task registered with `-RetentionDays 0`; one backup exists in `data\development\snapshots\db`
+- [ ] `AAMMerger-DevelopmentSnapshot` task registered; one snapshot contains logs/files
+- [ ] NSSM `AppRotateFiles 0` on all three services; `logging.backup_count: 0`
+- [ ] `data\development\archived_sets` exists and is writable; Delete was tested once
+- [ ] No one will run `scripts\reset_data.ps1` during the pilot
 - [ ] Dashboard URL written down for users
 - [ ] `docs/TESTER_GUIDE.md` given to the testers
-- [ ] Known limitations explained (guessed merge risk, quantities only, one PO per set)
+- [ ] Known limitations explained (guessed merge risk, quantities only, one PO per set, archive-on-delete)
 
 ---
 
@@ -185,3 +217,16 @@ There is **no authentication**. Anyone who can reach port 8000 can see every
 document and press every button. That is acceptable only on the client's
 private office LAN. Do not expose it to the internet, and keep the firewall rule
 scoped to the office subnet rather than "Any".
+
+Two browser-side hardening checks exist and are worth keeping on:
+
+- A state-changing request (`POST`/`PUT`/`PATCH`/`DELETE`) whose `Origin` or
+  `Referer` names a different host than the request is refused with `403`.
+  Requests that send neither header (curl, integrations) still work.
+- `server.allowed_hosts` (default `["*"]`, which accepts any host) can list the
+  host's real names/IPs; when it does, an HTTP `Host` header that is not listed
+  is refused. Set it when the host address is stable — it closes DNS-rebinding
+  reads that the no-auth design would otherwise allow.
+
+They reduce cross-site request forgery and DNS rebinding; they are **not**
+authentication and do not make an internet-facing deployment safe.

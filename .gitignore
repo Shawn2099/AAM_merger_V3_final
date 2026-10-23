@@ -24,6 +24,8 @@ data/samples/*
 !data/samples/.gitkeep
 data/Automation/
 data/backup/
+data/combined/
+data/development/
 data/*.json
 data/extraction_dump.json
 data/raw_extractions/
@@ -90,3 +92,8 @@ graphify-out/
 !skills-lock.json
 .worktrees/
 worktrees/
+
+# DB backups with a timestamp suffix (e.g. aam_merger.db.bak-20261022-201905, *.db-wal.bak-*)
+*.db.bak*
+*.db-wal.bak*
+*.db-shm.bak*

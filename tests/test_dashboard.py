@@ -344,9 +344,10 @@ def test_htmx_partial_refresh_attributes(tmp_cfg, client):
     _create_poset(tmp_cfg, po_no="POHTMX1", status=POSetStatus.pending)
     r = client.get("/dashboard")
     html = r.text
-    # dashboard must poll via hx-get + hx-trigger every 2s + hx-swap
+    # dashboard must poll via hx-get + hx-trigger + hx-swap (one poller only)
     assert "hx-get" in html
-    assert "every 2s" in html or "every 2" in html
+    assert "every 5s" in html
+    assert html.count('id="po-table"') == 1
     assert "hx-swap" in html or "outerHTML" in html or "innerHTML" in html
     # table fragment endpoint must also be HTMX-aware
     rf = client.get("/dashboard/table?status=pending")
@@ -665,12 +666,18 @@ def test_manual_merge_success_cleans_tmp(client, tmp_path, monkeypatch):
 def test_document_preview_and_merged_download(tmp_cfg, client, tmp_path):
     eng = get_engine(tmp_cfg)
     Base.metadata.create_all(eng)
-    pdf_file = tmp_path / "test_preview.pdf"
+    # Both served files live in their configured roots; the endpoints confine
+    # every DB path to those roots (a row cannot point the server anywhere).
+    pdf_file = Path(tmp_cfg.paths.stored_documents_folder) / "test_preview.pdf"
+    pdf_file.parent.mkdir(parents=True, exist_ok=True)
     pdf_file.write_bytes(b"%PDF-1.4 sample content")
+    merged_file = Path(tmp_cfg.paths.output_folder) / "merged_preview.pdf"
+    merged_file.parent.mkdir(parents=True, exist_ok=True)
+    merged_file.write_bytes(b"%PDF-1.4 merged content")
 
     with Session(eng) as s:
         ps = POSet(
-            po_no_normalized="POPREV1", status=POSetStatus.merged, merged_output_path=str(pdf_file)
+            po_no_normalized="POPREV1", status=POSetStatus.merged, merged_output_path=str(merged_file)
         )
         s.add(ps)
         s.commit()
@@ -698,7 +705,7 @@ def test_document_preview_and_merged_download(tmp_cfg, client, tmp_path):
     r_merged = client.get(f"/po_sets/{ps_id}/merged_pdf")
     assert r_merged.status_code == 200
     assert r_merged.headers["content-type"] == "application/pdf"
-    assert b"%PDF-1.4" in r_merged.content
+    assert b"%PDF-1.4 merged" in r_merged.content
 
 
 def test_static_assets_served(client):
@@ -753,8 +760,11 @@ def test_detail_matrix_absent_dn_pool_shows_mismatch(tmp_cfg, client, tmp_path):
 
     r = client.get(f"/po_sets/{ps_id}/view")
     assert r.status_code == 200, r.text
-    assert "row-mismatch" in r.text
-    assert "DN: 0" in r.text
+    # A missing pool is a wait, not a quantity failure. The status is pending,
+    # so the matrix must not paint the row as a mismatch.
+    assert "row-pending" in r.text
+    assert "Awaiting DN" in r.text
+    assert "row-mismatch" not in r.text
 
 
 def test_reclassify_combined_rejected(tmp_cfg, client):
@@ -915,3 +925,213 @@ def test_reclassify_customs_updates_count_and_clears_blocked(tmp_cfg, client):
         ps = s.get(POSet, pid)
         assert ps.customs_doc_count == 2
         assert ps.status == POSetStatus.pending
+
+def test_invalid_status_filter_is_422(client):
+    r = client.get("/dashboard", params={"status": "not-a-status"})
+    assert r.status_code == 422
+    r2 = client.get("/dashboard/table", params={"status": "not-a-status"})
+    assert r2.status_code == 422
+
+
+def test_unclassified_normalize_uses_the_server_normalizer(client):
+    r = client.get("/unclassified/normalize", params={"po_no": "PO-210851"})
+    assert r.status_code == 200
+    assert r.json() == {"normalized": "210851"}
+    r2 = client.get("/unclassified/normalize", params={"po_no": "161538,2"})
+    assert r2.json() == {"normalized": "161538"}
+
+def test_unclassified_save_and_route_has_a_form_owner(client, tmp_cfg):
+    """The button and inputs live in the same row; no <form> inside <tr>."""
+    from pypdf import PdfWriter
+
+    eng = get_engine(tmp_cfg)
+    pdf = Path(tmp_cfg.paths.stored_documents_folder) / "unclassified.pdf"
+    pdf.parent.mkdir(parents=True, exist_ok=True)
+    w = PdfWriter()
+    w.add_blank_page(width=100, height=100)
+    w.write(str(pdf))
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="hash_unclassified_form",
+            original_filename="unclassified.pdf",
+            stored_path=str(pdf),
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.valid,
+            po_set_id=None,
+        )
+        s.add(doc)
+        s.commit()
+        doc_id = doc.id
+
+    html = client.get("/unclassified").text
+    start = html.index(f'id="doc-row-{doc_id}"')
+    row = html[start : html.index("</tr>", start)]
+    assert 'hx-include="closest tr"' in row
+    assert "<form" not in row
+    assert 'type="button"' in row
+
+
+def test_document_filename_is_escaped_not_interpolated_into_js(client, tmp_cfg):
+    pid = _create_poset_with_docs(tmp_cfg, po_no="PO-XSS")
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        doc = s.query(Document).filter(Document.po_set_id == pid).first()
+        doc.original_filename = 'evil" onmouseover="alert(1).pdf'
+        s.commit()
+
+    html = client.get(f"/po_sets/{pid}/view").text
+    assert 'onmouseover="alert(1)' not in html
+    assert "data-preview-name=" in html
+
+def test_reclassify_refuses_a_completed_split_parent(client, tmp_cfg):
+    from datetime import UTC, datetime
+
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="hash_split_parent_guard",
+            original_filename="combined.pdf",
+            stored_path="data/stored/combined.pdf",
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.valid,
+            po_set_id=None,
+            is_split_parent=True,
+            split_completed_at=datetime.now(UTC),
+        )
+        s.add(doc)
+        s.commit()
+        doc_id = doc.id
+
+    r = client.post(
+        f"/unclassified/{doc_id}/reclassify",
+        data={"doc_type": "PO", "po_no": "PO-SPLIT"},
+    )
+    assert r.status_code == 409
+    assert "split" in r.text.lower()
+
+
+def test_a_failed_split_parent_is_visible_and_recoverable(client, tmp_cfg):
+    """A split that never completed must not vanish from every operator view.
+
+    P0-3 excluded every `is_split_parent` row from the holding area. A failed
+    split has no children and no set, so it then appeared on no page at all and
+    could not be reclassified — a readable packet lost from view.
+    """
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="hash_failed_split_parent",
+            original_filename="failed-split.pdf",
+            stored_path="data/stored/failed-split.pdf",
+            doc_type=DocType.COMBINED,
+            extraction_status=ExtractionStatus.failed,
+            po_set_id=None,
+            is_split_parent=True,
+            split_completed_at=None,
+        )
+        s.add(doc)
+        s.commit()
+        doc_id = doc.id
+
+    page = client.get("/unclassified")
+    assert page.status_code == 200
+    assert "failed-split.pdf" in page.text
+
+    r = client.post(
+        f"/unclassified/{doc_id}/reclassify",
+        data={"doc_type": "PO", "po_no": "PO-RECOVERED"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 302
+    with Session(eng) as s:
+        recovered = s.get(Document, doc_id)
+        assert recovered.is_split_parent is False
+        assert recovered.po_set_id is not None
+
+def test_customs_badges_use_attached_types_not_the_count(client, tmp_cfg):
+    """A CUSTOMS document must not make the SHIPPING badge say Attached."""
+    import re
+
+    from pypdf import PdfWriter
+
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        ps = POSet(
+            po_no_normalized="PO-BADGE",
+            status=POSetStatus.blocked_customs,
+            has_customs_toggle=True,
+            customs_doc_count=2,
+        )
+        s.add(ps)
+        s.commit()
+        pdf = Path(tmp_cfg.paths.stored_documents_folder) / "customs-only.pdf"
+        pdf.parent.mkdir(parents=True, exist_ok=True)
+        w = PdfWriter()
+        w.add_blank_page(width=100, height=100)
+        w.write(str(pdf))
+        s.add(
+            Document(
+                sha256_hash="hash_customs_only",
+                original_filename="customs-only.pdf",
+                stored_path=str(pdf),
+                doc_type=DocType.CUSTOMS,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=ps.id,
+            )
+        )
+        s.commit()
+        pid = ps.id
+
+    html = client.get(f"/po_sets/{pid}/view").text
+    assert re.search(r"Customs Clearance:.*?Attached", html, re.S)
+    assert re.search(r"Shipping \(AWB\):.*?Missing", html, re.S)
+
+def test_customs_rebuild_runs_while_the_per_po_lock_is_held(
+    client, tmp_cfg, monkeypatch
+):
+    """The append must not run after the upload lock is released."""
+    from pypdf import PdfWriter
+
+    from app.services import merge as merge_service
+
+    pid = _create_poset_with_docs(tmp_cfg, po_no="PO-LOCK", status=POSetStatus.merged)
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        ps = s.get(POSet, pid)
+        ps.has_customs_toggle = True
+        ship_pdf = Path(tmp_cfg.paths.stored_documents_folder) / "shipping.pdf"
+        w = PdfWriter()
+        w.add_blank_page(width=100, height=100)
+        w.write(str(ship_pdf))
+        s.add(
+            Document(
+                sha256_hash="hash_shipping_lock_test",
+                original_filename="shipping.pdf",
+                stored_path=str(ship_pdf),
+                doc_type=DocType.SHIPPING,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=pid,
+            )
+        )
+        s.commit()
+
+    observed = {}
+
+    def fake_append(po_set_id, cfg, source="operator"):
+        with Session(get_engine(cfg)) as s:
+            observed["locked_by_action"] = s.get(POSet, po_set_id).locked_by_action
+        return Path(cfg.paths.output_folder) / "fake.pdf"
+
+    monkeypatch.setattr(merge_service, "append_customs_to_merged_packet", fake_append)
+    customs_pdf = Path(tmp_cfg.paths.stored_documents_folder) / "customs-upload.pdf"
+    w = PdfWriter()
+    w.add_blank_page(width=100, height=100)
+    w.write(str(customs_pdf))
+
+    response = client.post(
+        f"/po_sets/{pid}/upload",
+        data={"doc_type": "CUSTOMS"},
+        files={"file": ("customs-upload.pdf", customs_pdf.read_bytes(), "application/pdf")},
+    )
+    assert response.status_code in (200, 302)
+    assert observed.get("locked_by_action") == "manual_upload"

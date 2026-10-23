@@ -37,6 +37,9 @@ REAL_SETS = [
     ("Halliburton 4518897682", ["4518897682"], ["4518897682"]),
     ("Nabors 37028240", ["37028240"], ["37028240"]),
     ("H&P 540012562", ["540012562"], ["540012562"]),
+    # Real header prints LPO26/2360 ("Local Purchase Order"); its DN prints
+    # "PO 26/2360". Both are the same order.
+    ("RAK LPO26/2360", ["LPO26/2360"], ["PO 26/2360"]),
 ]
 
 
@@ -83,6 +86,20 @@ def test_distinct_pos_never_collide():
         ("161538,0", "161538"),
         ("PO, 161538", "161538"),
         ("Purchase Order, 8300023893", "8300023893"),
+        # Label spellings the tokeniser used to split: these are one PO, not
+        # two, and the old entries for "P.O."/"P/0" could never match.
+        ("P.O. 161538", "161538"),
+        ("P.O 161538", "161538"),
+        ("P/0 161538", "161538"),
+        ("LPO26/2360", "262360"),
+        # A trailing revision must not become part of the key: "161538 Rev 2"
+        # keyed as 1615382 and collided with a different PO numbered 1615382.
+        ("161538 Rev 2", "161538"),
+        ("PO No. 161538 Rev. 0", "161538"),
+        # A printed thousand is not PO 1 revision 000, and Indian grouping is
+        # a number too ("1,00,000" used to key as "100").
+        ("1,000", "1000"),
+        ("1,00,000", "100000"),
         # Structured codes must survive intact
         ("D7264-PO-186000-013-01", "D7264PO18600001301"),
         ("D7264-PO186000-013-01-", "D7264PO18600001301"),
@@ -106,6 +123,13 @@ def test_sap_internal_id_stays_distinct_from_the_po_number():
     the SAP internal reference onto the PO, or two unrelated keys would merge.
     """
     assert normalize_po_no("PO_2112_15676_0_US") != normalize_po_no("15676")
+
+
+def test_a_revision_suffix_never_collides_with_a_different_po():
+    """The dangerous direction of the revision rule."""
+    assert normalize_po_no("161538 Rev 2") == normalize_po_no("161538")
+    assert normalize_po_no("161538 Rev 2") != normalize_po_no("1615382")
+    assert normalize_po_no("1,000") != normalize_po_no("1")
 
 
 def test_blank_and_none_are_safe():

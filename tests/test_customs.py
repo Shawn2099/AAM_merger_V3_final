@@ -64,13 +64,18 @@ def _add_doc(tmp_path, cfg, po_set_id, doc_type_str):
 
 
 def test_toggle_blocked(tmp_path):
-    """Brief shape: toggle -> is_blocked True (needs CUSTOMS+SHIPPING)."""
+    """Toggling the gate on records the requirement without inventing a verdict.
+
+    `blocked_customs` means "quantities reconciled, customs pair missing". A
+    set that has not reconciled must keep its real status until the next
+    reconcile says otherwise.
+    """
     from app.services.customs import is_blocked, toggle_customs
 
     po_set_id, cfg = _create_po_set(tmp_path, "PO-1234")
     ps = toggle_customs(po_set_id, cfg)
     assert ps.has_customs_toggle is True
-    assert ps.status.value == "blocked_customs"
+    assert ps.status.value == "pending"
     assert is_blocked(ps) is True  # needs CUSTOMS+SHIPPING
 
 
@@ -156,11 +161,14 @@ def test_toggle_any_status(tmp_path):
         po_set_id, cfg = _create_po_set(tmp_path, f"PO-ANY-{st.value}", status=st)
         ps = toggle_customs(po_set_id, cfg)
         assert ps.has_customs_toggle is True
-        assert ps.status.value == "blocked_customs"
+        assert ps.status == st, (st, ps.status)
         assert is_blocked(ps) is True
-        # toggle off should clear
+        # Toggling off clears the flag; only the gate's own blocked state
+        # returns to pending, never a quarantine or mismatch.
         ps2 = toggle_customs(po_set_id, cfg)
         assert ps2.has_customs_toggle is False
+        expected2 = POSetStatus.pending if st == POSetStatus.blocked_customs else st
+        assert ps2.status == expected2, (st, ps2.status)
         assert is_blocked(ps2) is False
 
 

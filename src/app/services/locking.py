@@ -65,14 +65,36 @@ def acquire_lock(ps: POSet, action: str, session: Session, cfg: AppConfig) -> bo
     return False
 
 
-def release_lock(ps: POSet, session: Session, action: str | None = None) -> None:
+def release_if_stale(ps: POSet, session: Session, cfg: AppConfig) -> bool:
+    """Clear a lock only when it is stale and is still the lock that was observed.
+
+    The read (`is_locked`) and the write are two statements. Without the
+    `action`/`locked_at` predicates, a cleanup that decided "stale" could clear
+    a FRESH lock acquired by another request in between — losing the 409 the
+    lock exists to provide. Returns True when a lock was cleared.
+    """
+    if ps.locked_by_action is None or is_locked(ps, cfg):
+        return False
+    release_lock(ps, session, action=ps.locked_by_action, observed_at=ps.locked_at)
+    return True
+
+
+def release_lock(
+    ps: POSet, session: Session, action: str | None = None, observed_at=None
+) -> None:
     """Release active lock held on POSet.
 
-    If action is specified, only releases if held by that action.
+    If action is specified, only releases if held by that action. If
+    `observed_at` is given, the release is also conditional on the lock still
+    being the one that was observed, so a cleanup that decided "this lock is
+    stale" cannot clear a FRESH lock acquired by another request in the gap
+    between the read and this write.
     """
     stmt = update(POSet).where(POSet.id == ps.id)
     if action is not None:
         stmt = stmt.where(POSet.locked_by_action == action)
+    if observed_at is not None:
+        stmt = stmt.where(POSet.locked_at == observed_at)
     stmt = stmt.values(locked_by_action=None, locked_at=None).execution_options(
         synchronize_session=False
     )

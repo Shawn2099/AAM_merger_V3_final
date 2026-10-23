@@ -27,6 +27,10 @@ REASONS = (
     "page_range_invalid",
     "page_range_overlap",
     "pages_unaccounted",
+    # The VLM claimed every page as SKIP: a structurally valid decomposition
+    # that would produce no child document at all. Retiring the PDF silently
+    # (parent `valid`, zero children) is how a real packet disappears.
+    "no_document_pages",
 )
 
 
@@ -77,6 +81,16 @@ def split_combined(parent_path: str | Path, response: dict, cfg) -> list[Path]:
     if not parent.exists():
         raise SplitError("page_range_invalid", f"parent not found: {parent}")
     data = parent.read_bytes()
+    sha16 = hashlib.sha256(data).hexdigest()[:16]
+    input_dir = Path(cfg.paths.input_folder)
+    input_dir.mkdir(parents=True, exist_ok=True)
+    # A crash after cutting some pages leaves `<sha16>_p*.pdf` behind. A
+    # re-split may produce a different decomposition (or be refused), and stale
+    # children from the abandoned pass would otherwise be ingested as real
+    # documents. Clear them BEFORE any validation: a refused re-split must not
+    # leave the previous pass's pages in input/.
+    for stale in input_dir.glob(f"{sha16}_p*.pdf"):
+        stale.unlink(missing_ok=True)
     real_pages = len(PdfReader(str(parent)).pages)
 
     claimed_count = (response or {}).get("page_count")
@@ -117,9 +131,6 @@ def split_combined(parent_path: str | Path, response: dict, cfg) -> list[Path]:
 
     # Cut non-SKIP components. Names are dense over kept components so a
     # SKIP in the middle does not leave a p-number gap on disk.
-    input_dir = Path(cfg.paths.input_folder)
-    input_dir.mkdir(parents=True, exist_ok=True)
-    sha16 = hashlib.sha256(data).hexdigest()[:16]
     reader = PdfReader(str(parent))
     out: list[Path] = []
     kept = [c for c in components if str(c.get("doc_type", "")).upper() != "SKIP"]

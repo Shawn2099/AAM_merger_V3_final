@@ -49,10 +49,10 @@ echo "[2/6] uv sync --all-groups"
 UV_CACHE_DIR=/tmp/uv-cache uv sync --all-groups >/dev/null
 echo "  deps ok"
 
-# 3) DB migrate
-echo "[3/6] alembic upgrade head"
-UV_CACHE_DIR=/tmp/uv-cache uv run alembic upgrade head 2>&1 | tail -n 5 || true
-echo "  db ok (sqlite WAL at $(grep sqlalchemy.url alembic.ini | cut -d= -f2-))"
+# 3) DB migrate — handles a fresh DB and the existing create_all-era DB
+echo "[3/6] scripts/migrate_db.py"
+UV_CACHE_DIR=/tmp/uv-cache uv run python scripts/migrate_db.py
+echo "  db ok (sqlite WAL)"
 
 if [ "$WITH_PREFECT" -eq 1 ]; then ensure_prefect; fi
 

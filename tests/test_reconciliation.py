@@ -67,7 +67,9 @@ def _reconcile_with_quantities(po_q, dn_q, si_q):
         ps_id = ps.id
         for n, (dtype, qty) in enumerate((("PO", po_q), ("DN", dn_q), ("SI", si_q)), start=1):
             p = tmp / "stored" / f"{n}_{dtype}.pdf"
-            PdfWriter().write(str(p))
+            w = PdfWriter()
+            w.add_blank_page(width=100, height=100)
+            w.write(str(p))
             d = Document(
                 sha256_hash=f"neg_{n}",
                 original_filename=f"{dtype}.pdf",
@@ -831,7 +833,9 @@ def test_step_10_numbering_no_longer_maps_and_quarantines(tmp_path):
         docs = {}
         for dtype in ("PO", "DN", "SI"):
             p = tmp_path / "stored_step10" / f"{dtype.lower()}.pdf"
-            PdfWriter().write(str(p))
+            w = PdfWriter()
+            w.add_blank_page(width=100, height=100)
+            w.write(str(p))
             d = Document(
                 sha256_hash=f"step10_{dtype}",
                 original_filename=f"{dtype.lower()}.pdf",

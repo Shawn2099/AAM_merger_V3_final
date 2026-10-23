@@ -263,8 +263,9 @@ def test_persist_failure_never_fails_reconcile(tmp_path):
 
 
 def test_merge_refusal_restores_prior_status(tmp_path):
-    """Docs but zero line-item evidence: merge refuses (None) and the set
-    keeps its prior status instead of sliding to pending."""
+    """Docs but zero line-item evidence: reconciliation quarantines with a
+    named reason instead of leaving the set silently pending (or claiming it
+    reconciled and then refusing the merge)."""
     from app.services.reconciliation import reconcile_po_set
 
     cfg, eng = _cfg(tmp_path, "refuse.db")
@@ -275,9 +276,10 @@ def test_merge_refusal_restores_prior_status(tmp_path):
         _doc(s, cfg, ps.id, "SI", "si.pdf", [], si_no="I1", invoice_no="I1")
         ps_id = ps.id
     res = reconcile_po_set(ps_id, cfg)
-    assert res["status"] == "mismatched"
+    assert res["status"] == "quarantined"
+    assert res["reason"] == "po_document_has_no_line_items"
     with Session(eng) as s:
-        assert s.get(POSet, ps_id).status == POSetStatus.mismatched
+        assert s.get(POSet, ps_id).status == POSetStatus.quarantined
         assert s.get(POSet, ps_id).merged_output_path is None
 
 
@@ -315,9 +317,9 @@ def test_packet_name_unsafe_si_falls_back_and_empty_is_none():
 
     si = SimpleNamespace(doc_type="SI", si_no="!!!", invoice_no=None)
     ps = SimpleNamespace(documents=[si], po_no_normalized="PO-1")
-    assert _packet_name(ps) == ("PO-1", True)
+    assert _packet_name(ps) == ("PO-1", True, ["!!!"])
     ps2 = SimpleNamespace(documents=[si], po_no_normalized="")
-    assert _packet_name(ps2) == (None, True)
+    assert _packet_name(ps2) == (None, True, ["!!!"])
 
 
 def test_resolve_own_file_returns(tmp_path):
@@ -330,17 +332,18 @@ def test_resolve_own_file_returns(tmp_path):
 def test_write_merged_missing_refuses_and_allows(tmp_path):
     import pytest
 
-    from app.services.merge import _write_merged
+    from app.services.merge import MergeSourceError, _write_merged
 
     good = _tiny_pdf(tmp_path / "good.pdf")
     ghost = SimpleNamespace(
         stored_path=str(tmp_path / "ghost.pdf"), id=9, original_filename="ghost.pdf"
     )
     docs = [SimpleNamespace(stored_path=str(good), id=1, original_filename="good.pdf"), ghost]
-    with pytest.raises(FileNotFoundError, match=r"ghost\.pdf"):
+    with pytest.raises(MergeSourceError, match=r"ghost\.pdf"):
         _write_merged(docs, tmp_path / "o1.pdf", allow_missing=False)
-    out = _write_merged(docs, tmp_path / "o2.pdf", allow_missing=True)
-    assert out.exists()
+    pages = _write_merged(docs, tmp_path / "o2.pdf", allow_missing=True)
+    assert pages >= 1
+    assert (tmp_path / "o2.pdf").exists()
 
 
 def test_merge_missing_set_raises_and_empty_set_refuses(tmp_path):
@@ -381,19 +384,18 @@ def test_merge_refuses_blocked_and_missing_file(tmp_path):
         )
         blocked_id = ps.id
         ps2 = _po_set(s, "PO-MF")
-        ghost = Document(
-            sha256_hash="h_ghost",
-            original_filename="ghost.pdf",
-            stored_path=str(tmp_path / "nope.pdf"),
-            doc_type=DocType.PO,
-            extraction_status=ExtractionStatus.valid,
-            po_set_id=ps2.id,
-        )
-        s.add(ghost)
+        _doc(s, cfg, ps2.id, "PO", "ghost.pdf", [{"no": "1", "qty": 100}])
+        ghost = s.query(Document).filter_by(po_set_id=ps2.id).one()
+        ghost.stored_path = str(tmp_path / "nope.pdf")
         s.commit()
         ghost_id = ps2.id
     assert merge_po_set(blocked_id, cfg) is None  # customs gate unsatisfied
-    assert merge_po_set(ghost_id, cfg) is None  # stored file gone → refuse
+    import pytest
+
+    from app.services.merge import MergeSourceError
+
+    with pytest.raises(MergeSourceError, match=r"ghost\.pdf"):
+        merge_po_set(ghost_id, cfg)  # stored file gone → named source failure
     with Session(eng) as s:
         assert s.get(POSet, ghost_id).merged_output_path is None
 
@@ -610,7 +612,9 @@ def test_toggle_counts_only_customs_shipping(tmp_path):
         ps_id = ps.id
     out = toggle_customs(ps_id, cfg)
     assert out.customs_doc_count == 0
-    assert out.status == POSetStatus.blocked_customs
+    # Toggling the requirement on does not invent a verdict for a set that
+    # has not reconciled; reconcile/merge sets blocked_customs when it applies.
+    assert out.status == POSetStatus.pending
     with Session(eng) as s:
         assert is_blocked(s.get(POSet, ps_id)) is True
 

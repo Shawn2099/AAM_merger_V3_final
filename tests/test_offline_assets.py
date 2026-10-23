@@ -21,6 +21,12 @@ def test_dashboard_scripts_are_served_locally():
     assert "/static/js/alpine.min.js" in html
     assert "unpkg.com" not in html
     assert "cdn.jsdelivr.net" not in html
+    # Fonts were still fetched from Google after the JS was vendored. On a LAN
+    # with no internet that is a failing external request on every page load
+    # (and a privacy leak from the client's browser). The theme already falls
+    # back to system fonts.
+    assert "fonts.googleapis.com" not in html
+    assert "fonts.gstatic.com" not in html
 
 
 def test_vendored_scripts_are_present():

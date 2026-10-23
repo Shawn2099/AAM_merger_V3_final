@@ -13,14 +13,24 @@ This guide details the single-host production and test rig setup for **AAM Merge
 Run PowerShell as **Administrator** from the project directory:
 
 ```powershell
-.\scripts\setup_test_rig.ps1 -OpenFirewall -ScheduleBackup
+.\scripts\setup_test_rig.ps1 -OpenFirewall -ScheduleBackup -WithPrefectServer
 ```
+
+> `-WithPrefectServer` is required on a single host. Without a Prefect API URL
+> the worker service cannot start (it exits immediately and NSSM restarts it),
+> and the midnight deployment is never registered. The installer now refuses to
+> install the worker in that state rather than reporting success.
 
 ### What this script automates:
 1. **Virtual Environment**: Verifies or creates `.venv` and installs dependencies.
 2. **Configuration**: Copies `config.example.yaml` to `config.yaml` (if missing).
 3. **Data Directories**: Creates all necessary folders (`data/input`, `output`, `quarantine`, `stored`, `logs`, `backup`).
-4. **Database Migration**: Executes `alembic upgrade head` to initialise or migrate SQLite WAL.
+4. **Database Migration**: Executes `python scripts/migrate_db.py` — initialises
+   a fresh SQLite database, or migrates an existing one. (A bare
+   `alembic upgrade head` is only correct for an empty database: the live DB
+   was created by `create_all`, so it has no `alembic_version` and Alembic
+   would try to create existing tables. The script detects the schema, writes a
+   pre-migration backup, stamps the proven revision, then upgrades.)
 5. **Prefect Deployment**: Registers the midnight sync schedule (`0 0 * * *`).
 6. **Firewall**: Adds an inbound Windows Firewall rule for TCP port 8000 (if `-OpenFirewall` is passed).
 7. **Daily Backups**: Schedules a daily Windows Scheduled Task at 01:00 AM (if `-ScheduleBackup` is passed).
@@ -62,6 +72,9 @@ paths:
 server:
   host: "0.0.0.0"
   port: 8000
+  # Optional Host-header allow-list (DNS-rebinding hardening). ["*"] accepts
+  # any host; list stable names/IPs to close rebinding, e.g. ["aam.local"].
+  allowed_hosts: ["*"]
 ```
 > **CRITICAL SQLite Rule:** The SQLite database file must reside on a **local drive** (e.g., `C:` or `D:`). SQLite WAL mode requires POSIX/shared memory locks that are **incompatible with network SMB shares**.
 
@@ -97,7 +110,7 @@ Three scripts are provided in `scripts/`:
 
 ## 4. Service Architecture & Log Files
 
-NSSM wraps the Python processes and redirects all console output with automatic 10 MB file rotation:
+NSSM wraps the Python processes and redirects all console output. For the pilot, rotation is **disabled** (`AppRotateFiles 0`) so logs are never pruned; the development snapshot task copies them:
 
 | Service Name | Executable & Arguments | Log Files |
 |---|---|---|
@@ -105,7 +118,7 @@ NSSM wraps the Python processes and redirects all console output with automatic 
 | `AAMMerger-Worker` | `python.exe -m prefect worker start --pool aam-merger-process-pool` | `data\logs\nssm-worker-stdout.log`<br>`data\logs\nssm-worker-stderr.log` |
 | `AAMMerger-PrefectServer` *(optional)* | `python.exe -m prefect server start --host 127.0.0.1 --port 4200` | `data\logs\nssm-prefect-server-stdout.log` |
 
-Application-level logs (from Python's `RotatingFileHandler`) are stored in `data\logs\app.log`.
+Application-level logs (from Python's `RotatingFileHandler`) are stored in `data\logs\aam_merger.log` (web process). The worker's own log records are in `nssm-worker-stdout.log` / `nssm-worker-stderr.log`.
 
 ---
 
@@ -114,12 +127,13 @@ Application-level logs (from Python's `RotatingFileHandler`) are stored in `data
 A dedicated online backup script safely checkpoints the WAL journal and creates an atomic snapshot without stopping the server:
 
 ```powershell
-.\scripts\backup_db.ps1 -RetentionDays 30
+.\scripts\backup_db.ps1 -RetentionDays 0 -BackupDir .\data\development\snapshots\db
 ```
 
-- Backups are timestamped: `data\backup\aam_merger_YYYYMMDD_HHMMSS.db`.
-- Backups older than 30 days are automatically pruned.
-- Scheduled automatically when `setup_test_rig.ps1 -ScheduleBackup` is run.
+- Backups are timestamped to the microsecond: `data\development\snapshots\db\aam_merger_YYYYMMDD_HHMMSS_ffffff.db` (a counter is appended if the name already exists, so two runs can never overwrite each other).
+- Each snapshot is written to a hidden `.partial` file, checked with `PRAGMA integrity_check`, and only then renamed into place. A failed check leaves no backup an operator could mistake for a good one.
+- `-RetentionDays 0` keeps every verified backup. Do not use a positive retention on the pilot PC.
+- Scheduled automatically when `setup_test_rig.ps1 -ScheduleBackup` is run; `AAMMerger-DevelopmentSnapshot` at 01:30 copies logs/files into the same development folder.
 
 ---
 

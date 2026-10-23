@@ -3,7 +3,9 @@
     scripts/backup_db.ps1 - Automated, online SQLite WAL backup for AAM Merger V3 (SPEC NFR-6).
 .DESCRIPTION
     Invokes scripts/backup_db.py to safely checkpoint the WAL journal and stream an
-    atomic online backup to data/backup/aam_merger_YYYYMMDD_HHMMSS.db.
+    atomic online backup to data/backup/aam_merger_YYYYMMDD_HHMMSS_ffffff.db.
+    The file is integrity-checked before it is given that name; an older backup
+    is pruned only if it still passes the same check.
 .PARAMETER RetentionDays
     Number of days to keep historical backups (default: 30).
 .PARAMETER BackupDir

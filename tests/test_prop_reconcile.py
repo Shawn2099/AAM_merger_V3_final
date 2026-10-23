@@ -210,5 +210,6 @@ def test_prop_reconcile_verdict_is_sound(data):
                 "missing_dn_document",
                 "missing_si_document",
                 "partial_fulfillment",
+                "multiple_po_documents",
             }, res.get("reason")
             assert ps.merged_output_path is None

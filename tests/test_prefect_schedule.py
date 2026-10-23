@@ -1,8 +1,8 @@
 """The midnight sync must run at the office's midnight, not UTC's.
 
 Prefect's cron schedule is UTC unless a timezone is given. The deployment is
-built from config so the installer can set it per site; unset keeps Prefect's
-default (UTC) rather than silently choosing a zone.
+built from config so the installer can set it per site; unset defaults to the
+office's zone (Asia/Kolkata) rather than silently running at 05:30 local.
 """
 
 from __future__ import annotations
@@ -47,8 +47,33 @@ def test_schedule_carries_the_configured_timezone():
     assert schedule.timezone == "Asia/Kolkata"
 
 
-def test_schedule_is_a_plain_cron_string_when_no_timezone_is_set():
+def test_schedule_is_a_cron_schedule_and_defaults_to_ist():
     module = _load_deploy_module()
     cfg = SimpleNamespace(prefect=SimpleNamespace(schedule_timezone=None))
 
-    assert module._schedule(cfg) == "0 0 * * *"
+    schedule = module._schedule(cfg)
+    assert schedule.cron == "0 0 * * *"
+    assert schedule.timezone == "Asia/Kolkata"
+
+
+def test_to_deployment_accepts_the_schedule_object():
+    """The deployment must be constructed with `schedule=`, not `cron=`.
+
+    Passing a CronSchedule to `cron=` fails pydantic validation, so the
+    deployment was never registered when a timezone was configured. Build the
+    deployment object only (no `.apply()`): this is the regression guard.
+    """
+    from app.flows.sync import sync_flow
+
+    module = _load_deploy_module()
+    cfg = SimpleNamespace(prefect=SimpleNamespace(schedule_timezone="Asia/Kolkata"))
+
+    deployment = sync_flow.to_deployment(
+        name="aam-midnight-sync-test",
+        schedule=module._schedule(cfg),
+        work_pool_name="test-pool",
+    )
+    assert len(deployment.schedules) == 1
+    built = deployment.schedules[0].schedule
+    assert built.cron == "0 0 * * *"
+    assert built.timezone == "Asia/Kolkata"

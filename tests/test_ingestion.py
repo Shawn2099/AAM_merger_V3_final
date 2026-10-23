@@ -1,7 +1,19 @@
+import io
 from pathlib import Path
+
+from pypdf import PdfWriter
 
 from app.core.config import load_config
 from app.services.ingestion import ingest_file, is_file_stable
+
+
+def _pdf_bytes() -> bytes:
+    """A real one-page PDF: ingestion now rejects non-%PDF- input (P2-23)."""
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
 
 
 def test_is_file_stable(tmp_path):
@@ -19,8 +31,9 @@ def test_dedup_sha256(tmp_path):
     (tmp_path / "input").mkdir()
     a = tmp_path / "a.pdf"
     b = tmp_path / "b.pdf"
-    a.write_bytes(b"same")
-    b.write_bytes(b"same")
+    data = _pdf_bytes()
+    a.write_bytes(data)
+    b.write_bytes(data)
     d1 = ingest_file(a, cfg)
     d2 = ingest_file(b, cfg)
     assert d1.sha256_hash == d2.sha256_hash
@@ -32,7 +45,7 @@ def test_stored_path_never_deleted(tmp_path):
     cfg.paths.stored_documents_folder = tmp_path / "stored"
     (tmp_path / "stored").mkdir()
     p = tmp_path / "orig.pdf"
-    p.write_bytes(b"data")
+    p.write_bytes(_pdf_bytes())
     d = ingest_file(p, cfg)
     assert Path(d.stored_path).exists()
 

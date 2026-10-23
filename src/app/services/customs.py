@@ -32,23 +32,20 @@ def is_blocked(po_set: POSet) -> bool:
 
 
 def toggle_customs(po_set_id: int, cfg) -> POSet:
-    """Flip has_customs_toggle regardless of current status (FR-12.1) and update status.
+    """Flip has_customs_toggle without hiding the set's real verdict.
 
-    - Flips has_customs_toggle.
-    - If now True and NOT yet satisfied (is_blocked) → status = blocked_customs
-      (FR-12.2) — except on a merged set, which stays `merged`.
-    - If now True and already satisfied (both CUSTOMS + SHIPPING present, is_blocked is
-      False) → status is unchanged. Forcing blocked_customs would immediately unblock on
-      the next reconcile pass, so the net effect is always a no-op — leave it alone.
-    - If now False and status was blocked_customs → status = pending (gate lifted).
-    - Also maintains customs_doc_count (count of CUSTOMS + SHIPPING docs attached).
+    The customs requirement is a gate, not a reconciliation result. A
+    quarantined, mismatched, or still-missing-document set keeps its status:
+    writing `blocked_customs` over it hid the quarantine from the quarantine
+    worklist and put an "Awaiting Customs" header over a quantity failure.
+    This function owns only its own state: clearing `blocked_customs` when
+    the requirement is switched off, and healing the historical inconsistent
+    case where `blocked_customs` is set with the gate off and both documents
+    present. Every other transition belongs to `reconcile_po_set`.
 
-    A merged set may be toggled ON. Its packet was written before the customs
-    requirement existed; the caller (`web route`) then rebuilds the packet once
-    both documents are attached. The status must stay `merged` either way: the
-    old implementation wrote `blocked_customs`, which showed a delivered packet
-    as "Awaiting Customs" and lost its terminal state. The append itself is
-    `merge.append_customs_to_merged_packet`, audited as `customs_append`.
+    A merged set may be toggled ON. Its packet was written before the
+    customs requirement existed; the caller then rebuilds the packet once
+    both documents are attached. The status stays `merged`.
     """
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
@@ -56,6 +53,8 @@ def toggle_customs(po_set_id: int, cfg) -> POSet:
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise ValueError(f"POSet {po_set_id} not found")
+        if ps.archived_at is not None:
+            raise ValueError(f"POSet {po_set_id} is archived and read-only")
         # flip
         ps.has_customs_toggle = not ps.has_customs_toggle
 
@@ -70,20 +69,25 @@ def toggle_customs(po_set_id: int, cfg) -> POSet:
                 types_present.add(val)
         ps.customs_doc_count = len(types_present)
 
-        if ps.has_customs_toggle:
-            # FR-12.1: if blocked, force into blocked_customs; if gate already satisfied, ensure not blocked
-            if ps.status == POSetStatus.merged:
-                # Delivered is terminal. The packet is rebuilt by the caller if
-                # both documents are present; the status never regresses.
-                pass
-            elif is_blocked(ps):
-                ps.status = POSetStatus.blocked_customs
-            elif ps.status == POSetStatus.blocked_customs:
-                ps.status = POSetStatus.pending
-        else:
-            # toggled OFF -> clear blocked_customs if it was set
-            if ps.status == POSetStatus.blocked_customs:
-                ps.status = POSetStatus.pending
+        # Toggling the gate OFF clears only the state this gate owns. A
+        # quarantine or mismatch is a real verdict and stays put.
+        if (
+            not ps.has_customs_toggle
+            and ps.status == POSetStatus.blocked_customs
+        ):
+            ps.status = POSetStatus.pending
+            ps.reconcile_reason = (
+                "Customs requirement removed; re-evaluate this set to merge."
+            )
+        # Heal the historical inconsistency: `blocked_customs` with the toggle
+        # OFF but both documents present. Toggling it ON must not leave the set
+        # stuck in a state the gate no longer explains.
+        if (
+            ps.has_customs_toggle
+            and ps.status == POSetStatus.blocked_customs
+            and not is_blocked(ps)
+        ):
+            ps.status = POSetStatus.pending
 
         s.commit()
         s.refresh(ps)

@@ -14,7 +14,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -165,6 +165,27 @@ class _VLMPageExtraction(BaseModel):
 
 def is_manual_only(doc_type: str) -> bool:
     return doc_type in ("CUSTOMS", "SHIPPING")
+
+
+#: The product's fixed default: three attempts before a document is terminal.
+DEFAULT_EXTRACTION_ATTEMPTS = 3
+
+
+def _attempt_cap(cfg) -> int:
+    """Attempts a document gets before extraction is permanently failed.
+
+    The product fixes this at three attempts, and `extraction.max_retries`
+    (1..5) is the operator's knob for the same envelope. The old hard-coded
+    `>= 3` made any configured value above 3 inert — the knob read as
+    "attempts" but attempts 4 and 5 were never made. Derive the cap from the
+    configured value so the knob does what it says, while the default (3)
+    keeps the product behaviour unchanged.
+    """
+    raw = getattr(getattr(cfg, "extraction", None), "max_retries", DEFAULT_EXTRACTION_ATTEMPTS)
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_EXTRACTION_ATTEMPTS
 
 
 def _parse_scaled_int(val: int | float | str | None, locale: str = "en_IN") -> int:
@@ -357,7 +378,15 @@ def _handle_combined(doc, s, result: dict, cfg) -> Document:
     from app.services.splitting import SplitError, split_combined
 
     try:
-        split_combined(doc.stored_path, result, cfg)
+        children = split_combined(doc.stored_path, result, cfg)
+        if not children:
+            # An all-SKIP decomposition retires the whole PDF with no child
+            # document, no quarantine and no trace. A real packet misread as
+            # covers must fail visibly instead.
+            raise SplitError(
+                "no_document_pages",
+                "the splitter claimed every page as SKIP; no PO/DN/SI document would exist",
+            )
     except SplitError as e:
         doc.extraction_status = ExtractionStatus.failed
         doc.split_completed_at = None
@@ -391,6 +420,22 @@ def _handle_combined(doc, s, result: dict, cfg) -> Document:
                 input_copy.unlink(missing_ok=True)
             else:
                 shutil.move(str(input_copy), str(dest))
+        # A byte-identical copy under another name is the same document. It was
+        # de-duplicated to this parent row, so nothing will ever read it; left
+        # in input/ it is re-hashed on every sync and never cleared. Remove
+        # every input copy whose content is the parent's (stored/ is untouched).
+        import hashlib
+
+        for other in Path(cfg.paths.input_folder).iterdir():
+            if not other.is_file() or other.suffix.lower() != ".pdf":
+                continue
+            if other.name == (doc.original_filename or ""):
+                continue
+            try:
+                if hashlib.sha256(other.read_bytes()).hexdigest() == doc.sha256_hash:
+                    other.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Could not remove duplicate input copy %s", other, exc_info=True)
     except Exception:
         logger.warning("Could not park split parent %s in combined/", doc.id, exc_info=True)
     doc.split_completed_at = datetime.now(UTC)
@@ -418,14 +463,47 @@ def populate_from_raw_dict(doc: Document, result: dict, s: Session, cfg) -> None
             effective_type = "UNKNOWN" if vtype == "SKIP" else vtype
             doc.doc_type = DocType(effective_type)  # type: ignore[arg-type]
 
-    if result and result.get("po_no_raw"):
+    # A parent whose split never completed is not a parent: the split failed
+    # (or the read changed its mind) and this read says it is an ordinary
+    # PO/DN/SI/UNKNOWN document. Leaving `is_split_parent=True` made it
+    # invisible to the holding area and unplaceable by every attach sweep, so a
+    # perfectly readable PO could never reach a set.
+    if (
+        vtype
+        and vtype != "COMBINED"
+        and getattr(doc, "is_split_parent", False)
+        and not getattr(doc, "split_completed_at", None)
+    ):
+        doc.is_split_parent = False
+
+    # Fields derived from the PREVIOUS read must not survive a re-read. The
+    # old code only ever assigned them, so an SI that used to read INV-999 kept
+    # naming the packet after a re-read returned no number, and a one-time
+    # ambiguity flag made the document un-attachable forever.
+    manual_po = (getattr(doc, "po_no_source", None) or "") == "manual"
+    doc.si_no = None
+    doc.invoice_no = None
+    doc.dn_no = None
+    if not manual_po:
+        doc.po_no_raw = None
+        doc.po_no_normalized = None
+        # If this read produced no PO reference, the document must be held,
+        # not left attached to the set its PREVIOUS read was placed in. The
+        # reconciliation drift guard only looks at documents that still carry a
+        # number, so a cleared number would otherwise compare unmoved.
+        if not result.get("po_no_raw"):
+            doc.po_set_id = None
+    # The current read's ambiguity, true or false — never the previous read's.
+    # A manual PO is a human decision, so it resolves the model's uncertainty
+    # even when this read still reports more than one PO number.
+    doc.po_reference_ambiguous = False if manual_po else bool(result.get("po_reference_ambiguous"))
+
+    if result and result.get("po_no_raw") and not manual_po:
         doc.po_no_raw = result["po_no_raw"]
         # normalize for grouping — same as grouping.normalize_po_no (split revision ", 0")
         from app.services.grouping import normalize_po_no
 
         doc.po_no_normalized = normalize_po_no(result["po_no_raw"])
-    if result and result.get("po_reference_ambiguous"):
-        doc.po_reference_ambiguous = True
 
     # also store DN/SI numbers if present (outside po_no_raw guard)
     if result.get("document_type") == "SI" and result.get("document_number"):
@@ -433,7 +511,12 @@ def populate_from_raw_dict(doc: Document, result: dict, s: Session, cfg) -> None
         doc.invoice_no = result["document_number"]
     if result.get("document_type") == "DN" and result.get("document_number"):
         doc.dn_no = result["document_number"]
-    if result.get("document_type") == "PO" and result.get("document_number") and not doc.po_no_raw:
+    if (
+        result.get("document_type") == "PO"
+        and result.get("document_number")
+        and not manual_po
+        and not doc.po_no_raw
+    ):
         doc.po_no_raw = result["document_number"]
         from app.services.grouping import normalize_po_no
 
@@ -465,7 +548,9 @@ def populate_from_raw_dict(doc: Document, result: dict, s: Session, cfg) -> None
             without_description += 1
         locale = getattr(getattr(cfg, "matching", None), "locale", "en_IN") or "en_IN"
         qty_i = _parse_scaled_int(qty, locale=locale)
-        price_i = _parse_scaled_int(price, locale=locale)
+        from app.services.sanitizer import parse_price_scaled
+
+        price_i = parse_price_scaled(price)
         if qty_i == 0:
             # No usable quantity — unreadable, rejected by the parser, or
             # printed as zero. Stored as zero on purpose: the set's
@@ -526,6 +611,7 @@ def reclaim_stale_processing(cfg) -> int:
         result = s.execute(
             _sa_update(Document)
             .where(
+                Document.archived_at.is_(None),
                 Document.extraction_status == ExtractionStatus.processing,
                 Document.updated_at <= cutoff,
             )
@@ -552,7 +638,7 @@ def repopulate_from_raw_json(doc_id: int, cfg) -> Document | None:
     Base.metadata.create_all(eng)
     with Session(eng) as s:
         doc = s.get(Document, doc_id)
-        if doc is None or not doc.raw_extraction_json:
+        if doc is None or doc.archived_at is not None or not doc.raw_extraction_json:
             return None
         try:
             result = json.loads(doc.raw_extraction_json)
@@ -573,6 +659,10 @@ def extract_document(doc_id: int, cfg) -> Document:
         doc = s.get(Document, doc_id)
         if doc is None:
             raise ValueError(f"document {doc_id} not found")
+        if doc.archived_at is not None:
+            # Archived documents are evidence, not work. A direct call must
+            # not spend a VLM request or rewrite their extracted fields.
+            return doc
 
         dtype = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
         if is_manual_only(dtype):
@@ -600,7 +690,28 @@ def extract_document(doc_id: int, cfg) -> Document:
                 return doc
             s.refresh(doc)
         elif cur_status == ExtractionStatus.processing:
-            # Already claimed by a concurrent caller; leave it.
+            # Already claimed by a concurrent caller — unless the claim is
+            # stale (the worker died mid-call). Without this check a Prefect
+            # retry saw `processing`, returned "success" and the document was
+            # not read again until the next night's reclaim.
+            timeout = int(getattr(cfg.extraction, "stale_processing_seconds", 900) or 900)
+            cutoff = datetime.now(UTC) - timedelta(seconds=timeout)
+            stale = s.execute(
+                _sa_update(Document)
+                .where(
+                    Document.id == doc_id,
+                    Document.extraction_status == ExtractionStatus.processing,
+                    Document.updated_at <= cutoff,
+                )
+                .values(extraction_status=ExtractionStatus.pending)
+                .execution_options(synchronize_session=False)
+            )
+            s.commit()
+            if getattr(stale, "rowcount", 0) > 0:
+                # Re-enter through the normal claim path; the CAS protects
+                # against a second retry doing the same.
+                return extract_document(doc_id, cfg)
+            s.refresh(doc)
             return doc
         elif cur_status == ExtractionStatus.valid:
             # Already read. A file stays in the input folder until its PO
@@ -620,7 +731,7 @@ def extract_document(doc_id: int, cfg) -> Document:
             if not split_incomplete:
                 return doc
 
-        if (doc.extraction_attempt_count or 0) >= 3:
+        if (doc.extraction_attempt_count or 0) >= _attempt_cap(cfg):
             # Attempt cap reached. This is a terminal state, not a no-op: the
             # document will never be read again until an operator resets the
             # count (POST /po_sets/{id}/redo_extract). It returns normally
@@ -637,7 +748,7 @@ def extract_document(doc_id: int, cfg) -> Document:
                 "no further attempts will be made without an operator reset",
                 doc_id,
                 doc.original_filename,
-                doc.extraction_attempt_count,
+                _attempt_cap(cfg),
             )
             return doc
 

@@ -23,7 +23,9 @@ def test_fr_10_1_pinned(tmp_path) -> None:
 
     for name in ("po.pdf", "dn1.pdf", "dn2.pdf", "si1.pdf", "si2.pdf"):
         p = tmp_path / "stored" / name
-        PdfWriter().write(str(p))
+        w = PdfWriter()
+        w.add_blank_page(width=100, height=100)
+        w.write(str(p))
 
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)

@@ -16,7 +16,7 @@ from app.core.config import AppConfig
 from app.core.database import get_engine
 from app.models import DocType, POSet, POSetStatus
 from app.models.base import Base
-from app.services.matching import compare_aggregates, group_by_line_no
+from app.services.matching import compare_aggregates, display_line_key, group_by_line_no
 from app.services.quarantine import quarantine_copy
 
 logger = logging.getLogger(__name__)
@@ -35,14 +35,21 @@ def compare_po_set_lines(
                                            line number (scaled x1000)
         po_fail    non-None when a PO line carries no usable line number
         flags      one entry per discrepancy, priority 1 (identity) before
-                   2 (quantity), ready to render or persist
+                   2 (quantity), plus `description_match` entries for links
+                   made by the description fallback (advisory, not a failure)
 
     A line that is short of its PO quantity is still reported here; deciding
     whether that means "awaiting delivery" or "failed" is the caller's job,
     because only the engine knows the set's history.
     """
-    po_totals, dn_totals, dn_orphans, po_fail = group_by_line_no(po_lines, dn_lines, desc_threshold)
-    _, si_totals, si_orphans, _ = group_by_line_no(po_lines, si_lines, desc_threshold)
+    dn_desc: list[dict] = []
+    si_desc: list[dict] = []
+    po_totals, dn_totals, dn_orphans, po_fail = group_by_line_no(
+        po_lines, dn_lines, desc_threshold, desc_matches=dn_desc
+    )
+    _, si_totals, si_orphans, _ = group_by_line_no(
+        po_lines, si_lines, desc_threshold, desc_matches=si_desc
+    )
 
     flags: list[dict] = []
     for label, orphans, totals in (("DN", dn_orphans, dn_totals), ("SI", si_orphans, si_totals)):
@@ -56,6 +63,32 @@ def compare_po_set_lines(
                     "po_quantity": d["po_qty"],
                     "vendor_quantity": d["vendor_qty"],
                     "reason": d["reason"],
+                }
+            )
+
+    # A fallback link is not a failure: the quantities may agree exactly. It is
+    # recorded so the UI can show which lines were attached by description
+    # rather than by a printed number, and the reviewer can check the item.
+    for label, matches in (("DN", dn_desc), ("SI", si_desc)):
+        for m in matches:
+            po_label = display_line_key(m["po_key"])
+            vendor_no = m["vendor_line_item_no"] or "(no line number)"
+            flags.append(
+                {
+                    "priority": 2,
+                    "type": "description_match",
+                    "pool": label,
+                    "line_item_no": po_label,
+                    "vendor_line_item_no": m["vendor_line_item_no"],
+                    "po_description": m["po_description"],
+                    "vendor_description": m["vendor_description"],
+                    "vendor_quantity": m["quantity"],
+                    "reason": "matched_by_description",
+                    "message": (
+                        f"{label} row {vendor_no} was matched to PO line {po_label} by "
+                        f"description ('{m['vendor_description']}' ≈ "
+                        f"'{m['po_description']}'), not by a printed line number"
+                    ),
                 }
             )
     flags.sort(key=lambda f: f.get("priority", 99))
@@ -83,8 +116,21 @@ REASON_TEXT: dict[str, str] = {
     "po_line_missing_line_item_no": (
         "A PO line has neither a line number nor a description, so it cannot be compared"
     ),
-    "multiple_po_documents": "This PO Set holds more than one PO document",
+    "multiple_po_documents": (
+        "This PO Set holds more than one PO document; review which one is correct"
+    ),
+    "vendor_document_has_no_line_items": (
+        "A delivery note or invoice was read but contains no line items"
+    ),
+    "blocked_customs": (
+        "Customs requirement is ON; attach both a CUSTOMS and a SHIPPING document"
+    ),
     "packet_naming_failed": "The merged packet could not be named unambiguously",
+    "packet_source_unreadable": (
+        "A document's stored PDF is missing or unreadable; the packet cannot be written"
+    ),
+    "packet_write_failed": "The merged packet could not be written to the output folder",
+    "no_line_item_evidence": "The set has no line-item evidence, so there is nothing to reconcile",
     "po_reference_mismatch": "A document references a different PO number",
     "quantity_mismatch": "PO, delivery, and invoice quantities do not agree",
     "po_document_has_no_line_items": (
@@ -130,14 +176,21 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
     reviewer re-running anything (or reading logs after a restart).
     """
     result = _reconcile_po_set_inner(po_set_id, cfg)
-    _persist_reason(po_set_id, result, cfg)
+    if result.get("status") != "archived":
+        _persist_reason(po_set_id, result, cfg)
     return result
 
 
 # Reasons whose detail names the offending files. Persisting the generic
 # REASON_TEXT sentence for these throws away the one thing the operator needs:
 # which document to look at.
-_DETAILED_REASONS = {"multiple_po_documents", "po_reference_mismatch", "packet_naming_failed"}
+_DETAILED_REASONS = {
+    "multiple_po_documents",
+    "po_reference_mismatch",
+    "packet_naming_failed",
+    "packet_source_unreadable",
+    "packet_write_failed",
+}
 
 
 def _persist_reason(po_set_id: int, result: dict, cfg: AppConfig) -> None:
@@ -153,15 +206,27 @@ def _persist_reason(po_set_id: int, result: dict, cfg: AppConfig) -> None:
     the one thing a quarantine must never look like.
     """
     status = result.get("status")
+    if status == "archived":
+        return
     flags = result.get("flags") or []
     naming = [f for f in flags if f.get("type") == "naming"]
+    desc = [f for f in flags if f.get("type") == "description_match"]
     reason_code = result.get("reason")
     has_quantity_evidence = any(f.get("type") == "quantity" for f in flags)
 
     if status == "merged":
         note = "Fully reconciled — packet merged"
+        extras: list[str] = []
         if naming:
-            note = f"Fully reconciled — packet merged. {naming[0].get('message', '')}"
+            extras.append(naming[0].get("message", ""))
+        if desc:
+            lines = sorted({str(f.get("line_item_no") or "?") for f in desc})
+            extras.append(
+                f"{len(desc)} line(s) were matched by description, not by a printed "
+                f"line number (line {', '.join(lines)}); review the item descriptions"
+            )
+        if extras:
+            note = "Fully reconciled — packet merged. " + " ".join(e for e in extras if e)
     elif reason_code:
         if reason_code not in REASON_TEXT:
             # Every code the reconciler can emit must have a text, or the
@@ -194,6 +259,7 @@ def _persist_reason(po_set_id: int, result: dict, cfg: AppConfig) -> None:
                     ps.status == POSetStatus.merged
                     and ps.reconcile_reason
                     and not naming
+                    and not desc
                     and status == "merged"
                 ):
                     return
@@ -211,9 +277,9 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
     - Gate: needs at least one PO, one DN and one SI row; a missing side
       waits visibly with an explicit reason (it is unfulfilled demand, not
       evidence).
-    - Quarantines a set holding more than one PO document when
-      `reconciliation.single_po_document` is on (summing two baselines would
-      double every quantity).
+    - Holds a set with more than one PO document pending for a human when
+      `reconciliation.single_po_document` is on. It does not sum them and does
+      not quarantine them: the documents may be page fragments or a re-issue.
     - Quarantines on PO-reference drift, non-positive quantities, unresolvable
       line numbers and unmatched vendor lines.
     - Compares exact integer aggregates per line, DN pool and SI pool
@@ -227,6 +293,12 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise ValueError(f"POSet {po_set_id} not found")
+        if ps.archived_at is not None:
+            return {
+                "status": "archived",
+                "po_set_id": po_set_id,
+                "flags": [],
+            }
 
         # Immutable once merged (FR-14.6)
         if ps.status == POSetStatus.merged:
@@ -299,36 +371,6 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 "flags": [],
             }
 
-        # A PO Set is expected to hold exactly one PO. Two usually means a
-        # re-issue or a mistyped PO number landing under the same key, and
-        # summing them would silently double the baseline every quantity is
-        # compared against. Configurable — see config.yaml reconciliation.
-        if (
-            getattr(cfg, "reconciliation", None) is not None
-            and getattr(cfg.reconciliation, "single_po_document", False)
-            and len(po_docs) > 1
-        ):
-            names = ", ".join(sorted(d.original_filename or "?" for d in po_docs))
-            detail_msg = (
-                f"This PO Set holds {len(po_docs)} PO documents ({names}); "
-                f"only one PO is expected per PO Set"
-            )
-            ps.status = POSetStatus.quarantined
-            s.commit()
-            quarantine_copy(ps.id, cfg, reason="multiple_po_documents", detail=detail_msg)
-            return {
-                "status": "quarantined",
-                "reason": "multiple_po_documents",
-                "detail": detail_msg,
-                "po_set_id": po_set_id,
-                "flags": [
-                    {
-                        "priority": 1,
-                        "type": "identification",
-                        "message": detail_msg,
-                    }
-                ],
-            }
 
         # Decoy PO / Cross-document PO Reference Validation (SPEC §7.3 FR-6.3)
         for d in docs:
@@ -368,6 +410,31 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                     ],
                 }
 
+        # More than one PO document is a human decision, not an engine guess.
+        # Do not sum them (a re-issue would double quantities) and do not
+        # quarantine them (they may be legitimate page fragments). Hold the
+        # set pending for review. No new action or schema: the operator uses
+        # the existing document tools, or leaves the set blocked.
+        if (
+            getattr(cfg, "reconciliation", None) is not None
+            and getattr(cfg.reconciliation, "single_po_document", False)
+            and len(po_docs) > 1
+        ):
+            names = ", ".join(sorted(d.original_filename or "?" for d in po_docs))
+            detail_msg = (
+                f"This PO Set holds {len(po_docs)} PO documents ({names}); "
+                "review which PO document is correct before merging"
+            )
+            ps.status = POSetStatus.pending
+            s.commit()
+            return {
+                "status": "pending",
+                "reason": "multiple_po_documents",
+                "detail": detail_msg,
+                "po_set_id": po_set_id,
+                "flags": [],
+            }
+
         po_lines = [
             {
                 "line_item_no": li.line_item_no,
@@ -402,12 +469,14 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             for li in d.line_items
         ]
 
-        # A PO document exists but extraction produced zero line items while vendor
-        # documents contain line items. The fault is in PO extraction (VLM returned nothing),
-        # not in vendor documents — so the quarantine reason must say so explicitly
-        # rather than falling through to "unmatched vendor line", which would point
-        # the operator at the wrong files.
-        if not po_lines and (dn_lines or si_lines):
+        # A PO document exists but extraction produced no line items. The fault
+        # is in PO extraction (VLM returned nothing), not in vendor documents —
+        # so the quarantine reason must say so explicitly rather than falling
+        # through to "unmatched vendor line", which would point the operator at
+        # the wrong files. This also covers the all-three-empty case: a set with
+        # no line anywhere has nothing to reconcile and must never be reported
+        # as merely waiting while the merge silently refuses.
+        if not po_lines:
             ps.status = POSetStatus.quarantined
             s.commit()
             quarantine_copy(ps.id, cfg, reason="po_document_has_no_line_items")
@@ -417,6 +486,43 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 "po_set_id": po_set_id,
                 "flags": [],
             }
+
+        # A DN or SI document that read as valid but produced no lines looks
+        # exactly like a vendor who has not delivered yet. It is not: the set
+        # has its three document types, the comparison can never progress, and
+        # the nightly sweep will report "waiting" forever. Quarantine the set
+        # and name the file, so the operator can re-extract it.
+        for label, vendor_docs, vendor_lines in (
+            ("DN", dn_docs, dn_lines),
+            ("SI", si_docs, si_lines),
+        ):
+            if vendor_docs and not vendor_lines:
+                names = ", ".join(sorted(d.original_filename or "?" for d in vendor_docs))
+                detail_msg = (
+                    f"The {label} document(s) read successfully but contain no "
+                    f"line items ({names}); re-extract or inspect the file"
+                )
+                ps.status = POSetStatus.quarantined
+                s.commit()
+                quarantine_copy(
+                    ps.id,
+                    cfg,
+                    reason="vendor_document_has_no_line_items",
+                    detail=detail_msg,
+                )
+                return {
+                    "status": "quarantined",
+                    "reason": "vendor_document_has_no_line_items",
+                    "detail": detail_msg,
+                    "po_set_id": po_set_id,
+                    "flags": [
+                        {
+                            "priority": 1,
+                            "type": "identification",
+                            "message": detail_msg,
+                        }
+                    ],
+                }
 
         all_lines = po_lines + dn_lines + si_lines
         if any(int(line.get("quantity") or 0) <= 0 for line in all_lines):
@@ -453,10 +559,18 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 ],
             }
 
-        if flags:
+        # Only identification and quantity flags decide the verdict. A
+        # description_match flag records that the engine attached a row by the
+        # description fallback — real information for the reviewer, but the
+        # quantities still agree, so it must not turn a merged set into
+        # "pending" or "mismatched".
+        failure_flags = [
+            f for f in flags if f.get("type") in ("identification", "quantity")
+        ]
+        if failure_flags:
             # A vendor line with no PO counterpart is unresolvable identity, not a
             # shortfall: quarantine rather than guess which PO line it belongs to.
-            if any(f.get("type") == "identification" for f in flags):
+            if any(f.get("type") == "identification" for f in failure_flags):
                 ps.status = POSetStatus.quarantined
                 s.commit()
                 quarantine_copy(ps.id, cfg, reason="unmatched_vendor_line", flags=flags)
@@ -470,7 +584,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             # Partial delivery is only genuine when the vendor reported NOTHING
             # for those lines. A line both sides reported with different
             # quantities is a real disagreement, not an outstanding delivery.
-            qty_flags = [f for f in flags if f.get("type") == "quantity"]
+            qty_flags = [f for f in failure_flags if f.get("type") == "quantity"]
             has_real_disagreement = any((f.get("vendor_quantity") or 0) > 0 for f in qty_flags)
             if not has_real_disagreement:
                 ps.status = POSetStatus.pending
@@ -491,10 +605,20 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
         if ps.has_customs_toggle and is_blocked(ps):
             ps.status = POSetStatus.blocked_customs
             s.commit()
-            return {"status": "blocked_customs", "po_set_id": po_set_id, "flags": flags}
+            return {
+                "status": "blocked_customs",
+                "reason": "blocked_customs",
+                "po_set_id": po_set_id,
+                "flags": flags,
+            }
 
         # Auto-merge (FR-14.1)
-        from app.services.merge import MergeNamingError, merge_po_set
+        from app.services.merge import (
+            MergeEmptyError,
+            MergeNamingError,
+            MergeSourceError,
+            merge_po_set,
+        )
 
         # Forward progress only: reconciled just now → clear to pending for
         # the merge; restore prior status if merge refuses (W-8).
@@ -523,7 +647,45 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                     }
                 ],
             }
+        except MergeEmptyError as e:
+            reason = getattr(e, "reason_code", "no_line_item_evidence")
+            ps.status = POSetStatus.quarantined
+            s.commit()
+            quarantine_copy(ps.id, cfg, reason=reason, detail=str(e))
+            return {
+                "status": "quarantined",
+                "reason": reason,
+                "detail": str(e),
+                "po_set_id": po_set_id,
+                "flags": [],
+            }
+        except (MergeSourceError, OSError) as e:
+            # A missing/encrypted/corrupt member, or a write failure, must be a
+            # named quarantine with the offending file — never a raw exception
+            # that leaves the set pending and retries every night.
+            reason = (
+                "packet_source_unreadable"
+                if isinstance(e, MergeSourceError)
+                else "packet_write_failed"
+            )
+            ps.status = POSetStatus.quarantined
+            s.commit()
+            quarantine_copy(ps.id, cfg, reason=reason, detail=str(e))
+            return {
+                "status": "quarantined",
+                "reason": reason,
+                "detail": str(e),
+                "po_set_id": po_set_id,
+                "flags": [],
+            }
         s.refresh(ps)
+        # Advisory only: how many vendor rows the fallback linked. Persisted so
+        # the dashboard can show the amber review tag without re-running the
+        # matcher on every 2-second poll.
+        desc_flags = [f for f in flags if f.get("type") == "description_match"]
+        if ps.description_match_count != len(desc_flags):
+            ps.description_match_count = len(desc_flags)
+            s.commit()
         if merged_path is None:
             if ps.status != prior_status:
                 ps.status = prior_status
@@ -542,6 +704,20 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                     "message": (
                         "No invoice number was extracted; packet named "
                         f"'{merge_info.get('output_name')}' from the PO number"
+                    ),
+                }
+            )
+        if merged_path is not None and merge_info.get("multiple_invoice_numbers"):
+            numbers = merge_info.get("invoice_numbers") or []
+            flags.append(
+                {
+                    "priority": 3,
+                    "type": "naming",
+                    "message": (
+                        "This set holds more than one invoice number ("
+                        + ", ".join(str(n) for n in numbers)
+                        + f"); packet named '{merge_info.get('output_name')}' from the "
+                        "first SI document"
                     ),
                 }
             )

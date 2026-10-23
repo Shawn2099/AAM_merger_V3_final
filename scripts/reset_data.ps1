@@ -15,6 +15,14 @@
       - data\backup\* (the pre-reset backup lands here)
       - logs
 
+    What is refused (audit P2-7):
+      - any folder or database path outside <project>\data — a typo in
+        config.yaml must not be able to empty a system folder. A production
+        deployment that stores its data under C:\AAM therefore does not use
+        this test-rig script; use scripts\backup_db.py plus a manual cleanup.
+      - the backup folder itself, or any folder that contains it, so the
+        snapshot taken moments earlier is never deleted by the same run.
+
     This is destructive. It asks for confirmation unless -Force is passed.
 
 .PARAMETER Force
@@ -72,6 +80,31 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($pathsJson)) {
 }
 $paths = $pathsJson | ConvertFrom-Json
 
+# 0. Path allow-list (audit P2-7). Checked before anything is deleted, and
+#    before the confirmation prompt so the operator is not asked to approve a
+#    plan that will be refused.
+. (Join-Path $ScriptDir "reset_path_guard.ps1")
+$dataRoot = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot "data"))
+$backupDir = [System.IO.Path]::GetFullPath((Join-Path $dataRoot "backup"))
+$dbPath = $paths.database_path
+
+$candidates = @(
+    $paths.input_folder,
+    $paths.output_folder,
+    $paths.quarantine_folder,
+    $paths.stored_documents_folder,
+    $paths.combined_folder,
+    $dbPath
+) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+foreach ($candidate in $candidates) {
+    if (-not (Test-ResetPathAllowed -Path $candidate -DataRoot $dataRoot -BackupDir $backupDir)) {
+        Write-Error (("Refusing to clear '{0}': it is outside the project data root '{1}', or it is (or contains) the backup folder '{2}'. " +
+            "reset_data.ps1 only clears test data under <project>\data and never the backup it just wrote. Fix the path in config.yaml.") -f $candidate, $dataRoot, $backupDir)
+        exit 1
+    }
+}
+
 # 1. Refuse while the server is listening: deleting a live SQLite database
 #    produces a half-removed state and misleading errors.
 $listeners = Get-NetTCPConnection -LocalPort $paths.port -State Listen -ErrorAction SilentlyContinue
@@ -120,8 +153,9 @@ if (-not $Force) {
     }
 }
 
-# 3. Back up the database before touching it (only if it exists).
-$dbPath = $paths.database_path
+# 3. Back up the database before touching it (only if it exists). The backup
+#    lands in data\backup, which the allow-list above has just guaranteed is
+#    not one of the folders about to be cleared.
 if (Test-Path $dbPath) {
     Write-Host "Backing up database..." -ForegroundColor Cyan
     & (Join-Path $ScriptDir "backup_db.ps1")
@@ -141,11 +175,6 @@ foreach ($suffix in @("", "-wal", "-shm")) {
 }
 
 foreach ($folder in $folders) {
-    $resolved = (Resolve-Path $folder).Path.TrimEnd('\')
-    if ($resolved -eq "" -or $resolved -eq $ProjectRoot.TrimEnd('\')) {
-        Write-Error "Refusing to clear '$folder': it resolves to the project root."
-        exit 1
-    }
     Get-ChildItem -Force $folder -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -ne '.gitkeep' } |
         Remove-Item -Recurse -Force

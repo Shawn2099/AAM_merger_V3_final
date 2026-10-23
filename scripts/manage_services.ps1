@@ -42,6 +42,9 @@ if ([string]::IsNullOrWhiteSpace($NssmPath)) {
 }
 
 $services = @("AAMMerger-Web", "AAMMerger-Worker", "AAMMerger-PrefectServer")
+# Start the API before the worker that polls it; stop in the reverse order.
+$startOrder = @("AAMMerger-PrefectServer", "AAMMerger-Worker", "AAMMerger-Web")
+$stopOrder = @("AAMMerger-Web", "AAMMerger-Worker", "AAMMerger-PrefectServer")
 
 Write-Host "=== AAM Merger V3 - Service Manager [Action: $Action] ===" -ForegroundColor Cyan
 
@@ -62,7 +65,7 @@ switch ($Action) {
     }
 
     "start" {
-        foreach ($name in $services) {
+        foreach ($name in $startOrder) {
             $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
             if ($svc) {
                 if ($svc.Status -ne "Running") {
@@ -79,7 +82,7 @@ switch ($Action) {
     }
 
     "stop" {
-        foreach ($name in $services) {
+        foreach ($name in $stopOrder) {
             $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
             if ($svc) {
                 if ($svc.Status -ne "Stopped") {
@@ -96,11 +99,19 @@ switch ($Action) {
     }
 
     "restart" {
-        foreach ($name in $services) {
+        foreach ($name in $stopOrder) {
+            $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+            if ($svc -and $svc.Status -ne "Stopped") {
+                Write-Host "Stopping $name..." -ForegroundColor Yellow
+                Stop-Service -Name $name -Force
+                Start-Sleep -Seconds 1
+            }
+        }
+        foreach ($name in $startOrder) {
             $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
             if ($svc) {
-                Write-Host "Restarting $name..." -ForegroundColor Cyan
-                Restart-Service -Name $name -Force
+                Write-Host "Starting $name..." -ForegroundColor Cyan
+                Start-Service -Name $name
                 Start-Sleep -Seconds 1
                 $updated = Get-Service -Name $name
                 Write-Host "  $name is now $($updated.Status)." -ForegroundColor Green

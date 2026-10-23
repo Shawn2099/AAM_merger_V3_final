@@ -21,7 +21,9 @@ def _tiny_pdf(path):
     from pypdf import PdfWriter
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    PdfWriter().write(str(path))
+    w = PdfWriter()
+    w.add_blank_page(width=100, height=100)
+    w.write(str(path))
     return path
 
 

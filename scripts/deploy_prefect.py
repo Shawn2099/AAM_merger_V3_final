@@ -19,24 +19,49 @@ CRON = "0 0 * * *"
 
 
 def _schedule(cfg):
-    """Cron at the site's local midnight when configured, else Prefect's UTC."""
-    timezone = getattr(cfg.prefect, "schedule_timezone", None)
-    if not timezone:
-        return CRON
+    """Cron at the site's local midnight, IST when nothing is configured.
+
+    Always return a CronSchedule object: `to_deployment(cron=...)` takes a
+    string, while `to_deployment(schedule=...)` takes a schedule object. The
+    old string branch made the deployment register at UTC midnight and, worse,
+    the object branch was passed to `cron=` and failed validation outright.
+
+    The office is in India; an unset key must not silently run at 05:30 local
+    (UTC midnight). A site that genuinely wants another zone sets it.
+    """
     from prefect.client.schemas.schedules import CronSchedule
 
+    timezone = getattr(cfg.prefect, "schedule_timezone", None) or "Asia/Kolkata"
     return CronSchedule(cron=CRON, timezone=timezone)
 
 
 def deploy() -> None:
+    """Register the deployment against a DURABLE Prefect API.
+
+    Prefect 3 starts an ephemeral local server when `PREFECT_API_URL` is unset,
+    writes the deployment into it, prints success, and stops the server on exit
+    — so nothing is registered and the nightly job never runs. Refuse instead
+    of lying to the operator. `AAM_ALLOW_EPHEMERAL_PREFECT=1` is an explicit
+    opt-out for a throwaway demo.
+    """
+    import os
+
+    if not os.getenv("PREFECT_API_URL") and os.getenv("AAM_ALLOW_EPHEMERAL_PREFECT") != "1":
+        raise SystemExit(
+            "[ERROR] PREFECT_API_URL is not set. Prefect would start a temporary "
+            "server, register the deployment there, and stop it on exit — the "
+            "nightly sync would silently not exist. Set PREFECT_API_URL (e.g. "
+            "http://127.0.0.1:4200/api) or pass -WithPrefectServer to the installer. "
+            "Set AAM_ALLOW_EPHEMERAL_PREFECT=1 only for a throwaway demo."
+        )
     cfg = load_config()
     pool_name = cfg.prefect.work_pool_name
     schedule = _schedule(cfg)
-    tz_note = getattr(schedule, "timezone", None) or "UTC"
+    tz_note = schedule.timezone or "UTC"
 
     deployment = sync_flow.to_deployment(
         name="aam-midnight-sync",
-        cron=schedule,
+        schedule=schedule,
         work_pool_name=pool_name,
         description="Nightly automated ingestion scan for AAM Merger V3",
     )

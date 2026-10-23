@@ -156,21 +156,26 @@ approximation.
 |---|---|---|
 | `pending` | `missing_po_document` / `missing_dn_document` / `missing_si_document` | a required side has no document row yet — not yet evaluable |
 | `pending` | `partial_fulfillment` | a PO line the vendor reported nothing about |
-| `mismatched` | *(none)* | both sides reported a line and the quantities differ |
+| `mismatched` | `quantity_mismatch` | both sides reported a line and the quantities differ |
 | `quarantined` | `non_positive_quantity` | any quantity zero, negative, or unparseable |
 | `quarantined` | `po_reference_mismatch` | a document's PO number disagrees with its set's |
 | `quarantined` | `po_line_missing_line_item_no` | a PO line has neither a number nor a description to compare on |
-| `quarantined` | `multiple_po_documents` | the set holds more than one PO document (config `reconciliation.single_po_document`) |
+| `pending` | `multiple_po_documents` | the set holds more than one PO document (config `reconciliation.single_po_document`); held for review, never summed or auto-merged |
 | `quarantined` | `unmatched_vendor_line` | a vendor row resolved to no PO line (see 3.2) |
 | `quarantined` | `po_document_has_no_line_items` | the PO document was read but contains no line items |
+| `quarantined` | `vendor_document_has_no_line_items` | a DN or SI document was read but contains no line items; the set can never leave pending, so it is quarantined |
 | `quarantined` | `packet_naming_failed` | merged packet could not be named unambiguously |
+| `quarantined` | `packet_source_unreadable` | a member PDF is missing, corrupt, or encrypted, so the packet cannot be written |
+| `quarantined` | `packet_write_failed` | the output folder could not be written (disk, permissions, lock timeout) |
+| `quarantined` | `no_line_item_evidence` | every attached document has zero line items, so there is nothing to merge |
 | `blocked_customs` | *(none)* | customs toggle on, CUSTOMS + SHIPPING not both attached |
 | `merged` | *(none)* | reconciled, customs gate clear, packet written - terminal except a customs append (§6) |
 
-`REASON_TEXT` carries every reason code the reconciler can emit (twelve, in
-`services/reconciliation.py`). `mismatched`, `blocked_customs`
-and `merged` pass no reason because the status already says everything a
-reviewer needs.
+`REASON_TEXT` carries every reason code the reconciler can emit (in
+`services/reconciliation.py`). `mismatched` and `merged` pass no reason
+because the status already says everything a reviewer needs; `blocked_customs`
+now carries its own reason so a customs wait cannot inherit a previous
+quantity-mismatch sentence.
 
 > Retired 2026-09-30 (Layer-2 purge): `combined_unverified` is gone. A
 > multi-doc PDF is split in Layer 1 into single-section child files
@@ -179,10 +184,13 @@ reviewer needs.
 
 ### 3.1.1 One PO document per set
 
-A PO Set is expected to hold exactly one PO. With
+A PO Set is expected to hold one PO **document**. With
 `reconciliation.single_po_document: true` (the default, in `config.yaml`), a
-set carrying two or more PO documents is **quarantined** with
-`multiple_po_documents`, naming the files.
+set carrying more than one PO document is held **pending** with
+`multiple_po_documents`; it is not summed and it does not auto-merge. The
+documents may be page fragments or a re-issue, and the engine must not guess.
+The detail names the files. The operator resolves the set using the existing
+document tools; this release adds no PO-selection UI.
 
 Without the gate, two POs in one set are summed into the baseline, which
 silently doubles every quantity the DN and SI are then compared against — the
@@ -193,24 +201,36 @@ Turn it off only if your vendors genuinely issue split POs under one number.
 
 ### 3.2 Every flag the comparison can produce
 
-Per-line flags, sorted priority 1 before 2. **There are exactly two types and
-three reasons** — verified by driving `compare_po_set_lines` over every case.
+Per-line flags, sorted priority 1 before 2. **There are three types and four
+reasons** — verified by driving `compare_po_set_lines` over every case.
 
 | Priority | `type` | `reason` | Pool | Means |
 |---|---|---|---|---|
 | 1 | `identification` | `no_po_line_with_this_number` | DN or SI | vendor row's number is not on the PO |
 | 1 | `identification` | `no_line_number_and_no_description_match` | DN or SI | vendor row has no number and no description clears the threshold |
 | 2 | `quantity` | `quantity_mismatch` | DN or SI | both sides reported the line, quantities differ |
+| 2 | `description_match` | `matched_by_description` | DN or SI | the row was attached by the description fallback, not by a printed line number — **advisory, not a failure** |
 | 3 | `naming` | *(no `reason` key)* | — | packet had to be named from the PO number because no invoice number was extracted (§6) |
 
-Priority 3 `naming` is the only flag that describes a successful outcome. It
-is raised by `reconcile_po_set` rather than by the comparison, and it exists
-so the PO-number fallback can never pass silently.
+Priority 3 `naming` and priority 2 `description_match` describe a successful
+outcome. `naming` is raised by `reconcile_po_set` rather than by the
+comparison. `description_match` is raised by `compare_po_set_lines` for every
+vendor row the description fallback placed, because that link is a guess the
+reviewer should see even when the quantities agree.
 
-The other set-level identification flags — `po_reference_mismatch`,
-`po_line_missing_line_item_no`, `multiple_po_documents` and
-`packet_naming_failed` — are raised by `reconcile_po_set` and quarantine the
-set directly; they are listed in §3.1 rather than as per-line flags.
+**`description_match` never changes the verdict.** It is not an
+identification or quantity failure; a set carrying only these flags still
+merges if its quantities reconcile. The dashboard shows an amber
+*Merged • review* pill and the detail page marks the affected matrix rows, so
+the CA checks the item descriptions. The count is persisted on
+`po_sets.description_match_count` for the list view. This is the one place the
+engine guesses, and the tag is how that guess is made visible rather than
+silent.
+
+`po_reference_mismatch`, `po_line_missing_line_item_no` and
+`packet_naming_failed` quarantine the set directly. `multiple_po_documents`
+holds it pending for review instead. All are listed in §3.1 rather than as
+per-line flags.
 
 Both pools are evaluated independently and reported separately, so a set can
 carry a DN flag and an SI flag for the same line.
@@ -218,7 +238,8 @@ carry a DN flag and an SI flag for the same line.
 **Identification outranks quantity** because an unidentifiable line is not a
 shortfall — the engine cannot say which item is missing, so guessing is worse
 than stopping. Any identification flag quarantines the set outright; a set only
-reaches `pending`/`mismatched` on quantity flags alone.
+reaches `pending`/`mismatched` on quantity flags alone. `description_match`
+sits outside that ladder: it records a fallback link, not a failure.
 
 `unmatched_vendor_line` (the set-level reason) is the quarantine raised by
 either identification reason above — the set-level code says *what happened*,

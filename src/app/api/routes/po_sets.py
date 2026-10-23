@@ -14,7 +14,9 @@ and ``locked_by_action``; dashboard templates should render buttons with
 from __future__ import annotations
 
 import html as _html
+import json
 import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Form, HTTPException, Response
 from fastapi.responses import HTMLResponse
@@ -24,7 +26,7 @@ from app.core.config import load_config
 from app.core.database import get_engine
 from app.models import ExtractionStatus, POSet, POSetStatus
 from app.models.base import Base
-from app.services.locking import acquire_lock, is_locked, release_lock
+from app.services.locking import acquire_lock, is_locked, release_if_stale, release_lock
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/po_sets", tags=["po_sets"])
@@ -51,12 +53,7 @@ def _doc_status_badge(status) -> str:
 
 def _auto_release_if_stale(ps: POSet, cfg, session: Session) -> bool:
     """If lock is stale (> timeout), clear it and return True (released)."""
-    if ps.locked_by_action is None:
-        return False
-    if not is_locked(ps, cfg):
-        release_lock(ps, session)
-        return True
-    return False
+    return release_if_stale(ps, session, cfg)
 
 
 def _acquire_lock(po_set_id: int, action: str, cfg) -> POSet:
@@ -67,6 +64,29 @@ def _acquire_lock(po_set_id: int, action: str, cfg) -> POSet:
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
+        # Every mutating action is blocked while a sync is running. The sync's
+        # extraction can take minutes; allowing a merge/reclassify/upload in
+        # that window lets two writers mutate the same set.
+        from app.services import sync_lock
+
+        if sync_lock._is_sync_running():
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "A sync is currently running; wait for it to finish before "
+                    "changing this PO Set."
+                ),
+            )
+        # Archived sets are read-only. The archive action is the one exception:
+        # it must stay idempotent if the operator clicks Delete twice.
+        if ps.archived_at is not None and action != "quarantine_delete":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This PO Set is archived and read-only. "
+                    f"{action} is not allowed."
+                ),
+            )
         if not acquire_lock(ps, action, s, cfg):
             raise HTTPException(
                 status_code=409,
@@ -85,6 +105,43 @@ def _release_lock(po_set_id: int, cfg, action: str) -> None:
             release_lock(ps, s, action)
 
 
+def _refresh_lock(po_set_id: int, cfg, action: str) -> None:
+    """Heartbeat the lock while a long action is still running.
+
+    A Re-Extract can call the VLM for every document in the set; one
+    interaction can take most of the default 300s timeout. Without a
+    heartbeat the dashboard's stale-lock cleanup re-enabled every button
+    while extraction was still writing line items.
+    """
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        ps = s.get(POSet, po_set_id)
+        if ps is not None and ps.locked_by_action == action:
+            ps.locked_at = datetime.now(UTC)
+            s.commit()
+
+
+def _refuse_if_merged(po_set_id: int, cfg, action: str) -> None:
+    """Merged is terminal for reconciliation and extraction.
+
+    Re-reading a delivered set rewrites its doc types, PO/SI/DN numbers and
+    line items while the packet on disk stays unchanged — the DB then no longer
+    describes what was delivered. Customs append is the only post-merge write,
+    and it has its own path.
+    """
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        ps = s.get(POSet, po_set_id)
+        if ps is not None and ps.status == POSetStatus.merged:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"This PO Set is already merged; {action} is not allowed. "
+                    "Use the customs append path for a post-delivery document."
+                ),
+            )
+
+
 def _po_to_dict(ps: POSet, cfg) -> dict:
     locked = is_locked(ps, cfg)
     # HTMX disable: when locked, buttons should be disabled (FR-CONC-3)
@@ -98,6 +155,11 @@ def _po_to_dict(ps: POSet, cfg) -> dict:
         "htmx_disabled": "disabled" if locked else "",
         "has_customs_toggle": ps.has_customs_toggle,
         "updated_at": ps.updated_at.isoformat() if ps.updated_at else None,
+        "archived_at": ps.archived_at.isoformat() if ps.archived_at else None,
+        "archived_by": ps.archived_by,
+        "archive_reason": ps.archive_reason,
+        "archive_path": ps.archive_path,
+        "is_archived": ps.archived_at is not None,
     }
 
 
@@ -109,12 +171,13 @@ def list_po_sets():
     Base.metadata.create_all(eng)
     with Session(eng) as s:
         # auto-release stale locks on list view so dashboard doesn't permanently disable buttons
-        all_sets = s.query(POSet).all()
+        all_sets = s.query(POSet).filter(POSet.archived_at.is_(None)).all()
         for ps in all_sets:
-            if ps.locked_by_action is not None and not is_locked(ps, cfg):
-                release_lock(ps, s)
-        s.commit()
-        rows = s.query(POSet).all()
+            if ps.locked_by_action is not None:
+                # release_if_stale commits only when it actually clears a row,
+                # and only if the lock is still the stale one observed here.
+                release_if_stale(ps, s, cfg)
+        rows = s.query(POSet).filter(POSet.archived_at.is_(None)).all()
         return [_po_to_dict(ps, cfg) for ps in rows]
 
 
@@ -129,8 +192,8 @@ def get_po_set(po_set_id: int):
         if ps is None:
             raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
         # auto-release stale before responding so UI doesn't show stale lock
-        if ps.locked_by_action is not None and not is_locked(ps, cfg):
-            release_lock(ps, s)
+        if ps.locked_by_action is not None:
+            release_if_stale(ps, s, cfg)
             s.refresh(ps)
         return _po_to_dict(ps, cfg)
 
@@ -145,14 +208,27 @@ def get_po_set_detail_html(po_set_id: int):
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
-        if ps.locked_by_action is not None and not is_locked(ps, cfg):
-            release_lock(ps, s)
+        if ps.locked_by_action is not None:
+            release_if_stale(ps, s, cfg)
             s.refresh(ps)
         d = _po_to_dict(ps, cfg)
-        disabled = 'disabled title="action already in progress"' if d["is_locked"] else ""
+        disabled = (
+            'disabled title="archived; read-only"'
+            if d["is_archived"]
+            else ('disabled title="action already in progress"' if d["is_locked"] else "")
+        )
         locked_msg = (
-            f'<span class="locked-msg">Locked by {d["locked_by_action"]}</span>'
-            if d["is_locked"]
+            f'<span class="locked-msg">Locked by '
+            f'{_html.escape(str(d["locked_by_action"] or ""))}</span>'
+            if d["is_locked"] and not d["is_archived"]
+            else ""
+        )
+        archived_msg = (
+            f'<p class="muted" style="margin:8px 0;">Archived '
+            f'{_html.escape(d["archived_at"] or "")} by '
+            f'{_html.escape(d["archived_by"] or "unknown")}; read-only. '
+            f'Export: {_html.escape(d["archive_path"] or "")}</p>'
+            if d["is_archived"]
             else ""
         )
 
@@ -161,6 +237,7 @@ def get_po_set_detail_html(po_set_id: int):
         # identical to one waiting for the vendor to send a third document.
         # Listing the files, with their extraction state, is what makes
         # Redo/Re-extract an informed action rather than a guess.
+        attempt_cap = int(getattr(cfg.extraction, "max_retries", 3) or 3)
         doc_rows = []
         for doc in sorted(ps.documents, key=lambda x: (str(x.doc_type), x.original_filename)):
             dtype = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
@@ -175,7 +252,7 @@ def get_po_set_detail_html(po_set_id: int):
                 f'<td style="text-align:right;">{n_items}</td>'
                 f'<td style="font-size:0.75rem;">'
                 + (
-                    f"{doc.extraction_attempt_count or 0}/3 attempts used — "
+                    f"{doc.extraction_attempt_count or 0}/{attempt_cap} attempts used — "
                     f"Redo/Re-extract will retry this file"
                     if failed
                     else ""
@@ -201,8 +278,9 @@ def get_po_set_detail_html(po_set_id: int):
         # minimal HTMX fragment - real dashboard will use richer template
         html = f"""
         <div id=\"po-{po_set_id}\" hx-get=\"/po_sets/{po_set_id}/detail\" hx-trigger=\"every 2s\" hx-swap=\"outerHTML\">
-          <h3>PO Set {d["po_no_normalized"]} - {d["status"]}</h3>
+          <h3>PO Set {_html.escape(str(d["po_no_normalized"]))} - {_html.escape(str(d["status"]))}</h3>
           {locked_msg}
+          {archived_msg}
           {files_html}
           <button hx-post=\"/po_sets/{po_set_id}/force_merge\" {disabled}>Force Merge</button>
           <button hx-post=\"/po_sets/{po_set_id}/toggle_customs\" {disabled}>Toggle Customs</button>
@@ -289,6 +367,25 @@ def toggle_customs(po_set_id: int):
 def redo_extract(po_set_id: int):
     """Redo/Re-extract - per-PO locked (FR-CONC-1). 409 if already locked."""
     cfg = load_config()
+    _refuse_if_merged(po_set_id, cfg, "Re-Extract")
+
+    # The nightly sync may be holding this same document in `processing` and
+    # calling the VLM. Resetting it to `pending` underneath that call would let
+    # two extractions interleave and append duplicate line items. Refuse while
+    # a sync is running (P2-21); the operator can retry when it finishes.
+    # Imported here, not at module scope, to keep the route <-> sync_lock
+    # import graph acyclic.
+    from app.services import sync_lock
+
+    if sync_lock._is_sync_running():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A sync is currently reading documents; Re-Extract could "
+                "double-extract this set. Wait for the sync to finish and try again."
+            ),
+        )
+
     _acquire_lock(po_set_id, "redo_extract", cfg)
     try:
         from app.models import Document, ExtractionStatus
@@ -326,6 +423,7 @@ def redo_extract(po_set_id: int):
 
         extraction_results = []
         for doc_id, _dtype in docs_to_extract:
+            _refresh_lock(po_set_id, cfg, "redo_extract")
             try:
                 # Use the same retry envelope as the nightly Prefect task so a transient
                 # VLM blip during redo_extract does not permanently burn an attempt (C1).
@@ -397,6 +495,7 @@ def merge_now(po_set_id: int):
 def redo_match(po_set_id: int):
     """Redo matching (no VLM) - per-PO locked (FR-CONC-1)."""
     cfg = load_config()
+    _refuse_if_merged(po_set_id, cfg, "Re-Match")
     _acquire_lock(po_set_id, "redo_match", cfg)
     try:
         from app.models import POSetStatus as _PSS
@@ -430,13 +529,33 @@ def delete_quarantined(po_set_id: int, response: Response, justification: str = 
     stored on the audit_log row.
     """
     cfg = load_config()
+    # A running sync may be attaching documents to this set. Archive snapshots
+    # the set's documents, so refuse rather than race the attach sweep.
+    from app.services import sync_lock
+
+    if sync_lock._is_sync_running():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A sync is currently reading documents; archiving could race "
+                "an attachment. Wait for the sync to finish and try again."
+            ),
+        )
     _acquire_lock(po_set_id, "quarantine_delete", cfg)
     try:
         from app.services.quarantine import delete_quarantined as svc_delete
 
         audit = svc_delete(po_set_id, cfg, justification=justification, source="operator")
         response.headers["HX-Redirect"] = "/quarantine"
-        return {"status": "deleted", "audit_id": audit.id}
+        try:
+            detail = json.loads(audit.detail or "{}")
+        except (TypeError, ValueError):
+            detail = {}
+        return {
+            "status": "archived",
+            "audit_id": audit.id,
+            "archive_path": detail.get("archive_path"),
+        }
     except HTTPException:
         raise
     except Exception as e:

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+import shutil
 import time
+import uuid
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -11,6 +14,8 @@ from sqlalchemy.orm import Session
 from app.core.config import AppConfig
 from app.core.database import get_engine
 from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus
+
+logger = logging.getLogger(__name__)
 
 
 def is_file_stable(p: Path, interval: int, count: int) -> bool:
@@ -25,15 +30,85 @@ def is_file_stable(p: Path, interval: int, count: int) -> bool:
     return len(set(sizes)) == 1 and sizes[0] >= 0
 
 
+def _quarantine_unreadable(src: Path, cfg: AppConfig, exc: Exception) -> None:
+    """Move an input file that cannot even be read out of the scan loop.
+
+    Without this, a PermissionError/MemoryError/OSError happened before any
+    Document row existed: no holding-area row, no attempt counter, no
+    quarantine — the same file was re-read every night forever. The reason file
+    is the trace, because there is no DB row to carry it.
+
+    Also used for a file that is readable but cannot be a PDF (wrong magic,
+    over the size cap): extracting it would burn three VLM attempts and end in
+    the same place, so it is rejected on the way in instead.
+    """
+    try:
+        dest_dir = Path(cfg.paths.quarantine_folder) / "_documents"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"{src.stem}_{uuid.uuid4().hex[:8]}{src.suffix}"
+        shutil.move(str(src), str(dest))
+        dest.with_suffix(dest.suffix + ".reason.txt").write_text(
+            f"Could not read input file before ingestion: {type(exc).__name__}: {exc}\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        logger.warning(
+            "Could not move unreadable input file %s to quarantine", src, exc_info=True
+        )
+
+
+def _reject_input(src: Path, cfg: AppConfig, reason: str) -> None:
+    """Quarantine a readable input file that is not an acceptable PDF."""
+    exc = ValueError(reason)
+    _quarantine_unreadable(src, cfg, exc)
+    raise exc
+
+
 def ingest_file(src: Path, cfg: AppConfig) -> Document:
-    data = src.read_bytes()
+    # A `*.pdf` suffix proves nothing: a zero-byte file, an HTML error page
+    # saved as .pdf, or a truncated download would otherwise be stored and sent
+    # to the VLM up to three times, costing API calls and ending as `failed`.
+    # Reject it here, before a row exists, and leave a reason file behind.
+    #
+    # The size cap reuses the same limit as the browser upload paths. Read it
+    # from the module (not a module-level import) so tests and operators can
+    # patch one symbol, as tests/test_dashboard.py already does.
+    from app.core import limits
+
+    try:
+        size = src.stat().st_size
+    except Exception as e:
+        _quarantine_unreadable(src, cfg, e)
+        raise
+    if size > limits.MAX_UPLOAD_BYTES:
+        _reject_input(
+            src,
+            cfg,
+            f"file is {size} bytes, over the {limits.MAX_UPLOAD_BYTES}-byte upload cap",
+        )
+    try:
+        data = src.read_bytes()
+    except Exception as e:
+        _quarantine_unreadable(src, cfg, e)
+        raise
+    if b"%PDF-" not in data[:1024]:
+        _reject_input(
+            src,
+            cfg,
+            "no %PDF- header in the first 1024 bytes; it is not a PDF",
+        )
     h = hashlib.sha256(data).hexdigest()
     eng = get_engine(cfg)
     from app.models.base import Base
 
     Base.metadata.create_all(eng)
     with Session(eng) as s:
-        existing = s.query(Document).filter_by(sha256_hash=h).first()
+        existing = (
+            s.query(Document)
+            .filter_by(sha256_hash=h)
+            .filter(Document.archived_at.is_(None))
+            .first()
+        )
         if existing:
             # ensure stored file still exists (tmp dir may have been cleaned between runs)
             sp = Path(existing.stored_path)
@@ -59,6 +134,7 @@ def ingest_file(src: Path, cfg: AppConfig) -> Document:
                 s.query(Document)
                 .filter(
                     Document.is_split_parent.is_(True),
+                    Document.archived_at.is_(None),
                     Document.sha256_hash.like(f"{sha16}%"),
                 )
                 .order_by(Document.id.asc())

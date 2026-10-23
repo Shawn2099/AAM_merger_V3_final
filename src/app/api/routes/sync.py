@@ -52,8 +52,13 @@ def trigger_sync():
         raise HTTPException(status_code=409, detail="Sync already running")
 
     # Run in background daemon thread while holding file lock across flow execution
-    t = threading.Thread(target=_run_sync, args=(lock,), daemon=True)
-    t.start()
+    try:
+        t = threading.Thread(target=_run_sync, args=(lock,), daemon=True)
+        t.start()
+    except Exception:
+        # A lock with no thread behind it blocks every later sync for an hour.
+        release_sync_lock(lock)
+        raise
     cfg = load_config()
     return {"status": "sync started", "pool": cfg.prefect.work_pool_name}
 

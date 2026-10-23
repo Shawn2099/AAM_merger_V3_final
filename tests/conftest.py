@@ -88,6 +88,7 @@ def _session_paths() -> dict[str, str]:
         "quarantine_folder": str(_SESSION_DIR / "quarantine"),
         "stored_documents_folder": str(_SESSION_DIR / "stored"),
         "combined_folder": str(_SESSION_DIR / "combined"),
+        "archive_folder": str(_SESSION_DIR / "development" / "archived_sets"),
         "log_folder": str(_SESSION_DIR / "logs"),
         "database_path": str(_SESSION_DIR / "aam_merger.db"),
     }

@@ -9,3 +9,9 @@ Centralized here so tests can monkeypatch one symbol.
 
 #: Max bytes accepted for a single uploaded file (human decision 2026-09-05).
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+
+#: Max number of PDFs in one manual merge (audit P2-15). The endpoint reads
+#: whole files into memory on a 2-core host; 20 is far above any real packet
+#: (PO + DN + SI + customs + shipping) and bounds a hostile request. The total
+#: bytes of one manual merge are capped at MAX_UPLOAD_BYTES as well.
+MAX_MANUAL_MERGE_FILES = 20

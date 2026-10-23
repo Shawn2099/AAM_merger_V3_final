@@ -16,13 +16,13 @@
         <span class="badge badge-quarantined" style="font-size:0.8rem;" title="These documents show more than one PO number. Nothing will attach them automatically — enter the PO number to place them.">{{ ambiguous_count }} need a PO number</span>
         {% endif %}
         {% if unplaced_count %}
-        <span class="badge badge-pending" style="font-size:0.8rem;" title="These were read successfully but carry no PO reference, and nothing has placed them yet. Enter the PO number to place them.">{{ unplaced_count }} waiting to be placed</span>
+        <span class="badge badge-pending" style="font-size:0.8rem;" title="These were read successfully but are not in a PO Set yet. Enter the PO number to place them.">{{ unplaced_count }} waiting to be placed</span>
         {% endif %}
       </h2>
       <p class="card-subtitle">
         Documents that are not in a PO Set yet: files that could not be
         identified, files that failed to read, files showing more than one PO
-        number, and files read successfully that carry no PO reference. Preview
+        number, and files read successfully but not placed. Preview one, then
         one, then assign its type and/or the PO number to route it.
       </p>
     </div>
@@ -43,12 +43,12 @@
       </thead>
       <tbody>
         {% for doc in documents %}
-        <tr id="doc-row-{{ doc.id }}" x-data="{ poInput: '', get norm() { return this.poInput.replace(/[^A-Za-z0-9]/g, '').toUpperCase(); } }">
-          <form method="post" action="/unclassified/{{ doc.id }}/reclassify" hx-post="/unclassified/{{ doc.id }}/reclassify" hx-target="#doc-row-{{ doc.id }}" hx-swap="outerHTML">
+        <tr id="doc-row-{{ doc.id }}" x-data="{ poInput: '', docType: '', norm: '', refreshNorm() { const q = this.poInput.trim(); if (!q) { this.norm = ''; return; } fetch('/unclassified/normalize?po_no=' + encodeURIComponent(q)).then(r => r.json()).then(d => { this.norm = d.normalized; }).catch(() => { this.norm = ''; }); } }">
             <td>
               <div style="font-weight:600; color:var(--text-main);">{{ doc.original_filename }}</div>
               <div class="muted" style="font-size:0.75rem; font-family:ui-monospace, monospace;">
                 SHA: {{ doc.sha256_hash[:12] }}…
+                {% if doc.po_no_normalized %}<br>Extracted PO: {{ doc.po_no_normalized }}{% endif %}
               </div>
             </td>
 
@@ -65,7 +65,7 @@
               {% if es == 'failed' %}
                 <span class="badge badge-failed" style="font-size:0.75rem;">Failed</span>
                 <div class="muted" style="font-size:0.7rem; margin-top:3px;">
-                  {{ doc.extraction_attempt_count or 0 }}/3 attempts.<br>
+                  {{ doc.extraction_attempt_count or 0 }}/{{ attempt_cap }} attempts.<br>
                   Quarantined — file copied to the quarantine folder.
                 </div>
               {% elif es == 'valid' %}
@@ -78,7 +78,7 @@
             </td>
 
             <td>
-              <select name="doc_type" required style="padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); font-weight:600; background:#fff; width:100%; max-width:240px;">
+              <select name="doc_type" required x-model="docType" style="padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); font-weight:600; background:#fff; width:100%; max-width:240px;">
                 <option value="">-- Select Type --</option>
                 <option value="PO">📄 Purchase Order (PO)</option>
                 <option value="DN">📦 Delivery Note (DN)</option>
@@ -94,10 +94,11 @@
                 name="po_no" 
                 placeholder="e.g. PO-210851" 
                 x-model="poInput"
+                @input.debounce.300ms="refreshNorm()"
                 style="padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); width:150px; font-family:ui-monospace, monospace;"
               >
-              <div x-show="poInput.length > 0" class="muted" style="font-size:0.72rem; margin-top:2px;">
-                Normalized: <strong x-text="norm" style="color:var(--primary);"></strong>
+              <div x-show="norm.length > 0" class="muted" style="font-size:0.72rem; margin-top:2px;">
+                Server key: <strong x-text="norm" style="color:var(--primary);"></strong>
               </div>
             </td>
 
@@ -106,22 +107,29 @@
                 <button 
                   type="button"
                   class="btn btn-secondary btn-sm"
-                  @click="$store.pdfDrawer.open('/documents/{{ doc.id }}/preview', '{{ doc.original_filename }}')"
+                  data-preview-url="/documents/{{ doc.id }}/preview"
+                  data-preview-name="{{ doc.original_filename }}"
+                  @click="$store.pdfDrawer.open($el.dataset.previewUrl, $el.dataset.previewName)"
                   title="Preview PDF in slide-over drawer"
                 >
                   <span>👁️ Preview</span>
                 </button>
 
                 <button 
-                  type="submit" 
+                  type="button"
                   class="btn btn-primary btn-sm"
+                  hx-post="/unclassified/{{ doc.id }}/reclassify"
+                  hx-target="#doc-row-{{ doc.id }}"
+                  hx-swap="outerHTML"
+                  hx-include="closest tr"
+                  hx-disabled-elt="this"
+                  :disabled="!docType"
                   title="Assign type and route document"
                 >
                   <span>Save &amp; Route</span>
                 </button>
               </div>
             </td>
-          </form>
         </tr>
         {% endfor %}
       </tbody>

@@ -37,7 +37,7 @@ if (-not (Test-Path "config.yaml")) {
     Write-Host "[1/5] config.yaml exists" -ForegroundColor Green
 }
 
-$folders = @("data/input", "data/output", "data/quarantine", "data/stored", "data/unclassified", "data/logs", "data/samples")
+$folders = @("data/input", "data/output", "data/quarantine", "data/stored", "data/combined", "data/logs", "data/samples")
 foreach ($f in $folders) {
     if (-not (Test-Path $f)) {
         New-Item -ItemType Directory -Path $f -Force | Out-Null
@@ -45,9 +45,10 @@ foreach ($f in $folders) {
 }
 Write-Host "  Data directories verified."
 
-# 2) DB Migration (Using python -m alembic for AppLocker compatibility)
-Write-Host "[2/5] Running database migrations (alembic upgrade head)..." -ForegroundColor Cyan
-uv run python -m alembic upgrade head
+# 2) DB Migration — migrate_db.py handles a fresh DB and the existing
+# create_all-era DB (which has no alembic_version).
+Write-Host "[2/5] Running database migrations (scripts/migrate_db.py)..." -ForegroundColor Cyan
+uv run python scripts/migrate_db.py
 Write-Host "  Database up to date." -ForegroundColor Green
 
 # 3) Gates: pytest + ruff + ty

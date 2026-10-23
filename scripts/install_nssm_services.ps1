@@ -9,7 +9,7 @@
 
     Each service is configured with:
       - Automatic restart on failure (AppThrottle 2000ms)
-      - Stdout / Stderr logging with automatic log rotation (10 MB per file)
+      - Stdout / Stderr logging; rotation is OFF so pilot logs are never pruned
       - Explicit working directory and PYTHONPATH environment setup
       - Auto-start on Windows boot (SERVICE_AUTO_START)
 
@@ -45,6 +45,7 @@ param(
     [string]$HostAddress = "0.0.0.0",
     [switch]$WithPrefectServer,
     [string]$PrefectApiUrl = "",
+    [string]$WorkPoolName = "aam-merger-process-pool",
     [switch]$StartServices
 )
 
@@ -123,8 +124,18 @@ Write-Host "Project Directory : $ProjectDir"
 Write-Host "Python Executable : $PythonExe"
 Write-Host "NSSM Executable   : $NssmPath"
 Write-Host "Binding           : ${HostAddress}:${Port}"
+Write-Host "Work Pool         : $WorkPoolName"
+
+# Every process must talk to the same Prefect API. Without PREFECT_API_URL each
+# one starts its own ephemeral server, so the worker never sees the scheduled
+# deployment and the midnight sync silently never runs. Resolve it BEFORE the
+# banner so the banner reports the URL this install will actually use.
+$prefectApi = $PrefectApiUrl
+if ([string]::IsNullOrWhiteSpace($prefectApi) -and $WithPrefectServer) {
+    $prefectApi = "http://127.0.0.1:4200/api"
+}
 Write-Host "Prefect Server    : $(if ($WithPrefectServer) { 'Yes (Local Service)' } else { 'No (External or Worker-only)' })"
-Write-Host "Prefect API URL   : $(if ($prefectApi) { $prefectApi } else { '(machine default)' })"
+Write-Host "Prefect API URL   : $(if ($prefectApi) { $prefectApi } else { '(MISSING - worker will not start)' })"
 
 # 4. Ensure Data & Log Directories
 $logsDir = Join-Path $ProjectDir "data\logs"
@@ -134,14 +145,8 @@ if (-not (Test-Path $logsDir)) {
 
 $srcDir = Join-Path $ProjectDir "src"
 
-# Every process must talk to the same Prefect API. Without PREFECT_API_URL each
-# one starts its own ephemeral server, so the worker never sees the scheduled
-# deployment and the midnight sync silently never runs.
-$prefectApi = $PrefectApiUrl
-if ([string]::IsNullOrWhiteSpace($prefectApi) -and $WithPrefectServer) {
-    $prefectApi = "http://127.0.0.1:4200/api"
-}
-$extraEnv = "PYTHONPATH=$srcDir`nNO_PROXY=127.0.0.1,localhost,::1`nPYTHONUTF8=1`nPYTHONIOENCODING=utf-8"
+$prefectHome = Join-Path $ProjectDir "data\prefect"
+$extraEnv = "PYTHONPATH=$srcDir`nNO_PROXY=127.0.0.1,localhost,::1`nPYTHONUTF8=1`nPYTHONIOENCODING=utf-8`nPREFECT_HOME=$prefectHome"
 if (-not [string]::IsNullOrWhiteSpace($prefectApi)) {
     $extraEnv = "$extraEnv`nPREFECT_API_URL=$prefectApi"
 }
@@ -173,9 +178,11 @@ function Install-Or-Update-NssmService {
     & $NssmPath set $ServiceName AppEnvironmentExtra "$extraEnv"
     & $NssmPath set $ServiceName AppStdout "$StdoutLog"
     & $NssmPath set $ServiceName AppStderr "$StderrLog"
-    & $NssmPath set $ServiceName AppRotateFiles 1
-    & $NssmPath set $ServiceName AppRotateOnline 1
-    & $NssmPath set $ServiceName AppRotateBytes 10485760   # 10 MB per log file
+    # Pilot rule: logs are collected, never rotated away. The development
+    # snapshot task copies them; NSSM keeps one growing file per service.
+    & $NssmPath set $ServiceName AppRotateFiles 0
+    & $NssmPath set $ServiceName AppRotateOnline 0
+    & $NssmPath set $ServiceName AppRotateBytes 0
     & $NssmPath set $ServiceName AppThrottle 2000         # Pause 2s before restarting after crash
     & $NssmPath set $ServiceName AppRestartDelay 2000
     & $NssmPath set $ServiceName Start SERVICE_AUTO_START
@@ -215,7 +222,7 @@ if ($WithPrefectServer) {
 # 7. Service 3: AAMMerger-Worker
 $workerStdout = Join-Path $logsDir "nssm-worker-stdout.log"
 $workerStderr = Join-Path $logsDir "nssm-worker-stderr.log"
-$workerArgs = "-m prefect worker start --pool aam-merger-process-pool"
+$workerArgs = "-m prefect worker start --pool $WorkPoolName"
 Install-Or-Update-NssmService `
     -ServiceName "AAMMerger-Worker" `
     -AppPath $PythonExe `

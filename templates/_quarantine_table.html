@@ -41,13 +41,16 @@
           <!-- Quarantine Delete Modal -->
           <div id="qd-modal-{{ ps.id }}" class="modal-backdrop">
             <div class="modal-dialog" role="dialog" aria-modal="true" style="text-align:left;">
-              <h3 style="color:#991b1b; margin-bottom:8px;">Confirm Delete Quarantined Record?</h3>
+              <h3 style="color:#991b1b; margin-bottom:8px;">Archive Quarantined PO Set?</h3>
               <p class="muted" style="margin-bottom:16px;">
-                This deletes PO Set <strong>{{ ps.po_no_normalized }}</strong> from the active pipeline. Stored and quarantine PDF files on disk are safely preserved. An audit log entry (<code>quarantine_delete</code>) will be recorded.
+                This moves PO Set <strong>{{ ps.po_no_normalized }}</strong> to
+                <code>{{ archive_folder }}</code> and removes it from the active worklists.
+                The database rows, every stored PDF and the audit trail are kept — nothing is destroyed.
+                An audit log entry (<code>quarantine_delete</code>) records the archive.
               </p>
               <div style="display:flex; gap:8px; justify-content:flex-end;">
                 <button class="btn btn-secondary" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.remove('open')">Cancel</button>
-                <button class="btn btn-danger" hx-delete="/po_sets/{{ ps.id }}/quarantine" hx-swap="none" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.remove('open')">Confirm Delete</button>
+                <button class="btn btn-danger" hx-delete="/po_sets/{{ ps.id }}/quarantine" hx-swap="none" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.remove('open')">Archive</button>
               </div>
             </div>
           </div>

@@ -48,10 +48,10 @@
 
 | Table | Columns |
 |---|---|
-| documents | id PK; sha256_hash unique indexed (dedup key); original_filename; stored_path (never auto-deleted); doc_type enum PO, DN, SI, COMBINED, CUSTOMS, SHIPPING, COMMERCIAL_INVOICE, UNKNOWN; 
+| documents | id PK; sha256_hash (dedup key; unique among ACTIVE rows only — partial index `WHERE archived_at IS NULL`, so archived bytes can be re-ingested); original_filename; stored_path (never auto-deleted); doc_type enum PO, DN, SI, COMBINED, CUSTOMS, SHIPPING, COMMERCIAL_INVOICE, UNKNOWN; archived_at nullable;
 aw_extraction_json; po_no_raw/po_no_normalized; po_reference_ambiguous (multi-PO doc is left unattached, never guessed); dn_no/si_no/invoice_no nullable; extraction_status enum pending, processing, valid, failed; extraction_attempt_count capped at 3; po_set_id FK nullable; created_at/updated_at |
 | line_items | id PK; document_id FK; line_item_no text nullable (**the** matching key); description; quantity int ×1000; unit_price int ×1000; dn_no nullable (per-line DN reference) |
-| po_sets | id PK; po_no_normalized indexed (grouping key); status enum pending, mismatched, quarantined, blocked_customs, merged; has_customs_toggle; customs_doc_count; merged_output_path; 
+| po_sets | id PK; po_no_normalized indexed (grouping key); status enum pending, mismatched, quarantined, blocked_customs, merged; has_customs_toggle; customs_doc_count; merged_output_path; description_match_count (advisory fallback-link count, UI tag only);
 econcile_reason (plain-language, dashboard reads it); merged_at (immutable); locked_by_action; locked_at; created_at/updated_at |
 | udit_log | id PK; po_set_id FK nullable ON DELETE SET NULL; ction enum orce_merge, quarantine_delete, manual_status_change; detail JSON; justification (operator note, >= 20 chars when given); 	imestamp; source |
 
@@ -133,7 +133,7 @@ NPM_CONFIG_CACHE=/tmp/npm-cache npx --yes skills add <owner/repo@skill> -y
 2. **TDD:** one test per behaviour, Given/When/Then with static expected
    values. Examples that hold today: PO 100 = DN 40+60 and SI 70+30 →
    `merged`; an orphan vendor line → `quarantined`; a set with no SI number →
-   auto-merge refuses; delete keeps files and writes an audit row; second
+   auto-merge refuses; Delete archives rows/files to `data/development/archived_sets` and writes an audit row; second
    Force Merge on a locked set → 409.
 3. **If you remove a guard, add the limitation to PRODUCT §8 and pin it with a
    test named `test_limitation_*` or `test_known_limitation_*`.** A removed

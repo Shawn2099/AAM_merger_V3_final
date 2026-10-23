@@ -64,7 +64,9 @@ def _create_po_set(cfg, po_no="PO9999", status=POSetStatus.pending):
     stored = Path(cfg.paths.stored_documents_folder)
     stored.mkdir(parents=True, exist_ok=True)
     pdf = stored / f"{po_no}.pdf"
-    PdfWriter().write(str(pdf))
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    writer.write(str(pdf))
 
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)

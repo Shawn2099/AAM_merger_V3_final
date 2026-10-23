@@ -75,7 +75,9 @@ def build(tmp_path, po_no, spec, name=None):
                 continue
             n += 1
             p = tmp_path / "stored" / f"doc{n}.pdf"
-            PdfWriter().write(str(p))
+            w = PdfWriter()
+            w.add_blank_page(width=100, height=100)
+            w.write(str(p))
             extra = {}
             if dtype == SI:
                 extra = {"si_no": f"SI-{n}", "invoice_no": f"SI-{n}"}
@@ -605,11 +607,11 @@ def test_product_doc_lists_every_per_line_flag_type():
     assert "`naming`" in doc, "the naming flag is not documented in PRODUCT 3.2"
 
 
-def test_multiple_po_documents_quarantines_and_is_configurable():
-    """PRODUCT 3.1.1: two POs in one set quarantine rather than being summed.
+def test_multiple_po_documents_are_pending_and_configurable():
+    """PRODUCT 3.1.1: two POs in one set are held pending, not summed.
 
-    Summing them would double the baseline every DN/SI quantity is compared
-    against, and the set could never reconcile for an obvious reason.
+    Summing them could double the baseline; guessing which document is the
+    real PO is worse. The operator resolves the hold.
     """
     import itertools
     from pathlib import Path as _P
@@ -634,9 +636,10 @@ def test_multiple_po_documents_quarantines_and_is_configurable():
 
         eng = get_engine(cfg)
         run = next(seq)
+        po = f"MULTI-{run}"
         store = cfg.paths.stored_documents_folder
         with Session(eng) as s:
-            ps = POSet(po_no_normalized="MULTI", status=POSetStatus.pending)
+            ps = POSet(po_no_normalized=po, status=POSetStatus.pending)
             s.add(ps)
             s.commit()
             s.refresh(ps)
@@ -651,7 +654,7 @@ def test_multiple_po_documents_quarantines_and_is_configurable():
                     doc_type=DocType.PO,
                     extraction_status=ExtractionStatus.valid,
                     po_set_id=pid,
-                    po_no_normalized="MULTI",
+                    po_no_normalized=po,
                 )
                 s.add(d)
                 s.commit()
@@ -678,7 +681,7 @@ def test_multiple_po_documents_quarantines_and_is_configurable():
                     doc_type=DocType[dt],
                     extraction_status=ExtractionStatus.valid,
                     po_set_id=pid,
-                    po_no_normalized="MULTI",
+                    po_no_normalized=po,
                     **extra,
                 )
                 s.add(d)
@@ -716,10 +719,9 @@ def test_multiple_po_documents_quarantines_and_is_configurable():
 
     pid = build(cfg, 2)
     res = reconcile_po_set(pid, cfg)
-    assert res["status"] == "quarantined"
+    assert res["status"] == "pending"
     assert res["reason"] == "multiple_po_documents"
     assert "2 PO documents" in res["detail"]
-    assert res["flags"][0]["type"] == "identification"
 
     # one PO is fine
     pid1 = build(cfg, 1)

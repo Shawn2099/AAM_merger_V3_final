@@ -423,7 +423,9 @@ def _build(tmp_path, po_no, spec):
             n += 1
             name = f"doc{n}"
             p = tmp_path / "stored" / f"{name}.pdf"
-            PdfWriter().write(str(p))
+            w = PdfWriter()
+            w.add_blank_page(width=100, height=100)
+            w.write(str(p))
             extra = {}
             if dtype == S:
                 extra = {"si_no": f"SI-{n}", "invoice_no": f"SI-{n}"}

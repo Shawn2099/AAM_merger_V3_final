@@ -83,6 +83,8 @@ def group_by_line_no(
     po_lines: list[dict],
     vendor_lines: list[dict],
     desc_threshold: int = 85,
+    *,
+    desc_matches: list[dict] | None = None,
 ) -> tuple[dict[str, int], dict[str, int], list[dict], str | None]:
     """Sum PO and vendor quantities into per-line groups.
 
@@ -96,6 +98,11 @@ def group_by_line_no(
     `po_item_key`); a vendor row with no number, or with a number the PO does
     not carry, is matched by description. A printed number that the PO does
     carry is always authoritative — description never overrides it.
+
+    `desc_matches`, when supplied, is populated with one entry per vendor row
+    that was attached by the DESCRIPTION fallback rather than by a printed line
+    number. That link is a guess the operator should see (an amber review tag
+    in the UI); callers that do not care pass nothing.
     """
     po_totals: dict[str, int] = {}
     po_desc: dict[str, str] = {}
@@ -118,6 +125,7 @@ def group_by_line_no(
     for ln in vendor_lines:
         key = normalize_line_no(ln.get("line_item_no"))
         target = key if key in po_totals else None
+        matched_by_description = False
 
         if target is None and desc_threshold:
             # No number, or a number the PO does not carry. A numbered vendor
@@ -126,9 +134,20 @@ def group_by_line_no(
             # a typo override a printed key.
             candidates = {k: po_desc[k] for k in numberless_po_keys} if key else po_desc
             target = _best_desc_key(ln, candidates, desc_threshold)
+            matched_by_description = bool(target)
 
         if target:
             vendor_totals[target] = vendor_totals.get(target, 0) + int(ln.get("quantity") or 0)
+            if matched_by_description and desc_matches is not None:
+                desc_matches.append(
+                    {
+                        "vendor_line_item_no": ln.get("line_item_no"),
+                        "vendor_description": ln.get("description"),
+                        "po_key": target,
+                        "po_description": po_desc.get(target),
+                        "quantity": int(ln.get("quantity") or 0),
+                    }
+                )
         elif not key:
             orphans.append({**ln, "why": "no_line_number_and_no_description_match"})
         else:

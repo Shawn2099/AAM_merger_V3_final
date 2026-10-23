@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from filelock import FileLock
 from pypdf import PdfReader, PdfWriter
 from sqlalchemy.orm import Session
 
@@ -23,6 +26,24 @@ def _doc_type_val(doc) -> str:
         return str(dt)
 
 
+def _si_numbers(po_set: POSet) -> list[str]:
+    """Invoice numbers from SI documents, in deterministic document order.
+
+    A set may hold more than one SI (n SI is part of the contract). Iterating
+    the relationship without an order made the packet name depend on whatever
+    row SQLite returned first; sorting by document id makes it reproducible,
+    and the caller flags when the numbers disagree instead of hiding it.
+    """
+    numbers: list[str] = []
+    for d in sorted(po_set.documents or [], key=lambda row: getattr(row, "id", 0) or 0):
+        if _doc_type_val(d) != DocType.SI.value:
+            continue
+        n = getattr(d, "si_no", None) or getattr(d, "invoice_no", None)
+        if n and n not in numbers:
+            numbers.append(n)
+    return numbers
+
+
 def _si_number(po_set: POSet) -> str | None:
     """The packet's invoice number, read from the SI document.
 
@@ -30,14 +51,8 @@ def _si_number(po_set: POSet) -> str | None:
     to name the packet, because a packet named from the wrong document is
     worse than an unnamed one.
     """
-    docs = list(po_set.documents or [])
-    for d in docs:
-        if _doc_type_val(d) != DocType.SI.value:
-            continue
-        n = getattr(d, "si_no", None) or getattr(d, "invoice_no", None)
-        if n:
-            return n
-    return None
+    numbers = _si_numbers(po_set)
+    return numbers[0] if numbers else None
 
 
 def _any_invoice_number(po_set: POSet) -> str | None:
@@ -47,7 +62,7 @@ def _any_invoice_number(po_set: POSet) -> str | None:
     file when the SI number is missing, so it may look wider than the auto
     path does. The auto path uses `_si_number` and nothing else.
     """
-    for d in po_set.documents or []:
+    for d in sorted(po_set.documents or [], key=lambda row: getattr(row, "id", 0) or 0):
         n = getattr(d, "si_no", None) or getattr(d, "invoice_no", None)
         if n:
             return n
@@ -64,6 +79,10 @@ def _ordered_docs(po_set: POSet, cfg=None) -> list:
     groups: dict[str, list] = {}
     for d in docs:
         groups.setdefault(_doc_type_val(d), []).append(d)
+    # Deterministic within a type: SQLite does not promise relationship order,
+    # and a set with two SI documents must rebuild to the same page sequence.
+    for members in groups.values():
+        members.sort(key=lambda row: getattr(row, "id", 0) or 0)
     # Order: config merge.legal_order (editable, DECISIONS_LOG §8);
     # types absent from the order append in first-seen order so new manual
     # types (e.g. AWB) never silently vanish from a packet.
@@ -94,12 +113,70 @@ class MergeNamingError(RuntimeError):
     """
 
 
+class MergeSourceError(RuntimeError):
+    """A source PDF is missing or unreadable.
+
+    A named, recoverable failure: the set must quarantine and tell the operator
+    which file to look at. It must never escape the reconcile as a raw pypdf
+    exception, which leaves the set silently pending and retries forever.
+    """
+
+
+class MergeEmptyError(RuntimeError):
+    """There is no page or line-item evidence to write a deliverable packet.
+
+    A packet with no pages (or no reconciled line behind it) must never be
+    delivered; the set quarantines instead. `reason_code` distinguishes the two
+    so the dashboard does not tell an operator "no line items" when the real
+    fault is a source PDF with no readable pages.
+    """
+
+    def __init__(self, message: str, reason_code: str = "no_line_item_evidence") -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+
+
+def _output_lock(out: Path) -> FileLock:
+    """Serialise writers for one output name across processes.
+
+    The per-PO lock stops two actions on the same set. It does not stop two
+    different sets that resolve to the same filename (the duplicate-PO case).
+    The lock is taken before the existence check so the check and the write are
+    one critical section.
+
+    The lock file lives in `output/.locks/`, not beside the packet: filelock
+    never deletes it, so `output/` would otherwise fill with `*.pdf.lock` and
+    the delivery folder would not contain only PDFs.
+    """
+    lock_dir = out.parent.parent / ".aam-merger-locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    # Outside the output folder: that folder must contain only delivered
+    # packets. The parent name keeps two output folders with the same packet
+    # name from sharing a lock.
+    return FileLock(str(lock_dir / f"{out.parent.name}__{out.name}.lock"), timeout=60)
+
+
+_WINDOWS_RESERVED = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
 def _safe_stem(value: str) -> str:
-    return "".join(c for c in str(value) if c.isalnum() or c in ("-", "_", "."))
+    stem = "".join(c for c in str(value) if c.isalnum() or c in ("-", "_", "."))
+    # A packet called CON.pdf targets the console device on Windows, not a
+    # file. Prefix rather than refuse: the operator still gets a deliverable.
+    if stem.upper().split(".", 1)[0] in _WINDOWS_RESERVED:
+        stem = f"_{stem}"
+    return stem[:100]
 
 
-def _packet_name(po_set: POSet) -> tuple[str | None, bool]:
-    """Filename stem, and whether the invoice number was missing.
+def _packet_name(po_set: POSet) -> tuple[str | None, bool, list[str]]:
+    """Filename stem, whether the invoice number was missing, and all SI numbers.
 
     Preferred: the SI document's own number, and only that. A number printed on
     a DN or a PO is never used, because a packet named from the wrong document
@@ -113,16 +190,16 @@ def _packet_name(po_set: POSet) -> tuple[str | None, bool]:
     A PO number alone is safe as a filename: only one open set exists per PO key
     at a time, and a genuine duplicate still raises in `_resolve_output_path`.
     """
-    si_no = _si_number(po_set)
-    if si_no:
-        stem = _safe_stem(si_no)
+    numbers = _si_numbers(po_set)
+    if numbers:
+        stem = _safe_stem(numbers[0])
         if stem:
-            return stem, False
+            return stem, False, numbers
     po_no = (po_set.po_no_normalized or "").strip()
     stem = _safe_stem(po_no) if po_no else ""
     if stem:
-        return stem, True
-    return None, True
+        return stem, True, numbers
+    return None, True, numbers
 
 
 def _resolve_output_path(
@@ -139,37 +216,81 @@ def _resolve_output_path(
         return out
     if out.exists():
         raise MergeNamingError(
-            f"output filename '{out.name}' already exists and belongs to another PO Set; "
-            f"refusing to overwrite (PO Set {po_set_id})"
+            f"output filename '{out.name}' already exists; refusing to overwrite "
+            f"(PO Set {po_set_id}). If no delivered packet owns it, inspect/remove "
+            "the file and re-run."
         )
     return out
 
 
-def _write_merged(ordered: list, out: Path, allow_missing: bool = False) -> Path:
+def _write_merged(ordered: list, out: Path, allow_missing: bool = False) -> int:
+    """Write the packet atomically and return its page count.
+
+    The writer targets a unique temporary file in the destination folder, then
+    `os.replace`s it. A crash, disk-full or unreadable source therefore never
+    leaves a truncated PDF at the delivered filename. Any pypdf failure is
+    wrapped in `MergeSourceError` so the caller can quarantine with a reason
+    instead of letting a raw exception abort the reconcile.
+    """
     out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(f".{out.stem}.{uuid.uuid4().hex}.tmp")
     writer = PdfWriter()
     missing: list[str] = []
-    for doc in ordered:
-        raw_path = getattr(doc, "stored_path", None)
-        p = Path(raw_path) if raw_path else None
-        # An empty stored_path becomes Path("."), which "exists" and then
-        # makes PdfReader open the cwd. A malformed row must be treated as a
-        # missing file, not crash the merge and abort the sweep.
-        if p is None or not p.is_file():
-            doc_id = getattr(doc, "id", "?")
-            doc_name = getattr(doc, "original_filename", "unknown")
-            missing.append(f"Doc {doc_id} ({doc_name}): {p}")
-            continue
-        reader = PdfReader(str(p))
-        for pg in reader.pages:
-            writer.add_page(pg)
+    try:
+        for doc in ordered:
+            raw_path = getattr(doc, "stored_path", None)
+            p = Path(raw_path) if raw_path else None
+            # An empty stored_path becomes Path("."), which "exists" and then
+            # makes PdfReader open the cwd. A malformed row must be treated as a
+            # missing file, not crash the merge and abort the sweep.
+            if p is None or not p.is_file():
+                doc_id = getattr(doc, "id", "?")
+                doc_name = getattr(doc, "original_filename", "unknown")
+                missing.append(f"Doc {doc_id} ({doc_name}): {p}")
+                continue
+            try:
+                reader = PdfReader(str(p))
+                for pg in reader.pages:
+                    writer.add_page(pg)
+            except Exception as e:
+                doc_id = getattr(doc, "id", "?")
+                doc_name = getattr(doc, "original_filename", "unknown")
+                if allow_missing:
+                    missing.append(f"Doc {doc_id} ({doc_name}): unreadable ({e})")
+                    continue
+                raise MergeSourceError(
+                    f"Doc {doc_id} ({doc_name}) is unreadable: {e}"
+                ) from e
 
-    if missing and not allow_missing:
-        raise FileNotFoundError(f"Missing stored PDF(s) during merge: {'; '.join(missing)}")
+        if missing and not allow_missing:
+            raise MergeSourceError(f"Missing stored PDF(s) during merge: {'; '.join(missing)}")
 
-    # pypdf requires at least one page; if empty, write empty PDF with no pages -> still create file
-    writer.write(str(out))
-    return out
+        writer.write(str(tmp))
+        pages = len(writer.pages)
+        if pages == 0:
+            raise MergeEmptyError(
+                "Refusing to write a 0-page packet: no readable pages in the attached documents",
+                reason_code="packet_source_unreadable",
+            )
+        os.replace(tmp, out)
+        return pages
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _delete_inputs_for_merged(ps: POSet, cfg) -> None:
+    """Remove the input copies once the packet is written.
+
+    The nightly flow does this, but a manual/force merge did not: the files
+    stayed in input until the next sweep, were re-hashed and de-duplicated on
+    every run, and counted as new work. A merged set's input copy is done.
+    """
+    try:
+        from app.services.ingestion import delete_input_files
+
+        delete_input_files(ps, Path(cfg.paths.input_folder))
+    except Exception:
+        logger.warning("Could not clear input copies for PO Set %s", ps.id, exc_info=True)
 
 
 def merge_po_set(po_set_id: int, cfg, info: dict | None = None) -> Path | None:
@@ -195,6 +316,8 @@ def merge_po_set(po_set_id: int, cfg, info: dict | None = None) -> Path | None:
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise ValueError(f"POSet {po_set_id} not found")
+        if ps.archived_at is not None:
+            return None
         # FR-14.6/14.7 immutable
         if ps.status == POSetStatus.merged:
             if ps.merged_output_path is not None:
@@ -207,6 +330,11 @@ def merge_po_set(po_set_id: int, cfg, info: dict | None = None) -> Path | None:
             POSetStatus.blocked_customs,
         )
         if ps.status in blocked:
+            return None
+        # More than one PO document is a human decision. Reconcile returns
+        # pending; this guard keeps a direct merge call (or a stale status)
+        # from bypassing that hold and summing two baselines.
+        if sum(1 for d in (ps.documents or []) if _doc_type_val(d) == DocType.PO.value) > 1:
             return None
         # Single source of truth for the customs gate. This used to be a
         # byte-for-byte private copy living in this module, which meant the
@@ -226,13 +354,14 @@ def merge_po_set(po_set_id: int, cfg, info: dict | None = None) -> Path | None:
         # (force_merge bypasses by explicit operator intent.)
         total_lines = sum(len(list(d.line_items or [])) for d in ordered)
         if total_lines == 0:
-            logger.warning("Auto-merge refused for PO Set %s: zero line-item evidence", po_set_id)
-            return None
+            raise MergeEmptyError(
+                f"PO Set {po_set_id} has documents but no line-item evidence — refusing to merge"
+            )
 
         # Named from the SI document's own number, falling back to the PO
         # number when no invoice number was extracted at all. The fallback is
         # reported through `info` so the reviewer sees the gap.
-        stem, invoice_missing = _packet_name(ps)
+        stem, invoice_missing, invoice_numbers = _packet_name(ps)
         if not stem:
             raise MergeNamingError(
                 f"PO Set {po_set_id} cannot be named: no invoice number and no PO number"
@@ -240,24 +369,41 @@ def merge_po_set(po_set_id: int, cfg, info: dict | None = None) -> Path | None:
         out = _resolve_output_path(
             stem, ps.id, Path(cfg.paths.output_folder), ps.merged_output_path
         )
-        if info is not None:
-            info["output_name"] = out.name
-            info["invoice_no_missing"] = invoice_missing
-
-        # Merge
-        try:
+        # The per-PO lock does not stop a different set that resolves to the
+        # same name. Re-check and write inside one cross-process critical
+        # section, so the existence check and the packet write are atomic.
+        with _output_lock(out):
+            out = _resolve_output_path(
+                stem, ps.id, Path(cfg.paths.output_folder), ps.merged_output_path
+            )
             _write_merged(ordered, out, allow_missing=False)
-        except FileNotFoundError as e:
-            logger.warning("Auto-merge failed for PO Set %s: %s", po_set_id, e)
-            return None
+            if info is not None:
+                info["output_name"] = out.name
+                info["invoice_no_missing"] = invoice_missing
+                info["invoice_numbers"] = invoice_numbers
+                info["multiple_invoice_numbers"] = len(invoice_numbers) > 1
 
-        ps.merged_output_path = str(out)
-        ps.merged_at = datetime.now(UTC)
-        ps.status = POSetStatus.merged
-        s.commit()
+            ps.merged_output_path = str(out)
+            ps.merged_at = datetime.now(UTC)
+            ps.status = POSetStatus.merged
+            # A set that was quarantined or mismatched before an operator's
+            # Re-Extract/Re-Match can reconcile and merge. Leaving the old
+            # sentence on the row makes the dashboard show a delivered packet
+            # as "could not be verified" forever; the override path already
+            # clears it. `_persist_reason` may still append a naming note.
+            ps.reconcile_reason = "Fully reconciled — packet merged"
+            try:
+                s.commit()
+            except Exception:
+                # The packet is not referenced by any DB row. Remove it rather
+                # than leave an unowned file that the next run would call a
+                # naming collision.
+                out.unlink(missing_ok=True)
+                raise
         s.refresh(ps)
         # ty: ps.merged_output_path set just above, non-None
         assert ps.merged_output_path is not None
+        _delete_inputs_for_merged(ps, cfg)
         return Path(ps.merged_output_path)
 
 
@@ -277,16 +423,23 @@ def force_merge(
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise ValueError(f"POSet {po_set_id} not found")
+        if ps.archived_at is not None:
+            raise ValueError(f"POSet {po_set_id} is archived and cannot be merged")
 
         from app.services.quarantine import validate_justification
 
         note = validate_justification(justification)
 
         if ps.status == POSetStatus.merged and ps.merged_output_path is not None:
-            # Idempotent no-op returning the existing packet — but the press
-            # itself is still audited (PRODUCT §6: every Force Merge writes a
-            # row). Intent is what the log records, not just effects.
             out = Path(ps.merged_output_path)
+            if not out.is_file():
+                # Never report a delivered packet that is not there. The
+                # documents are all attached, so the operator can rebuild by
+                # restoring the file or re-running the merge after clearing the
+                # row's merged state.
+                raise MergeSourceError(
+                    f"PO Set {po_set_id} is marked merged but its packet is missing: {out}"
+                )
             customs_count = sum(
                 1
                 for d in (ps.documents or [])
@@ -309,6 +462,7 @@ def force_merge(
                 )
             )
             s.commit()
+            _delete_inputs_for_merged(ps, cfg)
             return out
 
         ordered = _ordered_docs(ps, cfg)
@@ -331,30 +485,45 @@ def force_merge(
         out = _resolve_output_path(
             safe, ps.id, Path(cfg.paths.output_folder), ps.merged_output_path
         )
-        _write_merged(ordered, out, allow_missing=False)
-
-        ps.merged_output_path = str(out)
-        ps.merged_at = datetime.now(UTC)
-        ps.status = POSetStatus.merged
-
-        customs_count = sum(
-            1
-            for d in (ps.documents or [])
-            if _doc_type_val(d) in (DocType.CUSTOMS.value, DocType.SHIPPING.value)
-        )
-        detail = json.dumps({"customs_doc_count": customs_count, "output_name": out.name})
-        s.add(
-            AuditLog(
-                po_set_id=ps.id,
-                action=AuditAction.force_merge,
-                detail=detail,
-                source=source,
-                justification=note,
+        with _output_lock(out):
+            out = _resolve_output_path(
+                safe, ps.id, Path(cfg.paths.output_folder), ps.merged_output_path
             )
-        )
-        s.commit()
+            _write_merged(ordered, out, allow_missing=False)
+
+            ps.merged_output_path = str(out)
+            ps.merged_at = datetime.now(UTC)
+            ps.status = POSetStatus.merged
+            # The set was force-merged from a state that may have carried a
+            # mismatch or quarantine sentence. Leaving that sentence on a
+            # `merged` row makes the dashboard contradict itself forever.
+            ps.reconcile_reason = (
+                "Force-merged by operator — reconciliation and customs gates were bypassed"
+            )
+
+            customs_count = sum(
+                1
+                for d in (ps.documents or [])
+                if _doc_type_val(d) in (DocType.CUSTOMS.value, DocType.SHIPPING.value)
+            )
+            detail = json.dumps({"customs_doc_count": customs_count, "output_name": out.name})
+            s.add(
+                AuditLog(
+                    po_set_id=ps.id,
+                    action=AuditAction.force_merge,
+                    detail=detail,
+                    source=source,
+                    justification=note,
+                )
+            )
+            try:
+                s.commit()
+            except Exception:
+                out.unlink(missing_ok=True)
+                raise
         s.refresh(ps)
         assert ps.merged_output_path is not None
+        _delete_inputs_for_merged(ps, cfg)
         return Path(ps.merged_output_path)
 
 
@@ -381,6 +550,8 @@ def append_customs_to_merged_packet(po_set_id: int, cfg, source: str = "operator
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise ValueError(f"POSet {po_set_id} not found")
+        if ps.archived_at is not None:
+            raise ValueError(f"POSet {po_set_id} is archived and cannot be modified")
         if ps.status != POSetStatus.merged:
             raise ValueError(f"POSet {po_set_id} is not merged (status={ps.status})")
         if not ps.merged_output_path:
@@ -411,14 +582,11 @@ def append_customs_to_merged_packet(po_set_id: int, cfg, source: str = "operator
                 )
 
         out = Path(ps.merged_output_path)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        tmp = out.with_name(f"{out.stem}.appending{out.suffix}")
-        try:
-            _write_merged(ordered, tmp, allow_missing=False)
-            tmp.replace(out)
-        finally:
-            if tmp.exists():
-                tmp.unlink(missing_ok=True)
+        # `_write_merged` writes a unique temp and atomically replaces `out`;
+        # holding the output-name lock keeps a concurrent rebuild or first
+        # merge from swapping a half-written packet.
+        with _output_lock(out):
+            _write_merged(ordered, out, allow_missing=False)
 
         detail = json.dumps(
             {

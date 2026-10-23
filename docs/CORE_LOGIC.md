@@ -22,7 +22,7 @@ contract is pinned by `tests/test_business_scenarios_ui.py`.
 
 | Rule | Implementation |
 |---|---|
-| One PO document anchors a set. A second PO document under the same number **quarantines** (`multiple_po_documents`) rather than doubling the baseline. | `reconciliation.py` (`single_po_document`, default `true`) |
+| One PO document anchors a set. A second PO document under the same number holds the set **pending** (`multiple_po_documents`) for review; it is never summed and never auto-merged. | `reconciliation.py` (`single_po_document`, default `true`) |
 | DN and SI documents never create a set; they attach to the open set with the **same normalised PO number**. | `grouping.py` (`ANCHOR_TYPES`, `get_or_create_po_set(create=False)`) |
 | Any number of DN and SI documents may attach. All of them are included in the packet. | `reconciliation.py` (`dn_docs`, `si_docs`); `merge.py::_ordered_docs` |
 | The PO number is normalised (labels/leading `PO`, spacing, case, revision suffix). `PO 161538`, `161538` and `PO, Rev # 161538,0` are the same set. | `grouping.normalize_po_no` |
@@ -73,8 +73,8 @@ partial merge.
 |---|---|
 | `merged` | Every line matched exactly and, if the customs requirement is on, both customs documents are present. Packet written. |
 | `mismatched` | A line was reported on both sides with different quantities. A human decides which document is right. |
-| `pending` | A required side is missing, or the vendor reported **nothing** for a PO line (an outstanding delivery, not a failure). **Not a pass.** |
-| `quarantined` | A line could not be identified, a quantity is zero/unreadable, a second PO document, a PO reference mismatch, or the packet cannot be named. Whole set, never a line. |
+| `pending` | A required side is missing, the vendor reported **nothing** for a PO line, or the set holds more than one PO document (review hold). **Not a pass.** |
+| `quarantined` | A line could not be identified, a quantity is zero/unreadable, a PO reference mismatch, or the packet cannot be named. Whole set, never a line. |
 
 Zero or unreadable quantities quarantine (`non_positive_quantity`); a row is
 never silently dropped.
@@ -122,7 +122,7 @@ belonging to another set is never overwritten — that set quarantines as
 | Description fallback for a numberless vendor row | `test_a_numberless_vendor_row_falls_back_to_description` |
 | A PO line with no number matches by description | `test_a_numberless_po_line_reconciles_by_description` |
 | A PO line with no number *and* no description quarantines | `test_po_line_without_a_number_or_description_quarantines_and_both_pages_say_why` |
-| Second PO document quarantines | `test_two_po_documents_quarantine_and_the_pages_explain_it` |
+| Second PO document holds the set pending | `test_two_po_documents_hold_the_set_pending_for_review` |
 | Identical bytes are one document | `test_identical_po_bytes_are_one_document_not_a_second_po` |
 | Same PO number is required | `test_po_reference_mismatch_quarantines_with_the_offending_file` |
 | Partial delivery is a wait, not a pass | `test_partial_delivery_is_pending_not_quarantined` |

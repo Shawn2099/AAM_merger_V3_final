@@ -8,13 +8,24 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
 
-class PathsConfig(BaseModel):
+class _StrictConfigModel(BaseModel):
+    """Base for every config section: an unknown key is an error (audit P2-16).
+
+    `extra="ignore"` meant a typo (`stability_pol_count`, `schedule_timezon`)
+    ran the application on the default while the operator believed the file
+    had set the value. That is the opposite of SPEC §13.1 fail-fast.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PathsConfig(_StrictConfigModel):
     input_folder: Path
     output_folder: Path
     quarantine_folder: Path
@@ -24,36 +35,57 @@ class PathsConfig(BaseModel):
     # Layer-1 split parking for multi-doc PDFs (PLAN Step 4). Parents live here
     # after being cut; never re-scanned (only `input_folder` is scanned).
     combined_folder: Path = Path("./data/combined")
+    # Delete is an ARCHIVE action. The exported set (PDF copies, JSON manifests,
+    # ARCHIVE.txt) is written here. Optional so existing configs and the
+    # many hand-written test configs keep validating; omitted means
+    # `<config dir>/data/development/archived_sets`.
+    archive_folder: Path = Path("./data/development/archived_sets")
     # `unclassified_folder` was removed 2026-09-29. Unclassified documents
     # are identified by `documents.doc_type == UNKNOWN` and surfaced through
     # the web UI, so no folder was ever written to it.
 
 
-class ServerConfig(BaseModel):
+class ServerConfig(_StrictConfigModel):
     host: str = "0.0.0.0"
     port: int = 8000
+    # Hosts accepted in the HTTP `Host` header (audit P1-10). `["*"]` — the
+    # default — accepts any host, which is what a LAN deployment behind a
+    # changing IP needs. List the real names (`aam.local`, `10.0.0.5`) when the
+    # server has a stable address: that closes DNS-rebinding reads.
+    allowed_hosts: list[str] = ["*"]
 
 
-class VLMConfig(BaseModel):
+class VLMConfig(_StrictConfigModel):
     # `provider` was removed 2026-09-29: OpenRouter was the only supported
     # provider and nothing read the key, so it could only ever be misleading.
     model: str = "openai/gpt-6-luna"
-    request_timeout_seconds: int = 60
+    # ge=1: a zero/negative timeout makes every extraction fail immediately
+    # (audit P2-20).
+    request_timeout_seconds: int = Field(default=60, ge=1)
     api_key_env_var: str = "OPENROUTER_API_KEY"
 
 
-class ExtractionConfig(BaseModel):
+class ExtractionConfig(_StrictConfigModel):
+    # The number of extraction attempts a document gets before it is
+    # permanently failed. `app.services.extraction._attempt_cap` reads this
+    # value directly as the cap, so it is *attempts*, not retries-after-the-
+    # first-try (audit P2-25). Prefect also uses it as its retry count; the
+    # following pass that finds `attempt_count >= cap` writes the terminal
+    # `failed` state, which is how a capped document becomes actionable
+    # instead of looking like a wait. Values above 5 are refused because each
+    # attempt is a paid VLM call on a 2-core host.
     max_retries: int = Field(ge=1, le=5, default=3)
     retry_backoff_seconds: list[int] = Field(default=[2, 5, 15])
     # A document claimed for extraction (pending -> processing) that is still
     # `processing` after this many seconds belonged to a worker that died.
     # It is released back to `pending` and read again on the next pass.
-    # Must exceed the worst case of one attempt: vlm.request_timeout_seconds
-    # * max_retries, plus the retry backoff.
+    # Must exceed the worst case of one attempt:
+    # vlm.request_timeout_seconds * (max_retries + 1), plus the retry backoff.
+    # Enforced by `AppConfig.validate_attempt_budget` below.
     stale_processing_seconds: int = Field(default=900, ge=60)
 
 
-class MatchingConfig(BaseModel):
+class MatchingConfig(_StrictConfigModel):
     # The only matching knob that is read. `group_by_line_no` takes this as
     # its description-similarity threshold, used solely for rows that carry
     # no usable line number.
@@ -78,7 +110,7 @@ class MatchingConfig(BaseModel):
         return v
 
 
-class MergeConfig(BaseModel):
+class MergeConfig(_StrictConfigModel):
     # Final packet order, editable via config (DECISIONS_LOG §8).
     # Default keeps current behavior: SI→DN→PO→SHIPPING→CUSTOMS.
     legal_order: list[str] = Field(default=["SI", "DN", "PO", "SHIPPING", "CUSTOMS"])
@@ -104,17 +136,19 @@ class MergeConfig(BaseModel):
         return v
 
 
-class IngestionConfig(BaseModel):
-    stability_poll_interval_seconds: int = 2
-    stability_poll_count: int = 2
+class IngestionConfig(_StrictConfigModel):
+    # ge=1: a poll count of 0 raised IndexError and a negative interval called
+    # sleep(-1) at ingestion time (audit P2-20). Fail at startup instead.
+    stability_poll_interval_seconds: int = Field(default=2, ge=1)
+    stability_poll_count: int = Field(default=2, ge=1)
 
 
-class PrefectConfig(BaseModel):
+class PrefectConfig(_StrictConfigModel):
     work_pool_name: str = "aam-merger-process-pool"
     max_concurrent_extraction_tasks: int = Field(default=3, ge=1, le=10)
-    # IANA zone for the midnight sync (e.g. "Asia/Kolkata"). Unset means
-    # Prefect's default, which is UTC — the deploy script says so rather than
-    # letting an operator assume "midnight" means local midnight.
+    # IANA zone for the midnight sync (e.g. "Asia/Kolkata"). The deploy script
+    # falls back to Asia/Kolkata when this is unset (the office zone), NOT to
+    # Prefect's UTC default — an unset key must not run at 05:30 local.
     schedule_timezone: str | None = None
 
     @field_validator("schedule_timezone", mode="after")
@@ -131,20 +165,18 @@ class PrefectConfig(BaseModel):
         return v
 
 
-class ConcurrencyConfig(BaseModel):
+class ConcurrencyConfig(_StrictConfigModel):
     po_set_lock_timeout_seconds: int = 300
 
 
-class ReconciliationConfig(BaseModel):
-    # When true, a PO Set carrying more than one PO document is quarantined
-    # instead of summing them. A PO Set is expected to hold exactly one PO; a
-    # second one usually means a re-issue or a transcription of the same PO
-    # number, and summing two POs into one baseline silently doubles every
-    # quantity, which then never reconciles.
+class ReconciliationConfig(_StrictConfigModel):
+    # When true, a PO Set carrying more than one PO document is held pending
+    # for a human. It is not summed and not auto-merged: the engine cannot tell
+    # a page fragment from a re-issue.
     single_po_document: bool = True
 
 
-class LoggingConfig(BaseModel):
+class LoggingConfig(_StrictConfigModel):
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     max_file_size_mb: int = 10
     backup_count: int = 5
@@ -163,7 +195,52 @@ class AppConfig(BaseSettings):
     reconciliation: ReconciliationConfig = ReconciliationConfig()
     logging: LoggingConfig = LoggingConfig()
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # Audit P2-16: an unknown *top-level* key (e.g. `pathz:`) is an error too.
+    # The YAML file is the only settings source — see
+    # `settings_customise_sources` — so `extra` never sees `.env` secrets.
+    model_config = SettingsConfigDict(extra="forbid")
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Read config from the validated YAML dict only (SPEC §13.1).
+
+        With `extra="forbid"`, letting the env/dotenv sources contribute
+        would make every secret in `.env` (`OPENROUTER_API_KEY`) look like a
+        typo and refuse startup. Secrets are read with `os.getenv` by
+        `load_env` / the VLM client; they are not config fields.
+        """
+        return (init_settings,)
+
+    @model_validator(mode="after")
+    def validate_attempt_budget(self) -> AppConfig:
+        """A live extraction must not be reclaimed as stale (audit P2-20).
+
+        `stale_processing_seconds` releases a `processing` document back to
+        `pending`. If the worst-case single attempt can outlive it, the
+        recovery sweep reclaims a document that is still being read and the
+        VLM is called twice for the same PDF (double line items).
+        """
+        attempts = self.extraction.max_retries + 1
+        worst_case_seconds = self.vlm.request_timeout_seconds * attempts + sum(
+            self.extraction.retry_backoff_seconds
+        )
+        if self.extraction.stale_processing_seconds <= worst_case_seconds:
+            raise ValueError(
+                "extraction.stale_processing_seconds "
+                f"({self.extraction.stale_processing_seconds}s) must exceed the "
+                f"worst-case extraction ({worst_case_seconds}s = "
+                "vlm.request_timeout_seconds * (extraction.max_retries + 1) + "
+                "sum(extraction.retry_backoff_seconds)); otherwise a live "
+                "extraction is reclaimed as stale and the PDF is read twice"
+            )
+        return self
 
     @field_validator("paths", mode="after")
     @classmethod
@@ -177,6 +254,7 @@ class AppConfig(BaseSettings):
             "quarantine_folder",
             "stored_documents_folder",
             "combined_folder",
+            "archive_folder",
             "log_folder",
         ]:
             p = getattr(v, field_name, None)
@@ -221,8 +299,23 @@ def load_env(cfg_path: Path | None = None) -> None:
             logger.warning("Could not read %s", candidate, exc_info=True)
 
 
+_CONFIG_CACHE: dict[tuple[str, int, int, int, str], AppConfig] = {}
+
+
 def load_config(path: str | Path | None = None) -> AppConfig:
-    """Load YAML config + .env. SPEC §13.1 — validated at startup, fail fast."""
+    """Load YAML config + .env. SPEC §13.1 — validated at startup, fail fast.
+
+    The dashboard polls every 2 s and each route used to re-read the YAML and
+    re-run six `mkdir`s (audit P2-24). Parsed configs are cached by the config
+    file's stat signature and the API-key presence; callers get a deep copy so
+    a test or a route that adjusts a path cannot poison the cache.
+
+    `paths.combined_folder` is optional: when the YAML omits it, the default
+    is `<config dir>/data/combined`. Every relative `paths:` value is resolved
+    against **the config file's directory**, not the process working directory.
+    The Windows service starts in `C:\\Windows\\System32`, so a CWD-relative
+    `./data/output` parked real output in a system folder (audit P2-16).
+    """
     cfg_path = Path(path or os.getenv("AAM_CONFIG_PATH", "config.yaml"))
     if not cfg_path.exists():
         # SPEC §13.1: refuse to start — never silently fall back to the
@@ -232,6 +325,38 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             f"{cfg_path} and adjust paths for this host"
         )
     data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    try:
+        stat = cfg_path.stat()
+        env_path = cfg_path.resolve().parent / ".env"
+        env_stat = env_path.stat() if env_path.exists() else None
+        cache_key = (
+            str(cfg_path.resolve()),
+            stat.st_mtime_ns,
+            stat.st_size,
+            env_stat.st_mtime_ns if env_stat else 0,
+            os.getenv("OPENROUTER_API_KEY") or "",
+        )
+    except OSError:
+        cache_key = None
+    if cache_key is not None and cache_key in _CONFIG_CACHE:
+        return _CONFIG_CACHE[cache_key].model_copy(deep=True)
+    paths_raw = data.get("paths")
+    if isinstance(paths_raw, dict):
+        # Relative paths are relative to the CONFIG FILE, not the process
+        # working directory. Under NSSM that cwd is C:\Windows\System32, so a
+        # `./data/output` written in YAML would otherwise create output in a
+        # system folder. Absolute paths (the production C:\AAM form) are left
+        # exactly as written.
+        base_dir = cfg_path.resolve().parent
+        for key, value in list(paths_raw.items()):
+            if isinstance(value, str) and value and not Path(value).is_absolute():
+                paths_raw[key] = str((base_dir / value).resolve())
+        if "combined_folder" not in paths_raw:
+            paths_raw["combined_folder"] = str(base_dir / "data" / "combined")
+        if "archive_folder" not in paths_raw:
+            paths_raw["archive_folder"] = str(
+                base_dir / "data" / "development" / "archived_sets"
+            )
     cfg = AppConfig.model_validate(data)
     # Secrets are in .env or in the environment; load the file so the check
     # below sees the same key the VLM client will use. Without this the app
@@ -245,4 +370,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             "%s not set — VLM extraction will fail closed; set it in .env or env var",
             cfg.vlm.api_key_env_var,
         )
-    return cfg
+    if cache_key is not None:
+        _CONFIG_CACHE.clear()
+        _CONFIG_CACHE[cache_key] = cfg
+    return cfg.model_copy(deep=True)

@@ -39,6 +39,20 @@ _LEADING_LABEL_WORDS = {"PO", "P.O.", "P/0"}
 # deliberately absent: P106420232 is a real McDermott code, not a label.
 _LEADING_PREFIXES = ("PURCHASEORDER", "PURCHASEORDERS", "PONO", "PO.NO", "PO")
 
+#: Leading labels that must be removed from the RAW string before tokenising.
+#: `_LEADING_LABEL_WORDS` cannot do it: the tokeniser splits on punctuation, so
+#: "P.O. 161538" becomes tokens ["P", "O", "161538"] and the entries "P.O." and
+#: "P/0" never matched anything. LPO ("Local Purchase Order") is a label too —
+#: a real file prints `LPO26/2360` where its DN prints `PO 26/2360`.
+#: `(?![A-Za-z])` keeps "POST123"/"P106420232" intact: the next char must not
+#: be a letter for this to be a label rather than part of a code.
+_LEADING_LABEL_RE = re.compile(r"^\s*(?:P\.\s*O\.?|P/0|LPO|PO)(?![A-Za-z])", re.IGNORECASE)
+
+#: A trailing revision token: "161538 Rev 2", "PO No. 161538 Rev. 0". Without
+#: this the trailing digit stays and "161538 Rev 2" keys as "1615382", which
+#: collides with a genuinely different PO numbered 1615382.
+_REVISION_RE = re.compile(r"\b(?:rev(?:ision)?)\b\.?\s*#?\s*\d{1,3}\b", re.IGNORECASE)
+
 
 def normalize_po_no(raw: str) -> str:
     """Normalize a PO number to a stable grouping key.
@@ -64,10 +78,19 @@ def normalize_po_no(raw: str) -> str:
     s = raw.strip()
     if not s:
         return ""
-    # SAP revision counter: "PO, Rev # 161538,0" -> "PO, Rev # 161538"
+    # Labels that punctuation would otherwise split into tokens ("P.O.",
+    # "P/0", "LPO"). Done on the raw string, before tokenising.
+    s = _LEADING_LABEL_RE.sub("", s, count=1).strip()
+    # A trailing revision counter: "161538 Rev 2" -> "161538".
+    s = _REVISION_RE.sub(" ", s)
+    # SAP revision counter: "PO, Rev # 161538,0" -> "PO, Rev # 161538".
+    # Only a plausible revision is stripped: "1,000" is a printed one thousand,
+    # not PO 1 revision 000 (the old `\d{1,3}` did exactly that, keying the PO
+    # as "1" and colliding with a different PO numbered 1). Indian grouping
+    # ("1,00,000") is preserved for the same reason.
     if "," in s:
         before, after = s.rsplit(",", 1)
-        if re.search(r"\d", before) and re.match(r"^\s*\d{1,3}\s*$", after):
+        if re.search(r"\d", before) and re.match(r"^\s*(?:0|[1-9]\d{0,2})\s*$", after):
             s = before
     toks = [t for t in re.split(r"[^A-Za-z0-9]+", s) if t]
     kept: list[str] = []
@@ -129,7 +152,12 @@ def group_document(doc, cfg) -> tuple[int | None, str | None]:
         if dtype in NEEDS_PO_REFERENCE:
             return None, "missing_po_number"
         return None, None
-    if doc.po_reference_ambiguous and dtype in ANCHOR_TYPES:
+    if doc.po_reference_ambiguous:
+        # Every PO-bearing type, not just PO. A DN or SI that prints two PO
+        # numbers must not be attached to whichever one the model listed first:
+        # that silently strands the other PO and can push its lines into the
+        # wrong set. The two attach sweeps already refuse all types; this path
+        # is the third one and used to be the exception.
         return None, "ambiguous_po_number"
     ps = get_or_create_po_set(
         doc.po_no_raw or doc.po_no_normalized,
@@ -142,6 +170,7 @@ def group_document(doc, cfg) -> tuple[int | None, str | None]:
 
 
 def get_or_create_po_set(po_no: str, cfg, create: bool = True):
+    from sqlalchemy.exc import IntegrityError
     from sqlalchemy.orm import Session
 
     from app.core.database import get_engine
@@ -155,7 +184,11 @@ def get_or_create_po_set(po_no: str, cfg, create: bool = True):
     with Session(eng) as s:
         ps = (
             s.query(POSet)
-            .filter(POSet.po_no_normalized == norm, POSet.status != POSetStatus.merged)
+            .filter(
+                POSet.po_no_normalized == norm,
+                POSet.status != POSetStatus.merged,
+                POSet.archived_at.is_(None),
+            )
             .order_by(POSet.id.asc())
             .first()
         )
@@ -168,7 +201,26 @@ def get_or_create_po_set(po_no: str, cfg, create: bool = True):
             return None
         ps = POSet(po_no_normalized=norm, status=POSetStatus.pending)
         s.add(ps)
-        s.commit()
+        try:
+            s.commit()
+        except IntegrityError:
+            # The unique open-set index is the referee: two workers that both
+            # missed the SELECT cannot both insert. The loser joins the winner
+            # instead of surfacing a 500 or minting a duplicate set.
+            s.rollback()
+            ps = (
+                s.query(POSet)
+                .filter(
+                    POSet.po_no_normalized == norm,
+                    POSet.status != POSetStatus.merged,
+                    POSet.archived_at.is_(None),
+                )
+                .order_by(POSet.id.asc())
+                .first()
+            )
+            if ps is None:
+                raise
+            return ps
         s.refresh(ps)
         return ps
 
@@ -210,6 +262,7 @@ def attach_unattached_to_open_sets(cfg) -> set[int]:
                 .filter(
                     POSet.po_no_normalized == doc.po_no_normalized,
                     POSet.status != POSetStatus.merged,
+                    POSet.archived_at.is_(None),
                 )
                 .order_by(POSet.id.asc())
                 .first()
@@ -245,19 +298,18 @@ def _anchor_from_po_line_ref(session, dn_no: str | None) -> tuple[int | None, st
     if not dn_no:
         return None, None
 
-    from app.models import DocType, LineItem
+    from app.models import DocType, Document, LineItem
 
     po_doc_ids = {
         doc_id
         for (doc_id,) in session.query(LineItem.document_id)
-        .filter(LineItem.dn_no == dn_no)
+        .join(Document, Document.id == LineItem.document_id)
+        .filter(LineItem.dn_no == dn_no, Document.archived_at.is_(None))
         .distinct()
         .all()
     }
     if not po_doc_ids:
         return None, None
-
-    from app.models import Document
 
     anchor_rows = (
         session.query(Document)
@@ -265,6 +317,7 @@ def _anchor_from_po_line_ref(session, dn_no: str | None) -> tuple[int | None, st
             Document.id.in_(po_doc_ids),
             Document.doc_type == DocType.PO,
             Document.po_set_id.isnot(None),
+            Document.archived_at.is_(None),
         )
         .all()
     )
@@ -338,6 +391,7 @@ def resolve_unattached_documents(cfg) -> set[int]:
                         Document.dn_no == doc.dn_no,
                         Document.id != doc.id,
                         Document.po_set_id.isnot(None),
+                        Document.archived_at.is_(None),
                     )
                     .all()
                 )
@@ -355,7 +409,11 @@ def resolve_unattached_documents(cfg) -> set[int]:
 
             if matched_ps_id:
                 ps = s.get(POSet, matched_ps_id)
-                if ps and ps.status != POSetStatus.merged:
+                if (
+                    ps
+                    and ps.status != POSetStatus.merged
+                    and ps.archived_at is None
+                ):
                     doc.po_set_id = matched_ps_id
                     if not doc.po_no_normalized and matched_po_norm:
                         doc.po_no_normalized = matched_po_norm

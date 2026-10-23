@@ -281,7 +281,7 @@ def test_a_numberless_po_line_reconciles_by_description(cfg, client):
     assert result["status"] == "merged", _status(cfg, pid).reconcile_reason
     detail = client.get(f"/po_sets/{pid}/view").text
     assert "BOLT HEX 1/2 IN YELLOW ZINC" in detail
-    assert "✅ Match" in detail
+    assert "row-match" in detail and "\u2705 Match" in detail
 
 
 # ---------------------------------------------------------------------------
@@ -300,24 +300,26 @@ def _two_po_set(cfg, po_no: str):
     return pid
 
 
-def test_two_po_documents_quarantine_and_the_pages_explain_it(cfg, client):
+def test_two_po_documents_hold_the_set_pending_for_review(cfg, client):
     pid = _two_po_set(cfg, "PO-DUP")
     result = reconcile_po_set(pid, cfg)
 
-    assert result["status"] == "quarantined"
+    assert result["status"] == "pending"
     assert result["reason"] == "multiple_po_documents"
     ps = _status(cfg, pid)
     assert ps.merged_output_path is None
     assert "2 PO documents" in (ps.reconcile_reason or "")
 
-    quarantine = client.get("/quarantine").text
-    assert "PO-DUP" in quarantine
-    assert "more than one PO" in quarantine.lower() or "2 PO documents" in quarantine
+    dashboard = client.get("/dashboard").text
+    assert "PO-DUP" in dashboard
+    assert "2 PO documents" in dashboard or "more than one PO" in dashboard.lower()
 
-    # This is the regression: every line matches, so the matrix is green, but
-    # the set is quarantined. The page must still say why.
+    # It is a review hold, not a quarantine.
+    assert "PO-DUP" not in client.get("/quarantine").text
+
     detail = client.get(f"/po_sets/{pid}/view").text
     assert "2 PO documents" in detail or "more than one PO" in detail.lower()
+    assert "row-pending" in detail
 
 
 def test_identical_po_bytes_are_one_document_not_a_second_po(cfg, client):
@@ -370,10 +372,156 @@ def test_identical_po_bytes_are_one_document_not_a_second_po(cfg, client):
     assert Path(result["merged_output_path"]).exists()
 
 
-def test_duplicate_po_with_a_different_hash_still_quarantines(cfg, client):
+def test_duplicate_po_with_a_different_hash_is_still_held(cfg, client):
     pid = _two_po_set(cfg, "PO-DIFFHASH")
     result = reconcile_po_set(pid, cfg)
+    assert result["status"] == "pending"
     assert result["reason"] == "multiple_po_documents"
+
+
+def test_page_split_po_documents_are_held_not_summed(cfg):
+    """More than one PO document is a human decision, even with disjoint lines.
+
+    Page 1 prints lines 1-2 and page 2 prints lines 3-4. The engine must not
+    guess that they are one PO; it holds the set pending for review.
+    """
+    pid = _set(cfg, "PO-PAGES")
+    _doc(
+        cfg,
+        pid,
+        DocType.PO,
+        "pages-1.pdf",
+        [("1", "BOLT", 100), ("2", "NUT", 50)],
+        po_no="PO-PAGES",
+        seed="pages-a",
+    )
+    _doc(
+        cfg,
+        pid,
+        DocType.PO,
+        "pages-2.pdf",
+        [("3", "WASHER", 25), ("4", "SCREW", 10)],
+        po_no="PO-PAGES",
+        seed="pages-b",
+    )
+    _doc(
+        cfg,
+        pid,
+        DocType.DN,
+        "pages-dn.pdf",
+        [("1", "BOLT", 100), ("2", "NUT", 50), ("3", "WASHER", 25), ("4", "SCREW", 10)],
+        po_no="PO-PAGES",
+    )
+    _doc(
+        cfg,
+        pid,
+        DocType.SI,
+        "pages-si.pdf",
+        [("1", "BOLT", 100), ("2", "NUT", 50), ("3", "WASHER", 25), ("4", "SCREW", 10)],
+        po_no="PO-PAGES",
+        si_no="INV-PAGES",
+    )
+
+    result = reconcile_po_set(pid, cfg)
+    assert result["status"] == "pending", result
+    assert result["reason"] == "multiple_po_documents"
+    assert _status(cfg, pid).merged_output_path is None
+
+
+def test_vendor_document_with_zero_lines_quarantines_instead_of_pending(cfg):
+    """A complete-looking set whose DN read as zero lines can never progress.
+
+    Reporting it as "waiting for delivery" was a pending state that no later
+    sweep could ever leave.
+    """
+    pid = _set(cfg, "PO-ZERODN")
+    _doc(cfg, pid, DocType.PO, "zero-po.pdf", [("1", "BOLT", 100)], po_no="PO-ZERODN")
+    _doc(cfg, pid, DocType.DN, "zero-dn.pdf", [], po_no="PO-ZERODN", seed="zero-dn")
+    _doc(
+        cfg,
+        pid,
+        DocType.SI,
+        "zero-si.pdf",
+        [("1", "BOLT", 100)],
+        po_no="PO-ZERODN",
+        si_no="INV-ZERODN",
+    )
+
+    result = reconcile_po_set(pid, cfg)
+    assert result["status"] == "quarantined"
+    assert result["reason"] == "vendor_document_has_no_line_items"
+    assert "zero-dn.pdf" in result["detail"]
+
+
+def test_unclassified_does_not_list_a_document_already_in_a_set(cfg, client):
+    pid = _set(cfg, "PO-ATTACHED")
+    doc_id = _doc(
+        cfg,
+        pid,
+        DocType.PO,
+        "already-attached.pdf",
+        [("1", "BOLT", 100)],
+        po_no="PO-ATTACHED",
+    )
+    with Session(get_engine(cfg)) as s:
+        doc = s.get(Document, doc_id)
+        doc.po_reference_ambiguous = True
+        s.commit()
+
+    page = client.get("/unclassified").text
+    assert "already-attached.pdf" not in page
+    assert "All caught up" in page
+
+
+def test_reclassify_refuses_a_document_in_a_merged_set(cfg, client):
+    pid = _set(cfg, "PO-LOCKED")
+    _doc(cfg, pid, DocType.PO, "locked-po.pdf", [("1", "BOLT", 100)], po_no="PO-LOCKED")
+    _doc(cfg, pid, DocType.DN, "locked-dn.pdf", [("1", "BOLT", 100)], po_no="PO-LOCKED")
+    _doc(
+        cfg,
+        pid,
+        DocType.SI,
+        "locked-si.pdf",
+        [("1", "BOLT", 100)],
+        po_no="PO-LOCKED",
+        si_no="INV-LOCKED",
+    )
+    assert reconcile_po_set(pid, cfg)["status"] == "merged"
+    doc_id = _doc(cfg, pid, DocType.CUSTOMS, "locked-customs.pdf", [], po_no="PO-LOCKED")
+
+    r = client.post(
+        f"/unclassified/{doc_id}/reclassify",
+        data={"doc_type": "SHIPPING"},
+    )
+    assert r.status_code == 409, r.text
+
+
+def test_empty_status_filter_means_all(cfg, client):
+    assert client.get("/dashboard?status=").status_code == 200
+    assert client.get("/dashboard/table?status=").status_code == 200
+
+
+def test_preview_rejects_a_non_pdf_stored_file(cfg, client):
+    pid = _set(cfg, "PO-BADPDF")
+    path = Path(cfg.paths.stored_documents_folder) / "not-a-pdf.pdf"
+    path.write_bytes(b"\x00" * 128)
+    with Session(get_engine(cfg)) as s:
+        doc = Document(
+            sha256_hash="not-a-pdf-hash",
+            original_filename="not-a-pdf.pdf",
+            stored_path=str(path),
+            doc_type=DocType.PO,
+            extraction_status=ExtractionStatus.failed,
+            po_set_id=pid,
+        )
+        s.add(doc)
+        s.commit()
+        s.refresh(doc)
+        doc_id = doc.id
+
+    r = client.get(f"/documents/{doc_id}/preview")
+    assert r.status_code == 422
+    assert "not a readable PDF" in r.text
 
 
 # ---------------------------------------------------------------------------
@@ -757,7 +905,10 @@ def test_customs_on_before_merge_blocks_then_merges_after_both_docs(cfg, client)
 
     result = reconcile_po_set(pid, cfg)
     assert result["status"] == "blocked_customs"
+    assert result["reason"] == "blocked_customs"
     assert "Awaiting Customs" in client.get("/dashboard").text
+    page = client.get(f"/po_sets/{pid}/view").text
+    assert "Customs requirement is ON" in page
 
     _doc(cfg, pid, DocType.CUSTOMS, "cus-customs.pdf", [], po_no="PO-CUSTOMS", seed="customs")
     _doc(cfg, pid, DocType.SHIPPING, "cus-shipping.pdf", [], po_no="PO-CUSTOMS", seed="shipping")
@@ -790,12 +941,230 @@ def test_quarantine_delete_removes_it_from_the_page_and_keeps_files(cfg, client)
     assert r.status_code == 200, r.text
 
     assert "PO-DEL" not in client.get("/quarantine").text
-    assert stored.exists(), "stored document must survive the record delete"
+    assert stored.exists(), "stored document must survive the archive"
     with Session(eng) as s:
-        assert s.get(POSet, pid) is None
-        assert s.query(Document).filter(Document.po_set_id == pid).count() == 0
+        archived = s.get(POSet, pid)
+        assert archived is not None, "archive keeps the PO Set row"
+        assert archived.archived_at is not None
+        assert s.query(Document).filter(Document.po_set_id == pid).count() == 3
         actions = [a.action for a in s.query(AuditLog).all()]
         assert AuditAction.quarantine_delete in actions
+
+
+def _quarantined_set(cfg, po_no: str) -> int:
+    pid = _set(cfg, po_no)
+    _doc(cfg, pid, DocType.PO, f"{po_no}-PO.pdf", [("1", "BOLT", 100)], po_no=po_no)
+    _doc(cfg, pid, DocType.DN, f"{po_no}-DN.pdf", [("2", "BOLT", 100)], po_no=po_no)
+    _doc(
+        cfg,
+        pid,
+        DocType.SI,
+        f"{po_no}-SI.pdf",
+        [("1", "BOLT", 100)],
+        po_no=po_no,
+        si_no=f"INV-{po_no}",
+    )
+    assert reconcile_po_set(pid, cfg)["status"] == "quarantined"
+    return pid
+
+
+def test_archive_keeps_rows_manifest_and_hides_from_worklists(cfg, client):
+    """Delete is an export: rows/files stay, worklists hide the set."""
+    import json
+
+    po_no = "PO-ARCHIVE"
+    pid = _quarantined_set(cfg, po_no)
+    assert po_no in client.get("/quarantine").text
+
+    r = client.delete(f"/po_sets/{pid}/quarantine")
+    assert r.status_code == 200, r.text
+    assert po_no not in client.get("/quarantine").text
+    assert po_no not in client.get("/dashboard").text
+
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        ps = s.get(POSet, pid)
+        assert ps is not None and ps.archived_at is not None
+        assert ps.archive_path and Path(ps.archive_path).is_dir()
+        archive = Path(ps.archive_path)
+        docs = s.query(Document).filter_by(po_set_id=pid).all()
+        assert len(docs) == 3
+        assert all(d.archived_at is not None for d in docs)
+        assert s.query(LineItem).count() == 3
+
+        po_json = json.loads((archive / "po_set.json").read_text(encoding="utf-8"))
+        assert Path(po_json["archive_path"]) == archive
+        manifest = json.loads((archive / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["po_set_id"] == pid
+        assert manifest["document_count"] == 3
+        assert len(manifest["files"]) == 3
+        assert {row["sha256_hash"] for row in manifest["files"]} == {
+            d.sha256_hash for d in docs
+        }
+        exported_docs = json.loads((archive / "documents.json").read_text(encoding="utf-8"))
+        assert len(exported_docs) == 3
+        assert (archive / "line_items.json").is_file()
+        assert (archive / "audit_log.json").is_file()
+        assert (archive / "ARCHIVE.txt").is_file()
+        assert len(list((archive / "files").glob("*.pdf"))) == 3
+
+    detail = client.get(f"/po_sets/{pid}/view").text
+    assert "Archived PO Set" in detail
+    assert "Force Merge" not in detail
+
+    # Idempotent: a second Delete does not create a second export folder.
+    before = sorted(p.name for p in Path(ps.archive_path).parent.iterdir())
+    assert client.delete(f"/po_sets/{pid}/quarantine").status_code == 200
+    assert sorted(p.name for p in Path(ps.archive_path).parent.iterdir()) == before
+
+    # Archived sets are read-only server-side, not just in the template.
+    assert client.post(f"/po_sets/{pid}/redo_match").status_code == 409
+    assert client.post(f"/po_sets/{pid}/merge").status_code == 409
+    assert client.post(f"/po_sets/{pid}/force_merge").status_code == 409
+
+
+def test_archive_allows_a_new_set_for_the_same_po(cfg):
+    from app.services.grouping import get_or_create_po_set
+
+    po_no = "PO-REUSE"
+    pid = _quarantined_set(cfg, po_no)
+    from app.services.quarantine import delete_quarantined
+
+    delete_quarantined(pid, cfg, source="operator")
+
+    new_set = get_or_create_po_set(po_no, cfg)
+    assert new_set is not None
+    assert new_set.id != pid
+    assert new_set.archived_at is None
+
+
+def test_archived_document_does_not_block_identical_reingest(cfg):
+    from app.services.ingestion import ingest_file
+
+    po_no = "PO-REHASH"
+    pid = _quarantined_set(cfg, po_no)
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        old = s.query(Document).filter_by(po_set_id=pid).first()
+        old_id = old.id
+        source = Path(old.stored_path)
+
+    from app.services.quarantine import delete_quarantined
+
+    delete_quarantined(pid, cfg, source="operator")
+    fresh = ingest_file(source, cfg)
+    assert fresh.id != old_id
+    assert fresh.archived_at is None
+    assert fresh.sha256_hash == hashlib.sha256(source.read_bytes()).hexdigest()
+
+
+def test_archive_copy_failure_leaves_rows_untouched(cfg, monkeypatch):
+    import pytest
+
+    from app.services import quarantine as quarantine_module
+
+    po_no = "PO-COPYFAIL"
+    pid = _quarantined_set(cfg, po_no)
+
+    def _fail(*args, **kwargs):
+        raise OSError("simulated copy failure")
+
+    monkeypatch.setattr(quarantine_module.shutil, "copy2", _fail)
+    with pytest.raises(OSError, match="simulated copy failure"):
+        quarantine_module.delete_quarantined(pid, cfg, source="operator")
+
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        ps = s.get(POSet, pid)
+        assert ps is not None and ps.archived_at is None
+        assert s.query(Document).filter_by(po_set_id=pid).count() == 3
+        assert all(d.archived_at is None for d in s.query(Document).filter_by(po_set_id=pid))
+
+
+def test_archive_moves_input_copies_only_on_content_match(cfg):
+    import shutil
+
+    from app.services.quarantine import delete_quarantined
+
+    po_no = "PO-INPUT"
+    pid = _quarantined_set(cfg, po_no)
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        doc = s.query(Document).filter_by(po_set_id=pid).first()
+        stored = Path(doc.stored_path)
+        # _doc seeds a synthetic hash for test uniqueness; this test exercises
+        # content matching, so make the row's hash match the stored bytes.
+        doc.sha256_hash = hashlib.sha256(stored.read_bytes()).hexdigest()
+        s.commit()
+
+    input_dir = Path(cfg.paths.input_folder)
+    matching = input_dir / "matching.pdf"
+    other = input_dir / "other.pdf"
+    shutil.copy2(stored, matching)
+    other.write_bytes(b"%PDF-1.4 unrelated")
+
+    delete_quarantined(pid, cfg, source="operator")
+
+    assert not matching.exists()
+    assert other.exists()
+    with Session(eng) as s:
+        archive = Path(s.get(POSet, pid).archive_path)
+    assert (archive / "input" / "matching.pdf").is_file()
+
+
+def test_archive_retry_after_commit_failure_reuses_one_export(cfg, monkeypatch):
+    import json
+
+    from sqlalchemy.orm import Session as OrmSession
+
+    from app.services.quarantine import delete_quarantined
+
+    po_no = "PO-RETRY"
+    pid = _quarantined_set(cfg, po_no)
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        stored = [Path(d.stored_path) for d in s.query(Document).filter_by(po_set_id=pid)]
+    stored[0].unlink()  # force one missing file into the manifest
+
+    original_commit = OrmSession.commit
+    calls = {"n": 0}
+
+    def fail_once(self):
+        if calls["n"] == 0:
+            calls["n"] = 1
+            raise RuntimeError("simulated commit failure")
+        return original_commit(self)
+
+    monkeypatch.setattr(OrmSession, "commit", fail_once)
+    try:
+        import pytest
+
+        with pytest.raises(RuntimeError, match="simulated commit failure"):
+            delete_quarantined(pid, cfg, source="operator")
+    finally:
+        monkeypatch.undo()
+
+    # Retry: must find the completed folder, mark rows, and not duplicate it.
+    audit = delete_quarantined(pid, cfg, source="operator")
+    with Session(eng) as s:
+        ps = s.get(POSet, pid)
+        assert ps.archived_at is not None
+        archive = Path(ps.archive_path)
+        folders = [
+            p
+            for p in archive.parent.iterdir()
+            if p.is_dir() and p.name.startswith(f"{po_no}_")
+        ]
+        assert len(folders) == 1, folders
+        assert s.query(Document).filter_by(po_set_id=pid).count() == 3
+        assert all(
+            d.archived_at is not None
+            for d in s.query(Document).filter_by(po_set_id=pid)
+        )
+
+    manifest = json.loads((archive / "manifest.json").read_text(encoding="utf-8"))
+    detail = json.loads(audit.detail)
+    assert detail["missing_files"] == len(manifest["missing_files"]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -803,11 +1172,11 @@ def test_quarantine_delete_removes_it_from_the_page_and_keeps_files(cfg, client)
 # ---------------------------------------------------------------------------
 
 
-def test_quarantine_refresh_fragment_also_shows_the_reason(cfg, client):
+def test_pending_refresh_fragment_also_shows_the_reason(cfg, client):
     pid = _two_po_set(cfg, "PO-FRAG")
     assert reconcile_po_set(pid, cfg)["reason"] == "multiple_po_documents"
 
-    fragment = client.get("/quarantine/table").text
+    fragment = client.get("/dashboard/table").text
     assert "PO-FRAG" in fragment
     assert "2 PO documents" in fragment
 
@@ -1130,5 +1499,7 @@ def test_missing_stored_file_refuses_to_merge_instead_of_crashing(cfg):
 
     result = reconcile_po_set(pid, cfg)  # must not raise
 
-    assert result["status"] == "pending"
+    assert result["status"] == "quarantined"
+    assert result["reason"] == "packet_source_unreadable"
+    assert "lost-" in (result.get("detail") or "")
     assert _status(cfg, pid).merged_output_path is None

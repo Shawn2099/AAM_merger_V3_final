@@ -124,40 +124,32 @@ def test_delete_keeps_files(tmp_path):
     action_val = audit.action.value if hasattr(audit.action, "value") else str(audit.action)
     assert action_val == "quarantine_delete"
 
-    # DB rows gone
+    # DB rows remain, marked archived
     with Session(eng) as s:
-        assert s.get(POSet, po_set_id) is None, "po_sets row should be deleted"
+        archived = s.get(POSet, po_set_id)
+        assert archived is not None, "archive must keep the po_sets row"
+        assert archived.archived_at is not None
+        assert archived.archive_path and Path(archived.archive_path).is_dir()
+        archive_path = Path(archived.archive_path)
         remaining_docs = s.query(Document).filter_by(po_set_id=po_set_id).all()
-        assert len(remaining_docs) == 0, "documents rows should be deleted"
-        # line_items: all docs for this po_set are gone, so no line_items referencing them
-        # check via remaining docs ids (none) or query all and ensure none reference deleted docs
-        # simpler: count line_items that would have been for those docs by checking stored_paths count
-        all_line_items = s.query(LineItem).all()
-        # line_items for deleted docs should be gone; we created 3 line_items total, all should be gone
-        # but other PO sets may have none; so check that none have document_id in deleted doc ids
-        # Since we deleted, count should be 0 for this isolated DB
-        assert len(all_line_items) == 0, f"line_items should be deleted, got {len(all_line_items)}"
-        # audit_log row exists
-        audits = (
-            s.query(AuditLog).filter_by(action="quarantine_delete").all()
-            if False
-            else s.query(AuditLog).all()
-        )
-        # filter manually for enum equality
+        assert len(remaining_docs) == doc_count, "archive must keep every document row"
+        assert all(d.archived_at is not None for d in remaining_docs)
+        assert s.query(LineItem).count() == 3, "archive must keep every line item"
         found = [
             a
-            for a in audits
+            for a in s.query(AuditLog).all()
             if (a.action.value if hasattr(a.action, "value") else str(a.action))
             == "quarantine_delete"
         ]
         assert len(found) >= 1, "audit_log quarantine_delete row should exist"
 
-    # files still exist after DB delete
+    # files still exist after archive, and the export has its own copies
     for p in stored_paths:
-        assert p.exists(), f"stored_path should still exist after delete: {p}"
+        assert p.exists(), f"stored_path should still exist after archive: {p}"
         assert (q_folder / p.name).exists(), (
-            f"quarantine copy should still exist after delete: {q_folder / p.name}"
+            f"quarantine copy should still exist after archive: {q_folder / p.name}"
         )
+        assert (archive_path / "files").is_dir(), "archive must contain copied files"
 
 
 def test_quarantine_copy_uses_copy_not_move(tmp_path):
@@ -319,12 +311,16 @@ def test_delete_audit_carries_evidence_and_survives_its_set(tmp_path):
     )
     assert audit.action == AuditAction.quarantine_delete
     detail = json.loads(audit.detail)
-    assert detail == {"po_no_normalized": "PO-DEL", "document_count": 1}
+    assert detail["po_no_normalized"] == "PO-DEL"
+    assert detail["document_count"] == 1
+    assert detail["archived"] is True
+    assert Path(detail["archive_path"]).is_dir()
     assert len(audit.justification) >= 20
     with Session(eng) as s:
-        assert s.get(POSet, ps_id) is None
+        archived = s.get(POSet, ps_id)
+        assert archived is not None and archived.archived_at is not None
         kept = s.query(AuditLog).filter(AuditLog.action == AuditAction.quarantine_delete).one()
-        assert kept.po_set_id is None  # SET NULL fired, row survived
+        assert kept.po_set_id == ps_id
         assert json.loads(kept.detail)["po_no_normalized"] == "PO-DEL"
     assert pdf.exists(), "stored copy is the audit trail, never deleted"
 
@@ -371,15 +367,16 @@ def test_delete_audit_survives_with_detail(tmp_path):
     cfg = _cfg_with_tmp(tmp_path)
     po_set_id = _create_quarantined_poset(tmp_path, cfg, po_no="PO-AUDIT-1")
     audit = delete_quarantined(po_set_id, cfg)
-    assert audit.po_set_id is None
+    assert audit.po_set_id == po_set_id
     detail = json.loads(audit.detail)
     assert detail["po_no_normalized"] == "PO-AUDIT-1"
     assert detail["document_count"] == 3
+    assert detail["archived"] is True
 
     eng = get_engine(cfg)
     with Session(eng) as s:
         surviving = s.query(AuditLog).filter_by(id=audit.id).one()
-        assert surviving.po_set_id is None
+        assert surviving.po_set_id == po_set_id
         assert json.loads(surviving.detail)["document_count"] == 3
 
 

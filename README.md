@@ -29,7 +29,7 @@ exactly, in scaled integers. One unresolvable line fails the whole set.
 ```bash
 cp config.example.yaml config.yaml    # then edit paths; set OPENROUTER_API_KEY in .env
 uv sync --all-groups
-uv run alembic upgrade head
+uv run python scripts/migrate_db.py   # safe for fresh and create_all-era DBs
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -50,10 +50,12 @@ reconciliation, grouping or the reporting routes.
 ## Delivering it to users
 
 - [`docs/DELIVERY.md`](./docs/DELIVERY.md) — install on the client's single PC
-  (firewall, Windows services, Prefect pool + midnight schedule, backups,
-  reset, handover checklist).
+  (firewall, Windows services, Prefect pool + midnight schedule, no-pruning
+  backups, development snapshots, archive, handover checklist).
 - [`docs/TESTER_GUIDE.md`](./docs/TESTER_GUIDE.md) — the one-page guide for the
   people who will use the dashboard.
+- [`docs/PILOT_RELEASE_2026-10-23.md`](./docs/PILOT_RELEASE_2026-10-23.md) —
+  archive/no-pruning release evidence and the pilot package.
 
 Note: use **forward slashes** in `config.yaml` paths. A double-quoted
 `C:\AAM\input` is a YAML escape error and the app will refuse to start.

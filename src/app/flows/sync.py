@@ -158,35 +158,59 @@ def _quarantine_broken_document(
     # Quarantine the set too, when there is one. A set containing a document
     # that cannot be read cannot be confirmed, so it must not look like it is
     # merely waiting.
+    #
+    # The write is a single conditional UPDATE, not read-then-write. A merge
+    # running concurrently (the nightly sweep and a route merge can interleave)
+    # may have committed `merged` between the read and this write; the old code
+    # then overwrote a delivered set with `quarantined`, after which the
+    # quarantine-delete route could delete its DB row while the packet stayed
+    # on disk. A merged set is terminal and must never be re-statused by a
+    # background writer.
     try:
         with Session(eng) as s:
             doc = s.get(_Doc, doc_id)
             po_set_id = doc.po_set_id if doc else None
         if po_set_id is not None:
+            from sqlalchemy import update as _sa_update
+
+            reason = (
+                "Quarantined: a document in this set failed to read, "
+                "so the set could not be verified."
+            )
             with Session(eng) as s:
-                ps = s.get(POSet, po_set_id)
-                if ps is not None and ps.status not in (
-                    POSetStatus.merged,
-                    POSetStatus.quarantined,
-                ):
-                    ps.status = POSetStatus.quarantined
-                    ps.reconcile_reason = (
-                        "Quarantined: a document in this set failed to read, "
-                        "so the set could not be verified."
+                result = s.execute(
+                    _sa_update(POSet)
+                    .where(
+                        POSet.id == po_set_id,
+                        POSet.archived_at.is_(None),
+                        POSet.status.notin_([POSetStatus.merged, POSetStatus.quarantined]),
                     )
-                    s.commit()
-                    touched_po_set_ids.add(po_set_id)
-                    quarantine_copy(
-                        po_set_id,
-                        cfg,
-                        reason=ps.reconcile_reason,
-                        detail="A member document failed extraction permanently.",
-                    )
-                    logger.error(
-                        "PO Set %s quarantined: a member document failed permanently", po_set_id
-                    )
+                    .values(status=POSetStatus.quarantined, reconcile_reason=reason)
+                    .execution_options(synchronize_session=False)
+                )
+                s.commit()
+                changed = getattr(result, "rowcount", 0) > 0
+            if changed:
+                touched_po_set_ids.add(po_set_id)
+                quarantine_copy(
+                    po_set_id,
+                    cfg,
+                    reason=reason,
+                    detail="A member document failed extraction permanently.",
+                )
+                logger.error(
+                    "PO Set %s quarantined: a member document failed permanently", po_set_id
+                )
+            else:
+                logger.info(
+                    "PO Set %s was already merged or quarantined; the failed document did not "
+                    "re-status it",
+                    po_set_id,
+                )
     except Exception:
-        logger.warning("Could not quarantine PO Set for document %s", doc_id, exc_info=True)
+        logging.getLogger(__name__).warning(
+            "Could not quarantine PO Set for document %s", doc_id, exc_info=True
+        )
 
 
 @task(name="extract_task", retries=3, retry_delay_seconds=[2, 5, 15])
@@ -263,6 +287,9 @@ def _recovery_flow_locked(
     initial_touched_po_set_ids: list[int] | None = None,
 ) -> dict:
     cfg = load_config(cfg_path) if cfg_path else load_config()
+    from app.core.logging_setup import setup_logging
+
+    setup_logging(cfg)
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     from app.models import Document as _Doc
@@ -288,6 +315,7 @@ def _recovery_flow_locked(
     touched_po_set_ids: set[int] = set(initial_touched_po_set_ids or [])
     recovered_processed = 0
     recovered_errors = 0
+    recovered_extracted = 0
 
     def _reconcile_with_lock_guard(ps_id: int) -> dict | None:
         """Reconcile a POSet, skipping if a UI action currently holds the per-PO DB lock.
@@ -303,7 +331,7 @@ def _recovery_flow_locked(
         """
         with Session(eng) as s:
             ps = s.get(_POSet, ps_id)
-            if ps is None:
+            if ps is None or ps.archived_at is not None:
                 return None
             if is_locked(ps, cfg):
                 logger.info(
@@ -342,7 +370,10 @@ def _recovery_flow_locked(
         pending_ids = [
             r[0]
             for r in s.query(_Doc.id)
-            .filter(_Doc.extraction_status == ExtractionStatus.pending)
+            .filter(
+                _Doc.extraction_status == ExtractionStatus.pending,
+                _Doc.archived_at.is_(None),
+            )
             .all()
         ]
 
@@ -354,13 +385,16 @@ def _recovery_flow_locked(
             logger.warning("Extract task failed for pending doc %s", doc_id, exc_info=True)
             recovered_errors += 1
         else:
-            if _persisted_extraction_status(eng, doc_id) == ExtractionStatus.failed:
+            persisted = _persisted_extraction_status(eng, doc_id)
+            if persisted == ExtractionStatus.failed:
                 logger.error(
                     "Extraction did not succeed for pending doc %s; counted as an error",
                     doc_id,
                 )
                 recovered_errors += 1
                 _quarantine_broken_document(doc_id, cfg, eng, None, touched_po_set_ids)
+            elif persisted == ExtractionStatus.valid:
+                recovered_extracted += 1
 
         try:
             with Session(eng) as s_grp:
@@ -421,7 +455,10 @@ def _recovery_flow_locked(
     with Session(eng) as s_sweep:
         open_sets = (
             s_sweep.query(_POSet)
-            .filter(_POSet.status != POSetStatus.merged)
+            .filter(
+                _POSet.status != POSetStatus.merged,
+                _POSet.archived_at.is_(None),
+            )
             .with_entities(_POSet.id)
             .all()
         )
@@ -439,7 +476,7 @@ def _recovery_flow_locked(
 
     return {
         "processed": recovered_processed,
-        "extracted": max(0, recovered_processed - recovered_errors),
+        "extracted": recovered_extracted,
         "errors": recovered_errors,
         "touched_po_sets": len(touched_po_set_ids),
         "reconciled_count": reconciled_count,
@@ -488,6 +525,9 @@ def sync_flow(cfg_path: str | None = None, held_lock=None) -> dict:
 
 def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     cfg = load_config(cfg_path) if cfg_path else load_config()
+    from app.core.logging_setup import setup_logging
+
+    setup_logging(cfg)
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     from app.models import Document as _Doc
@@ -507,6 +547,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     input_folder.mkdir(parents=True, exist_ok=True)
 
     processed = 0
+    extracted = 0
     errors = 0
     touched_po_set_ids: set[int] = set()
 
@@ -532,6 +573,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
             # launch per file.
             if _already_read(doc):
                 logger.debug("Document %s was read already; not scheduled again", doc.id)
+                extracted += 1
             else:
                 try:
                     _extract_task_for(cfg)(doc.id, cfg_path=cfg_path)
@@ -549,6 +591,8 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
                         )
                         errors += 1
                         _quarantine_broken_document(doc.id, cfg, eng, f, touched_po_set_ids)
+                    else:
+                        extracted += 1
 
             # Group into PO Set (FR-7.1-7.2). Only PO mints;
             # DN/SI/UNKNOWN attach to an open set or wait unattached.
@@ -618,7 +662,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
 
     return {
         "processed": total_processed,
-        "extracted": max(0, total_processed - total_errors),
+        "extracted": extracted + rec_res.get("extracted", 0),
         "errors": total_errors,
         "touched_po_sets": rec_res.get("touched_po_sets", len(touched_po_set_ids)),
         "reconciled_count": rec_res.get("reconciled_count", 0),

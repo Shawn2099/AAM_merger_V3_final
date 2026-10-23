@@ -10,11 +10,18 @@ paths:
   stored_documents_folder: "./data/stored"
   database_path: "./data/aam_merger.db"
   combined_folder: "./data/combined"
+  # Delete is an archive action: exported sets (PDFs + JSON + ARCHIVE.txt)
+  # are written here. Nothing in the database is deleted.
+  archive_folder: "./data/development/archived_sets"
   log_folder: "./data/logs"
 
 server:
   host: "0.0.0.0"
   port: 8000
+  # Hosts accepted in the HTTP Host header. ["*"] accepts any host (right for a
+  # LAN deployment reached by a changing IP). A DNS name that never changes is
+  # better listed: it closes DNS-rebinding reads, e.g. ["aam.local", "10.0.0.5"].
+  allowed_hosts: ["*"]
 
 vlm:
   model: "openai/gpt-6-luna"  # team-confirmed VLM via OpenRouter, swap via config only
@@ -22,13 +29,18 @@ vlm:
   api_key_env_var: "OPENROUTER_API_KEY"
 
 extraction:
+  # Attempts a document gets before it is permanently failed (counted as
+  # attempts, not retries-after-the-first-try). Each pass is a paid VLM call;
+  # accepted values are 1..5. `stale_processing_seconds` below must stay above
+  # the worst case, or the recovery sweep reclaims a live extraction.
   max_retries: 3
   retry_backoff_seconds: [2, 5, 15]
   # A document claimed for extraction (pending -> processing) that is still
   # "processing" after this many seconds belonged to a worker that died.
   # It is released back to "pending" and read again on the next pass.
   # Must exceed the worst case of one attempt: vlm.request_timeout_seconds
-  # * max_retries, plus the retry backoff.
+  # * (extraction.max_retries + 1), plus the retry backoff. The app refuses to
+  # start if it does not.
   stale_processing_seconds: 900
 
 matching:
@@ -48,24 +60,26 @@ ingestion:
 prefect:
   work_pool_name: "aam-merger-process-pool"
   max_concurrent_extraction_tasks: 3
-  # The midnight sync runs at 00:00 in this zone. IST is the client default;
-  # an unset value means Prefect's own default (UTC).
+  # The midnight sync runs at 00:00 in this zone. IST is the client default and
+  # is also what `scripts/deploy_prefect.py` falls back to when the key is
+  # absent — an unset key does NOT mean UTC.
   schedule_timezone: "Asia/Kolkata"
 
 concurrency:
   po_set_lock_timeout_seconds: 300
 
 reconciliation:
-  # A PO Set is expected to hold exactly one PO. With this on, a second PO
-  # document quarantines the set instead of being summed into the baseline
-  # (which would double every quantity). Turn off only if your vendors genuinely
-  # issue split POs under one number.
+  # A PO Set is expected to hold one PO document. With this on, more than one
+  # PO document holds the set pending for a human; it is never summed and never
+  # auto-merged. No guessing.
   single_po_document: true
 
 logging:
   level: "INFO"
   max_file_size_mb: 10
-  backup_count: 5
+  # 0 = keep one growing log file; never rotate/delete. The pilot's
+  # development snapshot task copies it to data/development/snapshots/logs.
+  backup_count: 0
 
 # Database backup is NOT configured here. It was removed 2026-09-29 because
 # nothing read it. NFR-6 backup is a runbook item for the Windows host
