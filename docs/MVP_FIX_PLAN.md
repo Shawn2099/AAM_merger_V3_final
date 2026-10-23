@@ -146,8 +146,10 @@ symbol; `detect-changes --scope all` before each commit; name files explicitly.
 
 - 2026-10-23 DONE (local + pushed): plan doc `22dd016`; A3/A1 reconcile guards `6b00f9c`;
   A2 grouping allowlist `42a046d` (+ `tests/test_mvp_blockers.py`, 19 tests; suite green).
+- 2026-10-23 DONE: A4 merge snapshot guard (`MergeStaleError`, reason
+  `documents_changed_during_merge`). PRODUCT §3.1 / CORE_LOGIC §4 rows still owed (PRODUCT.md
+  has uncommitted user edits, so add the row when that tree is clean).
 - NEXT, in order (nothing started on these):
-  1. A4 merge snapshot guard (section 2 "A4").
   2. C Prefect `working_dir` + `AAM_CONFIG_PATH` + execution-policy docs, and the small
      script/UI fixes (commit order items 6-7). Independent of A4; may run in parallel.
   3. B persisted `customs_append_pending` + sync retry + honest UI (after A4).

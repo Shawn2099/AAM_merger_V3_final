@@ -112,6 +112,7 @@ REASON_TEXT: dict[str, str] = {
     "missing_dn_document": "No delivery note in this set yet",
     "missing_si_document": "No invoice in this set yet",
     "partial_fulfillment": "Waiting on more deliveries or invoices",
+    "documents_changed_during_merge": "Documents changed while merging; will re-check",
     "unmatched_vendor_line": "A delivery or invoice line could not be matched to any PO line",
     "po_line_missing_line_item_no": (
         "A PO line has neither a line number nor a description, so it cannot be compared"
@@ -674,6 +675,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             MergeEmptyError,
             MergeNamingError,
             MergeSourceError,
+            MergeStaleError,
             merge_po_set,
         )
 
@@ -684,7 +686,24 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
         s.commit()
         merge_info: dict = {}
         try:
-            merged_path = merge_po_set(po_set_id, cfg, info=merge_info)
+            merged_path = merge_po_set(
+                po_set_id,
+                cfg,
+                info=merge_info,
+                expected_doc_ids=frozenset(d.id for d in docs if d.archived_at is None),
+            )
+        except MergeStaleError as e:
+            # Documents moved between the reconcile read and the write. Hold the
+            # set; the next reconcile re-proves it against the current documents.
+            ps.status = POSetStatus.pending
+            s.commit()
+            logger.warning("Merge held for PO Set %s: %s", po_set_id, e)
+            return {
+                "status": "pending",
+                "reason": "documents_changed_during_merge",
+                "po_set_id": po_set_id,
+                "flags": flags,
+            }
         except MergeNamingError as e:
             # The packet cannot be named unambiguously. Quarantine rather than
             # write a clobbered or ambiguous file into the output folder.

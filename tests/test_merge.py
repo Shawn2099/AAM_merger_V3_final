@@ -193,6 +193,29 @@ def test_merge_returns_none_if_mismatched(tmp_path):
         assert out is None, f"expected None for status {st.value}"
 
 
+def test_merge_refuses_when_documents_changed_since_snapshot(tmp_path):
+    """A4: the packet is built only from the documents reconcile proved."""
+    import pytest
+
+    from app.models import POSetStatus
+    from app.services.merge import MergeStaleError, merge_po_set
+
+    cfg = _cfg_with_tmp(tmp_path)
+    po_set_id = _create_poset_with_docs(
+        tmp_path,
+        cfg,
+        po_no="PO-STALE",
+        status=POSetStatus.pending,
+        docs_info=[
+            {"doc_type": "SI", "si_no": "INV-S", "width": 200},
+            {"doc_type": "PO", "width": 200},
+        ],
+    )
+    with pytest.raises(MergeStaleError):
+        merge_po_set(po_set_id, cfg, expected_doc_ids=frozenset({999999}))
+    assert not list(Path(cfg.paths.output_folder).glob("*.pdf"))
+
+
 def test_merge_blocked_customs_returns_none(tmp_path):
     """FR-14.1: blocked_customs must not auto-merge."""
     from sqlalchemy.orm import Session

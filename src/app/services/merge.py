@@ -9,10 +9,11 @@ from pathlib import Path
 
 from filelock import FileLock
 from pypdf import PdfReader, PdfWriter
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_engine
-from app.models import AuditAction, AuditLog, DocType, POSet, POSetStatus
+from app.models import AuditAction, AuditLog, DocType, Document, POSet, POSetStatus
 from app.models.base import Base
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,15 @@ class MergeEmptyError(RuntimeError):
     def __init__(self, message: str, reason_code: str = "no_line_item_evidence") -> None:
         super().__init__(message)
         self.reason_code = reason_code
+
+
+class MergeStaleError(RuntimeError):
+    """The set's documents changed after reconcile read them.
+
+    The packet would be built from a different document list than the one the
+    quantities were proved against, so nothing is written. The caller leaves the
+    set pending and the next reconcile re-reads it.
+    """
 
 
 def _output_lock(out: Path) -> FileLock:
@@ -291,7 +301,12 @@ def _delete_inputs_for_merged(ps: POSet, cfg) -> None:
         logger.warning("Could not clear input copies for PO Set %s", ps.id, exc_info=True)
 
 
-def merge_po_set(po_set_id: int, cfg, info: dict | None = None) -> Path | None:
+def merge_po_set(
+    po_set_id: int,
+    cfg,
+    info: dict | None = None,
+    expected_doc_ids: frozenset[int] | None = None,
+) -> Path | None:
     """Auto-merge only when reconciled (FR-14.1). Returns None if not eligible.
 
     Order comes from `cfg.merge.legal_order` (default SI→DN→PO→
@@ -307,6 +322,10 @@ def merge_po_set(po_set_id: int, cfg, info: dict | None = None) -> Path | None:
 
     `info`, when given, is populated with naming details for the caller to
     surface (e.g. invoice_no_missing).
+
+    `expected_doc_ids` is the document snapshot the caller reconciled. If the
+    set's live documents differ just before the write, `MergeStaleError` is
+    raised and nothing is written.
     """
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
@@ -374,6 +393,19 @@ def merge_po_set(po_set_id: int, cfg, info: dict | None = None) -> Path | None:
             out = _resolve_output_path(
                 stem, ps.id, Path(cfg.paths.output_folder), ps.merged_output_path
             )
+            if expected_doc_ids is not None:
+                live = frozenset(
+                    s.scalars(
+                        select(Document.id).where(
+                            Document.po_set_id == po_set_id, Document.archived_at.is_(None)
+                        )
+                    )
+                )
+                if live != expected_doc_ids:
+                    raise MergeStaleError(
+                        f"PO Set {po_set_id} documents changed during merge: "
+                        f"expected {sorted(expected_doc_ids)}, found {sorted(live)}"
+                    )
             _write_merged(ordered, out, allow_missing=False)
             if info is not None:
                 info["output_name"] = out.name
