@@ -166,7 +166,10 @@ approximation.
 | `pending` | `multiple_po_documents` | the set holds more than one PO document (config `reconciliation.single_po_document`); held for review, never summed or auto-merged |
 | `quarantined` | `unmatched_vendor_line` | a vendor row resolved to no PO line (see 3.2) |
 | `quarantined` | `po_document_has_no_line_items` | the PO document was read but contains no line items |
-| `quarantined` | `vendor_document_has_no_line_items` | a DN or SI document was read but contains no line items; the set can never leave pending, so it is quarantined |
+| `quarantined` | `vendor_document_has_no_line_items` | any single DN or SI document was read but contains no line items (checked per document, so an empty DN beside a full one still quarantines) |
+| `quarantined` | `document_extraction_failed` | a PO/DN/SI document in the set failed extraction; its stale lines are never reconciled or merged. Use Re-Extract |
+| `pending` | `document_not_yet_read` | a PO/DN/SI document in the set is still pending/processing extraction |
+| `quarantined` | `unclassified_document_in_set` | a document that is not PO/DN/SI/CUSTOMS/SHIPPING (UNKNOWN, COMBINED) is attached to the set (legacy-row defence; the sweeps never attach one) |
 | `quarantined` | `packet_naming_failed` | merged packet could not be named unambiguously |
 | `quarantined` | `packet_source_unreadable` | a member PDF is missing, corrupt, or encrypted, so the packet cannot be written |
 | `quarantined` | `packet_write_failed` | the output folder could not be written (disk, permissions, lock timeout) |

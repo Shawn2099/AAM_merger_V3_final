@@ -122,6 +122,13 @@ REASON_TEXT: dict[str, str] = {
     "vendor_document_has_no_line_items": (
         "A delivery note or invoice was read but contains no line items"
     ),
+    "document_extraction_failed": (
+        "A document in this set could not be read; use Re-Extract or replace the file"
+    ),
+    "document_not_yet_read": "A document in this set has not been read yet",
+    "unclassified_document_in_set": (
+        "An unclassified document is attached to this set; reclassify or remove it"
+    ),
     "blocked_customs": ("Customs requirement is ON; attach both a CUSTOMS and a SHIPPING document"),
     "packet_naming_failed": "The merged packet could not be named unambiguously",
     "packet_source_unreadable": (
@@ -183,6 +190,8 @@ def reconcile_po_set(po_set_id: int, cfg: AppConfig) -> dict:
 # REASON_TEXT sentence for these throws away the one thing the operator needs:
 # which document to look at.
 _DETAILED_REASONS = {
+    "document_extraction_failed",
+    "unclassified_document_in_set",
     "multiple_po_documents",
     "po_reference_mismatch",
     "packet_naming_failed",
@@ -338,6 +347,61 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
         dn_docs = [d for d in docs if _get_type(d) == DocType.DN.value]
         si_docs = [d for d in docs if _get_type(d) == DocType.SI.value]
 
+        # Validity guards run before any missing-side check: a set must never
+        # be judged (or merged) on stale lines from a document that failed, or
+        # on a document nobody has read yet, or on a type that cannot be part
+        # of a set. Customs/shipping documents are separate add-ons and are
+        # not read for line items.
+        _addons = (DocType.CUSTOMS.value, DocType.SHIPPING.value)
+        _set_types = (DocType.PO.value, DocType.DN.value, DocType.SI.value)
+        checked = [d for d in docs if _get_type(d) not in _addons]
+
+        def _status(d) -> str:
+            st = d.extraction_status
+            return st.value if hasattr(st, "value") else str(st)
+
+        failed = [d for d in checked if _status(d) == "failed"]
+        if failed:
+            names = ", ".join(sorted(d.original_filename or "?" for d in failed))
+            detail_msg = f"{names} could not be read; use Re-Extract or replace the file"
+            ps.status = POSetStatus.quarantined
+            s.commit()
+            quarantine_copy(ps.id, cfg, reason="document_extraction_failed", detail=detail_msg)
+            return {
+                "status": "quarantined",
+                "reason": "document_extraction_failed",
+                "detail": detail_msg,
+                "po_set_id": po_set_id,
+                "flags": [{"priority": 1, "type": "identification", "message": detail_msg}],
+            }
+        unread = [d for d in checked if _status(d) in ("pending", "processing")]
+        if unread:
+            ps.status = POSetStatus.pending
+            s.commit()
+            return {
+                "status": "pending",
+                "reason": "document_not_yet_read",
+                "po_set_id": po_set_id,
+                "flags": [],
+            }
+        foreign = [d for d in docs if _get_type(d) not in _set_types + _addons]
+        if foreign:
+            names = ", ".join(sorted(d.original_filename or "?" for d in foreign))
+            detail_msg = (
+                f"Unclassified document(s) attached to this set ({names}); "
+                "reclassify or remove them"
+            )
+            ps.status = POSetStatus.quarantined
+            s.commit()
+            quarantine_copy(ps.id, cfg, reason="unclassified_document_in_set", detail=detail_msg)
+            return {
+                "status": "quarantined",
+                "reason": "unclassified_document_in_set",
+                "detail": detail_msg,
+                "po_set_id": po_set_id,
+                "flags": [{"priority": 1, "type": "identification", "message": detail_msg}],
+            }
+
         # Every side must arrive as its own document row. A missing side is
         # unfulfilled demand, not evidence: the set waits with an explicit
         # reason instead of merging or failing.
@@ -489,12 +553,10 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
         # has its three document types, the comparison can never progress, and
         # the nightly sweep will report "waiting" forever. Quarantine the set
         # and name the file, so the operator can re-extract it.
-        for label, vendor_docs, vendor_lines in (
-            ("DN", dn_docs, dn_lines),
-            ("SI", si_docs, si_lines),
-        ):
-            if vendor_docs and not vendor_lines:
-                names = ", ".join(sorted(d.original_filename or "?" for d in vendor_docs))
+        for label, vendor_docs in (("DN", dn_docs), ("SI", si_docs)):
+            empty = [d for d in vendor_docs if not d.line_items]
+            if empty:
+                names = ", ".join(sorted(d.original_filename or "?" for d in empty))
                 detail_msg = (
                     f"The {label} document(s) read successfully but contain no "
                     f"line items ({names}); re-extract or inspect the file"

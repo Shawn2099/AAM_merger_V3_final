@@ -24,6 +24,7 @@ contract is pinned by `tests/test_business_scenarios_ui.py`.
 |---|---|
 | One PO document anchors a set. A second PO document under the same number holds the set **pending** (`multiple_po_documents`) for review; it is never summed and never auto-merged. | `reconciliation.py` (`single_po_document`, default `true`) |
 | DN and SI documents never create a set; they attach to the open set with the **same normalised PO number**. | `grouping.py` (`ANCHOR_TYPES`, `get_or_create_po_set(create=False)`) |
+| A set is formed **only** by PO, DN and SI documents (customs/shipping are the separate add-ons, §5). An `UNKNOWN` or `COMBINED` document is never attached to a set, even if it carries a PO number, until an operator reclassifies it. A legacy row attached anyway quarantines the set (`unclassified_document_in_set`). | `grouping.py` (`_ATTACHABLE`); `reconciliation.py` |
 | Any number of DN and SI documents may attach. All of them are included in the packet. | `reconciliation.py` (`dn_docs`, `si_docs`); `merge.py::_ordered_docs` |
 | The PO number is normalised (labels/leading `PO`, spacing, case, revision suffix). `PO 161538`, `161538` and `PO, Rev # 161538,0` are the same set. | `grouping.normalize_po_no` |
 | A document whose printed PO number differs from the set's quarantines the set (`po_reference_mismatch`). | `reconciliation.py` |
@@ -74,8 +75,8 @@ partial merge.
 |---|---|
 | `merged` | Every line matched exactly and, if the customs requirement is on, both customs documents are present. Packet written. |
 | `mismatched` | A line was reported on both sides with different quantities. A human decides which document is right. |
-| `pending` | A required side is missing, the vendor reported **nothing** for a PO line, or the set holds more than one PO document (review hold). **Not a pass.** |
-| `quarantined` | A line could not be identified, a quantity is zero/unreadable, a PO reference mismatch, or the packet cannot be named. Whole set, never a line. |
+| `pending` | A required side is missing, the vendor reported **nothing** for a PO line, a document is not read yet (`document_not_yet_read`), or the set holds more than one PO document (review hold). **Not a pass.** |
+| `quarantined` | A line could not be identified, a quantity is zero/unreadable, a PO reference mismatch, a document failed extraction (`document_extraction_failed`), an unclassified document is attached (`unclassified_document_in_set`), any single DN/SI has no lines (`vendor_document_has_no_line_items`), or the packet cannot be named. Whole set, never a line. |
 
 Zero or unreadable quantities quarantine (`non_positive_quantity`); a row is
 never silently dropped.
