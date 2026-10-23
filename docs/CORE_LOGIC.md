@@ -102,6 +102,17 @@ a visible naming note) when no invoice number was extracted. An existing packet
 belonging to another set is never overwritten — that set quarantines as
 `packet_naming_failed`.
 
+## 6a. Two standing rules (2026-10-23)
+
+- **A filename is never an input to matching or grouping.** It appears only in
+  messages and logs. The packet is named by the first SI's invoice number, else
+  the PO number.
+- **A combined PDF (several documents in one file) is quarantined whole.**
+  `extraction.split_combined` is `false` by default: nothing is cut, no child
+  documents exist, and the file waits in the holding area and in
+  `quarantine/_documents`. The splitter (`services/splitting.py`) is kept and
+  can be re-enabled by setting the flag. Pinned by `tests/test_combined_quarantine.py`.
+
 ## 7. What this contract does **not** claim
 
 - It does not catch "same line number, same quantity, different item". That is

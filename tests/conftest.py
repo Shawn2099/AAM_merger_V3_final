@@ -121,7 +121,11 @@ def _redirect_paths(cfg):
 
 def _load_config(path=None):
     """The real loader, with every path redirected into the session dir."""
-    return _redirect_paths(_original_load_config(path))
+    cfg = _redirect_paths(_original_load_config(path))
+    # Production quarantines combined PDFs unsplit; the splitter tests need it on.
+    # Tests of the default set `cfg.extraction.split_combined = False` themselves.
+    cfg.extraction.split_combined = True
+    return cfg
 
 
 config_module.load_config = _load_config

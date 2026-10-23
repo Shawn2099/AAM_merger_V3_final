@@ -84,6 +84,11 @@ class ExtractionConfig(_StrictConfigModel):
     # Enforced by `AppConfig.validate_attempt_budget` below.
     stale_processing_seconds: int = Field(default=900, ge=60)
 
+    # A combined PDF (PO + DN + SI in one file) is quarantined unsplit by default:
+    # one operator-visible document, nothing guessed. True re-enables the Layer-1
+    # splitter (`services/splitting.py`), which cuts it into child PDFs.
+    split_combined: bool = False
+
 
 class MatchingConfig(_StrictConfigModel):
     # The only matching knob that is read. `group_by_line_no` takes this as
@@ -354,9 +359,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         if "combined_folder" not in paths_raw:
             paths_raw["combined_folder"] = str(base_dir / "data" / "combined")
         if "archive_folder" not in paths_raw:
-            paths_raw["archive_folder"] = str(
-                base_dir / "data" / "development" / "archived_sets"
-            )
+            paths_raw["archive_folder"] = str(base_dir / "data" / "development" / "archived_sets")
     cfg = AppConfig.model_validate(data)
     # Secrets are in .env or in the environment; load the file so the check
     # below sees the same key the VLM client will use. Without this the app

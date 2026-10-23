@@ -42,6 +42,9 @@ extraction:
   # * (extraction.max_retries + 1), plus the retry backoff. The app refuses to
   # start if it does not.
   stale_processing_seconds: 900
+  # A combined PDF (PO + DN + SI in one file) is quarantined as-is. Set true to
+  # split it into child PDFs instead (Layer-1 splitter).
+  split_combined: false
 
 matching:
   # Description similarity, used only for vendor rows carrying no line number.

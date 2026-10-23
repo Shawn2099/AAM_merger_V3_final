@@ -359,6 +359,37 @@ def _handle_combined(doc, s, result: dict, cfg) -> Document:
         s.refresh(doc)
         return doc
 
+    if not cfg.extraction.split_combined:
+        # Splitting is off: the file is quarantined whole. The row stays a valid,
+        # unattached COMBINED document (so it is never re-read and the holding area
+        # lists it) and carries no numbers, set or lines for Layer 2 to trust.
+        doc.doc_type = DocType.COMBINED
+        doc.extraction_status = ExtractionStatus.valid
+        doc.is_split_parent = False
+        doc.po_no_raw = None
+        doc.po_no_normalized = None
+        doc.po_reference_ambiguous = False
+        doc.dn_no = None
+        doc.si_no = None
+        doc.invoice_no = None
+        doc.po_set_id = None
+        for li in list(doc.line_items):
+            s.delete(li)
+        s.commit()
+        s.refresh(doc)
+        try:
+            from app.services.quarantine import quarantine_document
+
+            quarantine_document(
+                doc.id,
+                cfg,
+                reason="combined_document: one PDF holds several documents; "
+                "quarantined unsplit, a person must separate it",
+            )
+        except Exception:
+            logger.warning("Could not quarantine combined document %s", doc.id, exc_info=True)
+        return doc
+
     # Sterile parent: the trigger row carries no data — children own it, so
     # anything scanning the parent would double-count.
     doc.doc_type = DocType.COMBINED
