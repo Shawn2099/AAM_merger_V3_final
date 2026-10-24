@@ -51,13 +51,16 @@ Last updated: 2026-10-24. Branch `fix/mvp-high-priority`, remote `origin` (push 
   `make business-logic` files: 183 passed. Full suite at bf7a294: 6309 passed, 6 skipped, 46 xfailed.
 - **Still open:** T7 retest corpus + fresh-DB run (uses the paid provider; needs the user's go-ahead), T8 operator UI
   walk-through, T9 cleanup (list below, user decides), T10 final branch review + gitnexus refresh (`node .gitnexus/run.cjs analyze`).
-- **Decisions waiting on the user:** R-07 (disk-full/offline share at packet-write time: leave the set `pending` and retry,
-  instead of sticky `quarantined`? my recommendation: yes for a plain OSError), R-17 (zero-byte `.pdf` and files in input
-  SUBFOLDERS are skipped invisibly: log+count them, or scan subfolders?), R-13 (only with `split_combined: true`),
-  I-1 second read, "1 of 6" PO pages, pymupdf AGPL, extraction validation (section 7).
-- **Live DB `data/aam_merger.db` is stale** (revision a9b0c1d2e3f4: still has `line_items.unit_price`, no `po_sets.line_mapping_rule`).
-  Run `uv run python scripts/migrate_db.py` (verified on a copy: reaches e8f9a0b1c2d3), then `scripts/requeue_line_mapping.py`
-  dry run (would change sets 39,40,41,42,43,47,48,49,50,51; 39,40,42,48,50 merge) before any new real run, or start a fresh DB.
+- **Decisions made by the user (2026-10-24 night):** R-07 -> a packet-write I/O failure leaves the set `pending` and is retried
+  (implemented); R-17 -> leave as is (subfolders / zero-byte files stay unscanned; documented in PRODUCT section 8, pinned xfail);
+  licences (pymupdf AGPL) -> later; the real-corpus retest runs LAST, on a NEW DB, once all development and testing are done and
+  the assistant is confident; scratch cleanup approved and done (T9: files archived to `Desktop/aam_merger_scratch_backup_20261024.zip`
+  then deleted; the four local data folders and `scratch_*` are now in `.gitignore`).
+  Still undecided: R-13 (only with `split_combined: true`), I-1 second read, "1 of 6" PO pages, extraction validation (section 7).
+- **Live DB `data/aam_merger.db` was migrated** to e8f9a0b1c2d3 on 2026-10-24 (backup `data/backup/aam_merger_premigrate_20261024_*.db`).
+  The real retest still uses a NEW DB, as decided.
+- **History:** the live DB was at revision a9b0c1d2e3f4 (had `line_items.unit_price`, no `po_sets.line_mapping_rule`); migrated as above.
+  `scripts/requeue_line_mapping.py` dry run (would change sets 39,40,41,42,43,47,48,49,50,51; 39,40,42,48,50 merge) before any new real run, or start a fresh DB.
   Its 24 pending sets are explained: page-fragment sets ("...-pages-3.pdf", the out-of-scope fragments module), genuine partial
   deliveries, and sets still waiting for a DN.
 - Windows note: Application Control (WDAC) blocked the venv python for a while on this PC; it works again. If `uv run`
@@ -152,18 +155,18 @@ non-server mode or stop the server at session end (e.g. `PREFECT_SERVER_ALLOW_EP
 
 - 2026-10-24 evening: repaired broken push (6bb1384); T2 12d4950; manual merger ea2f511; T3/T4/T11 3f954b1; T5 938188f.
 
-- 2026-10-24 night: Opus review findings + R-08/R-09/R-15/R-18 fixed, bf7a294.
+- 2026-10-24 night: live DB migrated; R-07 done (pending on write failure); T9 cleanup done; Opus review findings + R-08/R-09/R-15/R-18 fixed, bf7a294.
 
 ## 6a. Handover-readiness checklist (what is and is not done for an MVP handover)
 
 Done and verified in the suite: reconciliation rule (PO == DN == SI per line, integers x1000), digit-keyed PO grouping with letters
 guard, duplicate-document guard, line-number fallback (x10, div10, -1 suffix), image-based extraction config, quarantine report +
 audit rows + original filenames, ingest rejects visible, 400 breaker, manual merger tool, DELIVERY checklist + licence note.
-NOT done (needs the user or the target machine): fix the stale live DB (above); pymupdf licence choice; real-corpus retest on a
-fresh DB (T7); operator UI walk-through (T8); one midnight Prefect run on the target Windows Server (DELIVERY section 8 item 9);
-R-07/R-17 decisions; scratch cleanup (T9); production-phase items in 6b.
+NOT done (needs the user or the target machine): pymupdf licence choice (later); real-corpus retest on a NEW DB (T7, last);
+operator UI walk-through (T8); one midnight Prefect run on the target Windows Server (DELIVERY section 8 item 9); T10 final
+review + gitnexus refresh; production-phase items in 6b.
 
-### T9 cleanup proposal (NOTHING deleted; the user decides)
+### T9 cleanup (DONE 2026-10-24, user approved; kept here as the record)
 - Safe to delete (throwaway): `scratch_*.py` (36 files) and `scratch_dump/` (184 MB), `append_report.py`, `batch_inspector.py`,
   `prepare_audit_batches.py`, `inspect_data.py`, `ordered_audit_docs.json`, `batch_02..30_findings.md` (merge their content into
   `AUDIT_FINDINGS_REPORT.md` first if still wanted).

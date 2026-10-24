@@ -178,7 +178,7 @@ approximation.
 | `quarantined` | `unclassified_document_in_set` | a document that is not PO/DN/SI/CUSTOMS/SHIPPING (UNKNOWN, COMBINED) is attached to the set (legacy-row defence; the sweeps never attach one) |
 | `quarantined` | `packet_naming_failed` | merged packet could not be named unambiguously |
 | `quarantined` | `packet_source_unreadable` | a member PDF is missing, corrupt, or encrypted, so the packet cannot be written |
-| `quarantined` | `packet_write_failed` | the output folder could not be written (disk, permissions, lock timeout) |
+| `pending` | `packet_write_failed` | the output folder could not be written (disk full, share offline, permissions, lock timeout). The documents are consistent, so the set stays pending and the next sweep retries it; nothing partial is left (R-07) |
 | `quarantined` | `no_line_item_evidence` | every attached document has zero line items, so there is nothing to merge |
 | `blocked_customs` | `blocked_customs` | customs toggle on, CUSTOMS + SHIPPING not both attached |
 | `merged` | *(none)* | reconciled, customs gate clear, packet written - terminal except a customs append (§6) |
@@ -632,6 +632,16 @@ persists after the config is fixed would condemn documents on the second night.
 Pinned by `test_the_400_breaker_refunds_attempts_and_reports_the_halt`,
 `test_a_document_the_breaker_already_refunded_is_judged_on_its_own` and
 `test_a_good_read_between_400s_does_not_trip_the_breaker`.
+
+### L — zero-byte files and files in input subfolders are skipped without a trace (R-17, decided: leave)
+
+A zero-byte `.pdf` never passes the stability check, and a PDF inside a subfolder of
+the input folder is never listed (`find_input_pdfs` reads the top level only). Neither
+gets a Document row, an error count or a log line, so neither appears on the
+Unclassified page. Nothing is deleted or lost: the file stays where it is. The
+operator must drop files directly in the input folder. Decided on 2026-10-24 not to
+scan subfolders or add a warning for now. Pinned (as a strict xfail) by
+`test_skipped_input_is_visible_to_the_operator` in `tests/test_robustness_batch_sync.py`.
 
 ### L — files rejected at ingest are listed, re-sent merged files are cleared (R-03, R-16)
 

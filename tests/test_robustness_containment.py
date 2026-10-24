@@ -351,7 +351,7 @@ def _reconciled_set_ready_to_merge(cfg, monkeypatch, *, merge_patch=None):
     return ps, res
 
 
-def test_disk_full_at_merge_quarantines_with_packet_write_failed_and_no_partial_file(
+def test_disk_full_at_merge_stays_pending_with_packet_write_failed_and_no_partial_file(
     rcfg, monkeypatch
 ):
     def enospc(self, stream):
@@ -359,7 +359,7 @@ def test_disk_full_at_merge_quarantines_with_packet_write_failed_and_no_partial_
         raise OSError(errno.ENOSPC, "No space left on device")
 
     ps, _ = _reconciled_set_ready_to_merge(rcfg, monkeypatch, merge_patch=enospc)
-    assert ps.status == POSetStatus.quarantined
+    assert ps.status == POSetStatus.pending  # R-07: retried once the disk is fixed
     assert "could not be written" in (ps.reconcile_reason or "") or "No space" in (
         ps.reconcile_reason or ""
     )
@@ -367,14 +367,6 @@ def test_disk_full_at_merge_quarantines_with_packet_write_failed_and_no_partial_
     assert (Path(rcfg.paths.input_folder) / "PO.pdf").exists(), "inputs kept when nothing merged"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="DEFECT R-07: an infrastructure failure at write time (disk full, output share "
-    "offline, 60 s output-lock timeout -> filelock.Timeout is an OSError) quarantines a "
-    "set whose documents are CONSISTENT, and quarantine is sticky under every sweep. "
-    "After the disk is fixed the set stays quarantined until an operator acts.",
-)
 def test_set_recovers_after_disk_full_is_fixed(rcfg, monkeypatch):
     import pypdf
 
@@ -384,7 +376,7 @@ def test_set_recovers_after_disk_full_is_fixed(rcfg, monkeypatch):
         raise OSError(errno.ENOSPC, "No space left on device")
 
     ps, _ = _reconciled_set_ready_to_merge(rcfg, monkeypatch, merge_patch=enospc)
-    assert ps.status == POSetStatus.quarantined  # precondition
+    assert ps.status == POSetStatus.pending  # precondition: not sticky
     monkeypatch.setattr(pypdf.PdfWriter, "write", real_write)
     run_sync()
     (ps,) = sets(rcfg)
@@ -402,12 +394,12 @@ def test_pypdf_error_during_packet_write_quarantines_the_set(rcfg, monkeypatch):
     assert ps.status == POSetStatus.quarantined, (ps.status, ps.reconcile_reason, res)
 
 
-def test_output_folder_that_is_a_file_quarantines_as_write_failure(rcfg, monkeypatch):
+def test_output_folder_that_is_a_file_stays_pending_as_write_failure(rcfg, monkeypatch):
     out = Path(rcfg.paths.output_folder)
     out.rmdir()
     out.write_text("not a folder", encoding="utf-8")
     ps, _res = _reconciled_set_ready_to_merge(rcfg, monkeypatch)
-    assert ps.status == POSetStatus.quarantined
+    assert ps.status == POSetStatus.pending
     assert ps.merged_output_path is None
 
 

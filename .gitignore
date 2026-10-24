@@ -97,3 +97,11 @@ worktrees/
 *.db.bak*
 *.db-wal.bak*
 *.db-shm.bak*
+
+# Local-only working data (real corpus backup, previous run, eval work): never commit
+data/input_corpus_backup/
+data/prev_run_20261024/
+pattern_lab/
+prompt_improvement/
+scratch_*
+scratch_dump/

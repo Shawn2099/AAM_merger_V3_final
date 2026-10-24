@@ -946,20 +946,33 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 "po_set_id": po_set_id,
                 "flags": [],
             }
-        except (MergeSourceError, OSError) as e:
-            # A missing/encrypted/corrupt member, or a write failure, must be a
-            # named quarantine with the offending file — never a raw exception
-            # that leaves the set pending and retries every night.
-            reason = (
-                "packet_source_unreadable"
-                if isinstance(e, MergeSourceError)
-                else "packet_write_failed"
-            )
+        except MergeSourceError as e:
+            # A missing/encrypted/corrupt member must be a named quarantine with
+            # the offending file, never a raw exception that leaves the set
+            # pending and retries every night.
+            reason = "packet_source_unreadable"
             ps.status = POSetStatus.quarantined
             s.commit()
             _quarantine_set(ps.id, cfg, reason=reason, detail=str(e))
             return {
                 "status": "quarantined",
+                "reason": reason,
+                "detail": str(e),
+                "po_set_id": po_set_id,
+                "flags": [],
+            }
+        except OSError as e:
+            # Disk full, output share offline, output-name lock timeout: the
+            # documents are consistent, the environment is not. Nothing was
+            # delivered (no partial packet is left), so the set stays PENDING with
+            # the reason and the next sweep retries it once the fault is fixed
+            # (R-07). Quarantine would be sticky and need an operator.
+            reason = "packet_write_failed"
+            ps.status = POSetStatus.pending
+            s.commit()
+            logger.error("Packet for PO Set %s could not be written; will retry: %s", ps.id, e)
+            return {
+                "status": "pending",
                 "reason": reason,
                 "detail": str(e),
                 "po_set_id": po_set_id,
