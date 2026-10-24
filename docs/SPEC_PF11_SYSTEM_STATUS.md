@@ -1,5 +1,7 @@
 # SPEC PF-11: operator-visible system status
 
+> **DROPPED (owner scope freeze, 2026-10-25, D17): do not build.** Design kept on file only.
+
 Status: **rev 2 (after Opus review 2026-10-25); not built.** Author: Claude (architect). Builder: worker (DeepSeek). Reviewer: Claude.
 
 Why: with the 1-minute poller (D5) nobody presses Scan any more. If the provider halts, the poller backs off for an hour, the
