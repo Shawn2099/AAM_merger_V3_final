@@ -35,7 +35,10 @@ A test that needs a specific path still sets it: `cfg.paths.output_folder
 
 from __future__ import annotations
 
+import contextlib
 import os
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -154,6 +157,46 @@ def _ensure_a_config_file() -> None:
     target = _SESSION_DIR / "config.yaml"
     target.write_text(yaml.safe_dump(data), encoding="utf-8")
     os.environ["AAM_CONFIG_PATH"] = str(target)
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:
+    """Stop the temporary Prefect API server a test run started (I-9).
+
+    Prefect 3 starts a subprocess uvicorn server on demand and registers
+    ``SubprocessASGIServer.stop`` with ``atexit``. On Windows with a
+    uv-created virtualenv, ``sys.executable`` is a trampoline: ``terminate()``
+    kills the trampoline and leaves the real interpreter (the uvicorn child)
+    running, so every test run leaked a
+    ``python -m uvicorn ... prefect.server.api.server:create_app`` process.
+
+    Kill the whole process tree here, while the trampoline is still alive,
+    then let Prefect's own ``stop()`` reset the singleton. Only servers that
+    this session actually started are touched.
+    """
+    if os.name != "nt":
+        # POSIX virtualenvs run the interpreter directly, so Prefect's own
+        # atexit stop() already reaps the server. Do not touch other processes.
+        return
+    module = sys.modules.get("prefect.server.api.server")
+    if module is None:
+        return  # no Prefect server was started in this session
+    server_cls = getattr(module, "SubprocessASGIServer", None)
+    if server_cls is None:  # pragma: no cover - Prefect internals changed
+        return
+    seen: set[int] = set()
+    for server in list(getattr(server_cls, "_instances", {}).values()):
+        process = getattr(server, "server_process", None)
+        pid = getattr(process, "pid", None)
+        if pid is not None and pid not in seen:
+            seen.add(pid)
+            with contextlib.suppress(Exception):
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(pid)],
+                    capture_output=True,
+                    timeout=15,
+                )
+        with contextlib.suppress(Exception):
+            server.stop()
 
 
 _ensure_a_config_file()

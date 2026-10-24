@@ -25,7 +25,14 @@ server:
 
 vlm:
   model: "openai/gpt-6-luna"  # team-confirmed VLM via OpenRouter, swap via config only
-  request_timeout_seconds: 60
+  # Every page is rasterised and sent as an image. The validated recipe is
+  # 150 DPI + reasoning effort "high" (see prompt_improvement/eval). Valid
+  # ranges are enforced at startup in src/app/core/config.py: raster_dpi
+  # 72..300, reasoning_effort minimal|low|medium|high, max_pages >= 1.
+  request_timeout_seconds: 180
+  raster_dpi: 150
+  reasoning_effort: "high"
+  max_pages: 30
   api_key_env_var: "OPENROUTER_API_KEY"
 
 extraction:

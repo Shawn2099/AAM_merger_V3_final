@@ -219,6 +219,7 @@ def test_stale_processing_must_exceed_the_worst_case_attempt(tmp_path):
 
 def test_stale_processing_above_the_worst_case_is_accepted(tmp_path):
     def mutate(data):
+        data["vlm"]["request_timeout_seconds"] = 60
         data["extraction"]["retry_backoff_seconds"] = [2, 5, 15]
         data["extraction"]["stale_processing_seconds"] = 263
 

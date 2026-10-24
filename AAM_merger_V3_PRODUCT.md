@@ -174,12 +174,13 @@ approximation.
 | `quarantined` | `vendor_document_has_no_line_items` | any single DN or SI document was read but contains no line items (checked per document, so an empty DN beside a full one still quarantines) |
 | `quarantined` | `document_extraction_failed` | a PO/DN/SI document in the set failed extraction; its stale lines are never reconciled or merged. Use Re-Extract |
 | `pending` | `document_not_yet_read` | a PO/DN/SI document in the set is still pending/processing extraction |
+| `pending` | `documents_changed_during_merge` | a document was attached to, or changed in, the set after reconcile read it and before the packet was written; no packet is written and the next reconcile re-checks the set |
 | `quarantined` | `unclassified_document_in_set` | a document that is not PO/DN/SI/CUSTOMS/SHIPPING (UNKNOWN, COMBINED) is attached to the set (legacy-row defence; the sweeps never attach one) |
 | `quarantined` | `packet_naming_failed` | merged packet could not be named unambiguously |
 | `quarantined` | `packet_source_unreadable` | a member PDF is missing, corrupt, or encrypted, so the packet cannot be written |
 | `quarantined` | `packet_write_failed` | the output folder could not be written (disk, permissions, lock timeout) |
 | `quarantined` | `no_line_item_evidence` | every attached document has zero line items, so there is nothing to merge |
-| `blocked_customs` | *(none)* | customs toggle on, CUSTOMS + SHIPPING not both attached |
+| `blocked_customs` | `blocked_customs` | customs toggle on, CUSTOMS + SHIPPING not both attached |
 | `merged` | *(none)* | reconciled, customs gate clear, packet written - terminal except a customs append (§6) |
 
 `REASON_TEXT` carries every reason code the reconciler can emit (in
@@ -220,9 +221,9 @@ reasons** (`line_mapping` and `line_mapping_rejected` came with the line-number 
 | 1 | `identification` | `no_po_line_with_this_number` | DN or SI | vendor row's number is not on the PO |
 | 1 | `identification` | `no_line_number_and_no_description_match` | DN or SI | vendor row has no number and no description clears the threshold |
 | 2 | `quantity` | `quantity_mismatch` | DN or SI | both sides reported the line, quantities differ |
-| 2 | `description_match` | `matched_by_description` | DN or SI | the row was attached by the description fallback, not by a printed line number — **advisory, not a failure** |
 | 2 | `line_mapping` | `line_number_mapped` | DN or SI | a pool's vendor line numbers were mapped to the PO by a rule (x10, div10, add_rel, strip_rel) — **advisory, not a failure** |
 | 1 | `line_mapping_rejected` | `document_fits_exact` | DN or SI | the pool fits a rule but one document already matches the PO as printed, so nothing was mapped — **advisory**; the orphans quarantine the set |
+| 2 | `description_match` | `matched_by_description` | DN or SI | the row was attached by the description fallback, not by a printed line number — **advisory, not a failure** |
 | 3 | `naming` | *(no `reason` key)* | — | packet had to be named from the PO number because no invoice number was extracted (§6) |
 
 Priority 3 `naming` and priority 2 `description_match` describe a successful
@@ -615,12 +616,16 @@ person to place. Safe direction, pinned by
 
 A provider fault (timeout, 429, 5xx, credit, bad key or model id) leaves the
 document `pending` and is not charged as an attempt, so one outage cannot
-quarantine a batch. The cost: a file the provider can *never* serve (for
+quarantine a batch. There is no circuit breaker: a bad key (401) or an empty
+credit balance (402) is re-attempted for every document in the run, one provider
+call each, rather than stopping the run at the first failure. Each stays
+`pending` and uncharged. The cost of both: a file the provider can *never* serve (for
 example a scan that always times out) is retried on every sync and never
 reaches `failed`. It shows as "Not read" and each run logs a warning; it does
 not quarantine its set or hide anything. The operator resolves it by removing
 or re-scanning the file. Pinned by
-`test_known_limitation_provider_fault_is_retried_every_run`.
+`test_known_limitation_provider_fault_is_retried_every_run` and
+`test_known_limitation_auth_fault_is_attempted_once_per_document`.
 
 ### M — a document placed under the wrong PO cannot be moved from the UI
 
@@ -808,6 +813,11 @@ apply to it:
 
 - **The document.** Its input-folder copy is removed and the file is copied to
   `quarantine/_documents/<name>/` with a `QUARANTINE.txt` stating the reason.
+  Every automatic quarantine (document or set) keeps the original filename,
+  writes the same `QUARANTINE.txt` layout (what happened, documents, what to
+  do) and an `audit_log` row (`quarantined`) holding that text. The input copy
+  is removed only after a copy exists in quarantine. Pinned by
+  `tests/test_quarantine_report.py`.
   This is what stops the loop: `ingest_file` copies into `stored/` and leaves
   the original in the input folder, and input is only cleared when a set
   merges, so without this a dead PDF is re-hashed, de-duplicated to the same
@@ -950,6 +960,79 @@ good file that antivirus or a backup tool held for a moment. A file that stays u
 therefore never moved to quarantine and has no Document row: its only trace is the error
 count and the log. Content problems (not a PDF, over the size cap, incomplete) are still
 quarantined at once. Pinned by `test_known_limitation_unreadable_input_file_stays_for_next_sync`.
+
+### M — Re-Extract can overwrite a document type the operator set
+
+Re-Extract re-reads a document and takes the type the model returns, so a type
+the operator set by hand (for example DN) is replaced by the new reading. Fails
+safe: if the new type is UNKNOWN the set quarantines (`unclassified_document_in_set`);
+if it is another valid type the set reconciles on that type. Nothing is merged on
+a type the operator did not confirm, but the operator's correction can be lost
+silently. Not yet pinned by a test.
+
+### M — a DN number that matches another vendor's set is attached
+
+The sweep that places unattached documents matches a DN or SI on its DN number
+alone against open sets. It does not check the vendor or the printed PO. The
+document is attached to the matching set, and reconcile then quarantines it with
+`po_reference_mismatch` if its PO differs. The wrong attach is therefore visible,
+but the document sits in a set that is not its own until an operator moves it, and
+the reclassify route refuses to move an attached document (see the entry on
+placing a document under the wrong PO). Pinned by
+`test_known_limitation_dn_number_collision_attaches`.
+
+### L — reclassify attaches a document before it takes the set lock
+
+Reclassify attaches the document to a set before it acquires that set's lock. A
+merge of the same set that is in progress can therefore see the document arrive
+after its check. The merge's pre-write check (`documents_changed_during_merge`)
+catches a change made before the packet is written, but a change that lands
+between that check and the write is not caught. The window is small. Not yet
+pinned by a test.
+
+### L — some operator actions write no audit row
+
+Toggling customs writes no `audit_log` row. Reclassify, Re-Extract (`redo_*`) and
+upload also write none. Pinned for the customs
+toggle by `test_known_limitation_customs_toggle_writes_no_audit_row`; the others
+are not yet pinned.
+
+### L — a manual Scan needs the Prefect server
+
+The manual Scan Input Folder action runs through Prefect, so it needs
+`AAMMerger-PrefectServer` running. The nightly sync has the same dependency. If the
+server is down the scan cannot run. Start `AAMMerger-PrefectServer` (see
+DELIVERY.md). Not yet pinned by a test.
+
+### L — the server accepts any Host header
+
+`server.allowed_hosts` defaults to `["*"]`, so the dashboard answers any host
+name. This is deliberate for a LAN server behind a changing IP. The cost is that
+DNS-rebinding reads are not blocked until real names are listed. Pinned by
+`test_known_limitation_allowed_hosts_defaults_to_any_host`.
+
+### L — the quantity parser accepts exponent and underscore forms
+
+The strict babel parse accepts `1e2` and `1_000`, read as 100 and 1000. A vendor
+printing a quantity in these forms gets a number, not a quarantine. Pinned by
+`test_known_limitation_sanitizer_accepts_exponent_and_underscore_forms`.
+
+### L — a customs append that fails waits for the next sync
+
+When the customs requirement is on for a set that is already merged, the packet
+must be rebuilt to include the CUSTOMS and SHIPPING documents. If the rebuild
+fails (for example the set's lock is busy, or the write fails), the set is flagged
+`customs_append_pending` and the packet on disk is left without those documents.
+The flag is set by the toggle, the upload and a reclassify that attaches customs
+or shipping documents. The set's badge reads **Customs append pending** and its
+detail page reads **Merged • customs not yet in packet**. The toggle response
+carries `append_pending` and a scrubbed `append_error`, and the page shows a
+warning that the packet was NOT rebuilt and will retry on the next sync. The nightly
+sync retries each flagged merged set under that set's lock. The flag clears when the
+append succeeds, or when the toggle is switched off. Until then the packet is out of
+date, and the badge is the only sign of it. Pinned by
+`test_customs_append_failure_is_persisted_and_retried_by_sync` and
+`test_badge_shows_when_append_pending` in `tests/test_mvp_blockers.py`.
 
 ---
 

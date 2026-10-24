@@ -72,6 +72,9 @@ What it does, in order:
 3. applies the database schema (`python scripts/migrate_db.py` — handles both a
    fresh database and the existing `create_all`-era database, which has no
    `alembic_version`; a bare `alembic upgrade head` fails on the latter);
+   after updating the code and before restarting services, always run
+   `uv run python scripts/migrate_db.py` (the current release drops `line_items.unit_price`;
+   without it every line-item insert fails);
    After upgrading an existing rig, run `python scripts/review_merged_sets.py` (read-only) to list
    already-merged packets that need manual review.
 4. adds the inbound firewall rule for TCP 8000 (`-OpenFirewall`);
@@ -86,6 +89,18 @@ What it does, in order:
 8. performs an HTTP health check.
 
 It prints the dashboard URL using this machine's LAN IP. Services start on boot.
+
+> **Licence check: PyMuPDF (2026-10-24).** `pymupdf==1.28.2` is dual-licensed
+> **GNU AGPL-3.0 or an Artifex commercial licence** (installed package metadata
+> and PyPI: "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial
+> License"). This product is proprietary (`pyproject.toml`: "Proprietary -
+> internal CA tool") and the dashboard is served to the office over the LAN,
+> so AGPL section 13 (network use) is the clause that matters. Before
+> hand-over the client must choose one, in writing: (a) buy the Artifex
+> commercial licence, (b) replace the rasteriser (`extraction._rasterize_pdf`)
+> with a permissively licensed renderer, or (c) accept AGPL and offer the
+> corresponding source to the dashboard's users. Nothing in the installer
+> resolves this; it is a commercial/legal decision, not a code default.
 
 **Re-running the installer is safe** — it updates the environment, services and
 scheduled sync without touching data. That is also the upgrade path (section 8).
@@ -123,6 +138,11 @@ scheduled sync without touching data. That is also the upgrade path (section 8).
    that new documents from yesterday have been read; if the inbox is waiting
    and nothing moved overnight, check the three services
    (`manage_services.ps1 -Action status`) before anything else.
+9. **VLM cost and schedule.** Re-run `scripts/deploy_prefect.py` after any
+   change to `vlm:` in `config.yaml` (the deployment captures the project
+   root, not the settings). Check the OpenRouter key's quota/limit, then run
+   one midnight sync on the target machine and confirm the run finishes and
+   the key is billed as expected before hand-over.
 
 ---
 
