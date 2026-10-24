@@ -857,6 +857,15 @@ shown as a failed document, like any unreadable file. A combined packet over the
 therefore never split. Pinned by
 `test_page_cap_refuses_before_a_request_is_built`.
 
+### L — a permanently unreadable input file is retried every night
+
+A read or stat error on an input file (`PermissionError`, a broken share handle) leaves the
+file where it is and is counted as a sync error; the next sync tries again. This protects a
+good file that antivirus or a backup tool held for a moment. A file that stays unreadable is
+therefore never moved to quarantine and has no Document row: its only trace is the error
+count and the log. Content problems (not a PDF, over the size cap, incomplete) are still
+quarantined at once. Pinned by `test_known_limitation_unreadable_input_file_stays_for_next_sync`.
+
 ---
 
 ## 9. Non-goals

@@ -92,6 +92,10 @@ def parse_price_scaled(raw_price_str: str | None) -> int:
         return 0
     if not val.is_finite():
         return 0
+    # A misread long number (barcode, concatenated column) must not overflow the
+    # SQLite INTEGER column and block the document; prices are documentation only.
+    if abs(val) > Decimal("1e12"):
+        return 0
     # Keep the column's x1000 contract; half-up is the least surprising rule
     # for a price with more precision than the column can hold.
     return int((val * 1000).quantize(Decimal("1"), rounding=ROUND_HALF_UP))

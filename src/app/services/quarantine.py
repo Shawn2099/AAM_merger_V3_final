@@ -311,22 +311,29 @@ def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
 
     folder = Path(cfg.paths.quarantine_folder) / "_documents" / name.replace(".pdf", "")
     folder.mkdir(parents=True, exist_ok=True)
-    if stored.exists():
-        shutil.copy(str(stored), str(folder / name))
+    input_copy = Path(cfg.paths.input_folder) / original if original else None
+    try:
+        if stored.exists():
+            shutil.copy(str(stored), str(folder / name))
+    except OSError:
+        logger.warning("Could not copy stored file %s", stored, exc_info=True)
     # Remove the input copy here, not only in the sync caller: the report below
     # tells the operator it was removed, and `extraction._handle_combined`
     # calls this directly. Match on content, so a same-named unrelated file is
-    # never swept away.
-    if original:
-        input_copy = Path(cfg.paths.input_folder) / original
-        if input_copy.is_file():
-            try:
-                import hashlib
+    # never swept away. The input copy is never removed unless a copy of it now
+    # exists in the quarantine folder (the stored file may be missing).
+    if input_copy is not None and input_copy.is_file():
+        try:
+            import hashlib
 
-                if hashlib.sha256(input_copy.read_bytes()).hexdigest() == sha:
+            data = input_copy.read_bytes()
+            if hashlib.sha256(data).hexdigest() == sha:
+                if not (folder / name).is_file():
+                    (folder / name).write_bytes(data)
+                if (folder / name).is_file():
                     input_copy.unlink(missing_ok=True)
-            except OSError:
-                logger.warning("Could not remove input copy %s", input_copy, exc_info=True)
+        except OSError:
+            logger.warning("Could not remove input copy %s", input_copy, exc_info=True)
     (folder / "QUARANTINE.txt").write_text(
         "\n".join(
             [

@@ -220,7 +220,8 @@ def test_helper_classifies_leaves_and_wrapped_causes():
     # content / unknown
     assert not _is_infrastructure_error(status_err(400))
     assert _is_infrastructure_error(status_err(404))  # retired model id: config fault
-    assert not _is_infrastructure_error(FileNotFoundError("stored_path not found"))
+    # R-10: a missing stored copy is a storage fault, not a bad document
+    assert _is_infrastructure_error(FileNotFoundError("stored_path not found"))
     assert not _is_infrastructure_error(RuntimeError("something else broke"))
     assert not _is_infrastructure_error(ValueError("bad"))
     assert not _is_infrastructure_error(None)

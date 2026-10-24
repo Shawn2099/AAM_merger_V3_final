@@ -74,13 +74,17 @@ def _poll_stability(files, cfg) -> dict:
     interval = cfg.ingestion.stability_poll_interval_seconds
     count = cfg.ingestion.stability_poll_count
     workers = max(1, min(_STABILITY_POLL_WORKERS, len(files)))
+
+    def _safe_stable(f) -> bool:
+        # One unstat-able file must not abort the sync: skip it this run.
+        try:
+            return is_file_stable(f, interval=interval, count=count)
+        except OSError:
+            logger.warning("Stability check failed for %s; skipping this run", f, exc_info=True)
+            return False
+
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        results = list(
-            pool.map(
-                lambda f: (f, is_file_stable(f, interval=interval, count=count)),
-                files,
-            )
-        )
+        results = list(pool.map(lambda f: (f, _safe_stable(f)), files))
     return dict(results)
 
 
@@ -148,14 +152,8 @@ def _quarantine_broken_document(
     except Exception:
         logger.warning("Could not quarantine broken document %s", doc_id, exc_info=True)
 
-    # The input copy is what makes the next run re-encounter this file.
-    if input_file is not None:
-        try:
-            Path(input_file).unlink(missing_ok=True)
-        except Exception:
-            logger.warning(
-                "Could not remove quarantined file from input: %s", input_file, exc_info=True
-            )
+    # The input copy is removed inside quarantine_document, and only once a copy
+    # exists in the quarantine folder; never unlink it again here.
 
     # Quarantine the set too, when there is one. A set containing a document
     # that cannot be read cannot be confirmed, so it must not look like it is

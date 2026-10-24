@@ -238,8 +238,9 @@ def test_ingestion_accepts_a_real_pdf(cfg):
     assert Path(doc.stored_path).exists()
 
 
-def test_an_unreadable_input_file_is_moved_to_quarantine(cfg, monkeypatch):
-    """P1-9: a PermissionError before any row exists must not retry forever."""
+def test_known_limitation_unreadable_input_file_stays_for_next_sync(cfg, monkeypatch):
+    """R-05: a read error is treated as transient. The file stays in input for the next
+    sync (no quarantine, no row); a permanently unreadable file is retried every night."""
     from app.services import ingestion
 
     src = Path(cfg.paths.input_folder) / "locked.pdf"
@@ -257,10 +258,8 @@ def test_an_unreadable_input_file_is_moved_to_quarantine(cfg, monkeypatch):
     with pytest.raises(PermissionError):
         ingestion.ingest_file(src, cfg)
 
-    assert not src.exists(), "the unreadable file must leave the input folder"
-    reasons = list((Path(cfg.paths.quarantine_folder) / "_documents").glob("*.reason.txt"))
-    assert len(reasons) == 1
-    assert "PermissionError" in reasons[0].read_text(encoding="utf-8")
+    assert src.exists(), "a transient read error must leave the file for the next sync"
+    assert not list((Path(cfg.paths.quarantine_folder) / "_documents").glob("*.reason.txt"))
 
 
 # --------------------------------------------------- P2-25 config-derived attempt cap

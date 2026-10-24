@@ -835,6 +835,10 @@ def _is_infrastructure_leaf(exc: BaseException) -> bool:
         return True
     if isinstance(exc, (TimeoutError, ConnectionError)):
         return True
+    # A missing stored copy is a storage fault, not a verdict on the document:
+    # leave it pending so nothing is condemned (and no bytes are lost).
+    if isinstance(exc, FileNotFoundError) and "stored_path not found" in str(exc):
+        return True
     # Fail-closed config raised by _call_vlm (missing API key or vlm.model).
     return isinstance(exc, RuntimeError) and "not configured" in str(exc)
 
@@ -966,6 +970,7 @@ def extract_document(doc_id: int, cfg) -> Document:
             return doc
 
         doc.extraction_attempt_count = (doc.extraction_attempt_count or 0) + 1
+        attempt_no = doc.extraction_attempt_count
         try:
             # Multi-page PDFs (FR-6.1, amended: rasterised): every page is rendered to an
             # image and all pages go to Luna in ONE request, in real page order.
@@ -1024,11 +1029,19 @@ def extract_document(doc_id: int, cfg) -> Document:
             s.refresh(doc)
             return doc
         except Exception as e:
+            # The session may be in a failed-flush state (e.g. a DB error at
+            # flush); roll back and re-fetch the row so the verdict below can
+            # always be committed and counted.
+            s.rollback()
+            refetched = s.get(Document, doc_id)
+            if refetched is None:
+                raise e
+            doc = refetched
             if _is_infrastructure_error(e):
                 # A provider or network fault says nothing about the document.
                 # Refund the attempt and leave it pending, so Prefect's retry
                 # and the next sync claim it again instead of condemning it.
-                doc.extraction_attempt_count = max(0, (doc.extraction_attempt_count or 1) - 1)
+                doc.extraction_attempt_count = max(0, attempt_no - 1)
                 doc.extraction_status = ExtractionStatus.pending
                 s.commit()
                 s.refresh(doc)
@@ -1040,6 +1053,7 @@ def extract_document(doc_id: int, cfg) -> Document:
                     type(e).__name__,
                 )
                 raise e
+            doc.extraction_attempt_count = attempt_no
             doc.extraction_status = ExtractionStatus.failed
             s.commit()
             s.refresh(doc)

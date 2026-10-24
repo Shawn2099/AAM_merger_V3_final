@@ -124,8 +124,13 @@ def ingest_file(src: Path, cfg: AppConfig) -> Document:
     # patch one symbol, as tests/test_dashboard.py already does.
     from app.core import limits
 
+    # A transient OSError (antivirus/backup holding the file, a flaky share) says
+    # nothing about the content: leave the file in place for the next sync.
     try:
         size = src.stat().st_size
+    except OSError:
+        logger.warning("Could not stat %s; leaving it for the next sync", src, exc_info=True)
+        raise
     except Exception as e:
         _quarantine_unreadable(src, cfg, e)
         raise
@@ -137,6 +142,9 @@ def ingest_file(src: Path, cfg: AppConfig) -> Document:
         )
     try:
         data = src.read_bytes()
+    except OSError:
+        logger.warning("Could not read %s; leaving it for the next sync", src, exc_info=True)
+        raise
     except Exception as e:
         _quarantine_unreadable(src, cfg, e)
         raise
