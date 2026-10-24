@@ -28,6 +28,9 @@
     Prefect API URL for the web app, worker and CLI. Defaults to
     http://127.0.0.1:4200/api when -WithPrefectServer is used. Point it at an
     external Prefect server or Prefect Cloud instead if you have one.
+.PARAMETER AllowAnyHost
+    Passed to the service installer: lets it continue when config.yaml
+    server.allowed_hosts is missing or ["*"]. Lab machines only.
 .PARAMETER SkipServices
     Switch to configure files, database, and schedule without installing NSSM services.
 
@@ -42,6 +45,7 @@ param(
     [switch]$ScheduleBackup,
     [switch]$WithPrefectServer,
     [string]$PrefectApiUrl = "",
+    [switch]$AllowAnyHost,
     [switch]$SkipServices
 )
 
@@ -274,7 +278,13 @@ if (-not $SkipServices) {
         # passed explicitly: the worker and the CLI must talk to the same API.
         $installParams["PrefectApiUrl"] = $prefectApi
     }
+    if ($AllowAnyHost) { $installParams["AllowAnyHost"] = $true }
     & $installScript @installParams
+    # An exit inside a script called with & never throws, so check it here.
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Service install refused/failed (exit $LASTEXITCODE)."
+        exit $LASTEXITCODE
+    }
 } else {
     Write-Host "[6/8] Skipping NSSM service installation (-SkipServices specified)." -ForegroundColor Gray
 }

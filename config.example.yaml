@@ -21,9 +21,10 @@ server:
   # Read only by scripts/reset_data.ps1 (to check the port is free). Keep it equal to the
   # installer's -Port, or the reset checks the wrong port.
   port: 8000
-  # Hosts accepted in the HTTP Host header. ["*"] accepts any host (right for a
-  # LAN deployment reached by a changing IP). A DNS name that never changes is
-  # better listed: it closes DNS-rebinding reads, e.g. ["aam.local", "10.0.0.5"].
+  # Hosts accepted in the HTTP Host header. ["*"] accepts any host and is only a
+  # development default: scripts/install_nssm_services.ps1 REFUSES it unless run with
+  # -AllowAnyHost (lab machines). On the office PC list the real name and static IP,
+  # e.g. ["aam-server", "10.0.0.5"]; that also closes DNS-rebinding reads and writes.
   allowed_hosts: ["*"]
 
 vlm:

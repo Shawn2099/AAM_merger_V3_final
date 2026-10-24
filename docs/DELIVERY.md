@@ -40,6 +40,12 @@ are `./data/...`, relative to the project folder — that is correct for a
 single-PC install. Edit only if you are moving the data to another local disk,
 and keep the SQLite file on a local drive.
 
+**Pin the host names before installing.** In `config.yaml` set `server.allowed_hosts` to the
+server's name and static IP, for example `["aam-server", "10.0.0.5"]`. The shipped default `["*"]`
+accepts any Host header, which leaves the dashboard open to a malicious web page reaching the LAN
+server from a user's browser. The installer refuses to finish while it is `["*"]` (see the installer
+switches in section 3). After changing it later, restart `AAMMerger-Web` and re-check from another PC.
+
 If the project folder moves or is renamed, rerun `scripts/deploy_prefect.py`:
 the Prefect deployment's paths are fixed at deploy time.
 
@@ -102,6 +108,25 @@ It prints the dashboard URL using this machine's LAN IP. Services start on boot.
 > corresponding source to the dashboard's users. Nothing in the installer
 > resolves this; it is a commercial/legal decision, not a code default.
 
+**Installer switches** (`scripts\install_nssm_services.ps1`; `setup_test_rig.ps1` calls it and passes
+`-AllowAnyHost` through):
+
+- The installer **refuses to finish** (exit 1, before any service is created) when `server.allowed_hosts`
+  in `config.yaml` is missing or contains `"*"`. `setup_test_rig.ps1` stops with the same exit code.
+  `-AllowAnyHost` downgrades the refusal to a loud warning; use it on a lab machine only.
+- `-DryRun` prints every action it would take (each `nssm` call, the dependency step) and changes
+  nothing; it needs no Administrator rights and no `nssm.exe`. The `allowed_hosts` check in a dry run is a
+  plain read of the YAML (no folders are created). A real install validates the whole config with the
+  application's own loader. Run it first on the target:
+  `.\scripts\install_nssm_services.ps1 -WithPrefectServer -DryRun`.
+- `-ConfigPath` exists only to validate or dry-run another config file. A real install refuses it unless it
+  is `<project>\config.yaml`, because the deployment script and the backup task read that file.
+- With `-WithPrefectServer`, `AAMMerger-Web` and `AAMMerger-Worker` declare `DependOnService
+  AAMMerger-PrefectServer`: Windows starts Prefect first and stops web first. Consequences: the web
+  service does not start at boot if the Prefect server fails to start, and restarting the Prefect service
+  by hand needs `Restart-Service -Force` (it stops the dependents); `manage_services.ps1 -Action restart`
+  handles the order for you.
+
 **Re-running the installer is safe** — it updates the environment, services and
 scheduled sync without touching data. That is also the upgrade path (section 8).
 
@@ -122,23 +147,18 @@ scheduled sync without touching data. That is also the upgrade path (section 8).
    packet appears in `data\output`.
 4. `.\scripts\manage_services.ps1 -Action status` shows all three services
    `Running`.
-5. `.\scripts\backup_db.ps1 -RetentionDays 0` creates a file in
+5. `.\scripts\backup_db.ps1 -RetentionDays 0 -BackupDir .\data\development\snapshots\db` creates a file in
    `data\development\snapshots\db`, and the `AAMMerger-DevelopmentSnapshot`
    task has copied logs/files into `data\development\snapshots`.
-6. **Pin the host names.** In `config.yaml` set `server.allowed_hosts` to the
-   server's name and static IP, for example `["aam-server", "10.0.0.5"]`. The
-   shipped default `["*"]` accepts any Host header, which leaves the dashboard
-   open to a malicious web page reaching the LAN server from a user's browser.
-   Restart `AAMMerger-Web`, then re-check step 2 from another PC.
-7. **Confirm the schedule zone.** `prefect.schedule_timezone` must be the
+6. **Confirm the schedule zone.** `prefect.schedule_timezone` must be the
    office's IANA zone (default `Asia/Kolkata`); re-run the installer if it
    changed.
-8. **Hand over the daily check.** Nothing alerts anyone if the midnight sync
+7. **Hand over the daily check.** Nothing alerts anyone if the midnight sync
    does not run. Every morning the operator opens the dashboard and confirms
    that new documents from yesterday have been read; if the inbox is waiting
    and nothing moved overnight, check the three services
    (`manage_services.ps1 -Action status`) before anything else.
-9. **VLM cost and schedule.** Re-run `scripts/deploy_prefect.py` after any
+8. **VLM cost and schedule.** Re-run `scripts/deploy_prefect.py` after any
    change to `vlm:` in `config.yaml` (the deployment captures the project
    root, not the settings). Check the OpenRouter key's quota/limit, then run
    one midnight sync on the target machine and confirm the run finishes and
@@ -187,10 +207,38 @@ fine, pointing the app at a UNC path is not required and adds failure modes.
 - **Manual scan** is the same button users press: it is safe to run at any time;
   a second request while one is running is refused with 409.
 
-Restore a backup: stop the services, replace `data\aam_merger.db` with a file
-from `data\development\snapshots\db`, delete any `-wal`/`-shm` beside it, start
-the services. Keep `data\stored`, `data\output`, `data\combined` and
-`data\quarantine` with the restored DB — the rows point at those files.
+### Restore drill (safe: never touches the live database)
+
+Do this once before hand-over and after any change to the backup task.
+
+1. Take a fresh backup into the snapshot folder:
+   `.\scripts\backup_db.ps1 -RetentionDays 0 -BackupDir .\data\development\snapshots\db`
+   (without `-BackupDir` the file lands in `data\backup`). Note the new file name.
+2. Verify it against the live database. Both files are opened read-only:
+   `.\scripts\verify_backup.ps1 -Source .\config.yaml -Backup <that file> -AllowSourceNewer`
+   Drop `-AllowSourceNewer` when nothing has run since the backup; counts must then be equal. It compares
+   the row counts of `documents`, `line_items`, `po_sets`, `audit_log` and the SHA-256 of up to 3 stored
+   PDFs named in the backup (the newest and the oldest rows). Expect a PASS table and exit code 0; any
+   FAIL exits non-zero.
+3. Rehearse opening it: copy the backup to a scratch folder (for example `C:\Temp\drill`) and run
+   `.\scripts\verify_backup.ps1 -Source .\config.yaml -Backup C:\Temp\drill\<file>.db` against that copy.
+   Never copy anything over `data\aam_merger.db` as a drill.
+
+### Real restore (only after data loss or a corrupt database)
+
+1. `.\scripts\manage_services.ps1 -Action stop`, then `-Action status`: all three services must show
+   `Stopped`, and nothing else (a SQLite browser, a script) may have the database open.
+2. MOVE, do not delete, `data\aam_merger.db`, `aam_merger.db-wal` and `aam_merger.db-shm` together into a
+   dated folder such as `data\restore_2026-10-25\`. After an unclean stop (power loss, NSSM kill) the
+   `-wal` file holds committed rows that are not yet in the main file.
+3. Copy the chosen backup to `data\aam_merger.db`, then `.\scripts\manage_services.ps1 -Action start`.
+4. Open the dashboard and confirm the counts and one merged packet. Keep `data\stored`, `data\output`,
+   `data\combined` and `data\quarantine`: the restored rows point at those files.
+
+Documents ingested after the backup was taken lose their database rows, and their copies in the input
+folder are already gone (the sync moves them to `stored`), so re-submit those PDFs from their source.
+Power loss alone is normally recovered by SQLite from the `-wal` file on the next start; restore only if
+the dashboard then shows database errors.
 
 ---
 
@@ -225,7 +273,7 @@ git pull
 .\scripts\setup_test_rig.ps1 -OpenFirewall -ScheduleBackup -WithPrefectServer
 ```
 
-The installer re-applies migrations and re-registers the deployment. If you
+Set `server.allowed_hosts` first (section 2), or the installer refuses. The installer re-applies migrations and re-registers the deployment. If you
 skipped `git pull` because the client has no git, copy the new files over and
 run the same command.
 
@@ -276,7 +324,8 @@ Two browser-side hardening checks exist and are worth keeping on:
 - A state-changing request (`POST`/`PUT`/`PATCH`/`DELETE`) whose `Origin` or
   `Referer` names a different host than the request is refused with `403`.
   Requests that send neither header (curl, integrations) still work.
-- `server.allowed_hosts` (default `["*"]`, which accepts any host) can list the
+- `server.allowed_hosts` (shipped as `["*"]`, which accepts any host; the installer refuses that unless
+  `-AllowAnyHost`) must list the
   host's real names/IPs; when it does, an HTTP `Host` header that is not listed
   is refused. Set it when the host address is stable — it closes DNS-rebinding
   reads AND writes (Force Merge, archive, upload) that the no-auth design would otherwise allow.

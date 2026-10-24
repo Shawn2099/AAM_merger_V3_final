@@ -115,6 +115,7 @@ Spec: `docs/SPEC_CUSTOMS_REPLACE.md` (rev 2, Opus-approved with changes, all app
 - Acceptance: a bad value never leaves the app unable to start; every edit audited; round-trip test (edit, restart, value kept).
 
 ### WS4. Windows installation and operations (DeepSeek drafts scripts and checks; Claude reviews; user runs on the target)
+> **BUILT 2026-10-25** (Sonnet worker, Opus review with 9 required fixes applied): web and worker depend on the Prefect server, installer refuses `["*"]` unless `-AllowAnyHost`, `-DryRun`, `verify_backup.ps1`, restore drill and real-restore sections in DELIVERY, 21 script tests. Real NSSM behaviour is a WS9 check.
 - Make the web service start after the Prefect service (NSSM `DependOnService`), in `scripts/*.ps1`.
 - Make step 6 of `docs/DELIVERY.md` enforceable: the install script refuses to finish without `server.allowed_hosts` set to the PC's real name/address.
 - Backup task, restore drill (write the steps and a verification script that compares row counts and a sample file hash), power-loss recovery notes.
@@ -149,6 +150,13 @@ All with the canned VLM, no network:
 3. One midnight Prefect run observed.
 4. **Real-corpus run on the NEW database** (paid provider, user go-ahead): compare results with the earlier real run explained in HANDOFF (24 pending sets are known causes; requeue dry-run predicted sets 39, 40, 42, 48, 50 would merge).
 5. Backup, restore drill, reboot test.
+6. Windows service checks (WS4 scripts were built and parse-tested but never run against a real NSSM; Opus listed what only the target PC can prove):
+   - `nssm.exe version` is 2.24 or later; `nssm get AAMMerger-Web DependOnService` and the same for the worker list `AAMMerger-PrefectServer`; `sc qc AAMMerger-Web` shows DEPENDENCIES.
+   - After a reboot the Prefect server starts before web and worker. NSSM reports Running before port 4200 listens, so a few worker restarts in `nssm-worker-stderr.log` are expected.
+   - Re-running the installer over existing services ends without a "marked for deletion" error (close services.msc first); `manage_services.ps1 -Action stop/start/restart` works.
+   - The installer refuses `allowed_hosts: ["*"]` without `-AllowAnyHost` and creates no service (`Get-Service AAMMerger-*` unchanged); `-DryRun` as a non-admin exits 0.
+   - A real backup, then `verify_backup.ps1` exits 0 with the services running (use `-AllowSourceNewer`); a restore rehearsal into a scratch folder only, then the real restore section of DELIVERY once.
+   - Customs: one full run of both scenarios in `docs/CUSTOMS_OPERATIONS.md` including Remove and replace.
 - Acceptance: nothing merged that a human would not sign; every non-merged set has a visible reason and an action.
 
 ## 5. Gates
