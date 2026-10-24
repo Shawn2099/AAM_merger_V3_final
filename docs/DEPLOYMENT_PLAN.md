@@ -19,14 +19,14 @@ Rules for every packet:
 2. The worker leaves changes uncommitted. **Claude reviews the diff, re-runs the suite, then commits by naming files.**
 3. Anything touching reconciliation, grouping, merge, migrations or the Prefect deployment gets an **Opus review before commit** (CLAUDE.md).
 4. Worker output is never trusted on its own word: the reviewer re-runs the named commands and reads the diff. A test made green by weakening it is rejected.
-5. No real corpus, no paid provider, no `data/` folder, no `config.yaml` in any packet. The one real run is WS9, last, on a NEW database, with the user's go-ahead.
+5. No real corpus, no paid provider, no `data/` folder (except the throwaway harness `data/ui_test`), no `config.yaml` in any packet. The one real run is WS9, last, on a NEW database, with the user's go-ahead.
 6. Standing user rules still apply: precision over recall (doubt means hold, not merge); do not delete anything without asking; no force-push, never push `main`; keep this file and `HANDOFF_PLAN.md` updated.
 
 ## 1. Where we are (2026-10-25)
 
-- Branch `fix/mvp-high-priority`, last pushed commit `736fdc6` (1-minute poller). Review fixes (3 batches) are in the working tree, **uncommitted**; full suite: 6347 passed, 8 failed before the last fixes; the 8 are fixed in targeted runs and a confirming full run is the first task of WS0.
+- Branch `fix/mvp-high-priority`. The Opus review fixes are committed and pushed (`905d974`; full suite 6355 passed, ruff and ty clean). WS0 is DONE. The worker is on WS1b in the OpenCode desktop app.
 - Done: pipeline, fallbacks, guards, quarantine report, subfolder reading, 400 circuit breaker, poller + queue + settle + nightly switch, UI test harness (20 reference tests), Opus review of the whole branch and its fixes.
-- **Readiness verdict:** ready for a *supervised pilot* on the target PC once WS0 and WS4 are done. **Not ready for unattended production**: WS2 (misread hold), WS3 (settings page, if the user still wants it before go-live), WS5 (hardening) and WS9 (real run on the target) are open. See section 5 for the gates.
+- **Readiness verdict:** ready for a *supervised pilot* on the target PC once WS1b, WS1 (triaged) and WS4 are done and Q7 is answered. **Not ready for unattended production**: WS2 (misread hold), WS3 (settings page, if the user still wants it before go-live), WS5 (hardening) and WS9 (real run on the target) are open. See section 5 for the gates.
 
 ## 2. Decision log (every decision so far; newest facts win; "Where" says which doc holds the detail)
 
@@ -50,6 +50,7 @@ Rules for every packet:
 | D10 | Per-PO lock timeout default 900 s; an older shorter value is raised with a warning, 0/tiny refused | 2026-10-24 | built | config.py |
 | D11 | Config must become fully editable from the UI; auto-run timings and folder polling to be finalised; then production deployment decisions and full testing | 2026-10-24 | **open, needs the answers in section 3 (WS3)** | HANDOFF 6b |
 | D12 | **Operating model: Opus as architect/reviewer, DeepSeek via OpenCode as worker for token-heavy work; keep this decision log; plan before deployment so other sessions/tools can implement and test** | 2026-10-25 | this file | section 0 |
+| D15 | Opus review of the plans (2026-10-25): WS2 spec rejected and rewritten (rev 2); PF-11 now persists run results in `last_sync.json` because the nightly run is another process; packets that share files run serially; PF brief got binding corrections | 2026-10-25 | applied | specs, brief |
 | D14 | Pre-deploy UI fixes PF-01..PF-10 approved (WS1b); archive justification optional; Re-Extract state machine unchanged; add PF-11 system-status pill | 2026-10-25 | approved, in progress | WS1b |
 | D13 | Not fixed on purpose, documented: Origin guard compares host names only; upload has no size middleware; unused config keys; per-minute re-hash of stuck input files; split-parent cleanup by name; no installer DependOnService for Prefect | 2026-10-24 | open (WS5) | PRODUCT 8 "operating limits" |
 
@@ -63,10 +64,12 @@ Rules for every packet:
 | Q4 | Is the settings page required for the FIRST go-live, or can the pilot run with `config.yaml` edited by IT? | Pilot first with `config.yaml`; settings page after the pilot | order of WS3 |
 | Q5 | pymupdf AGPL: accept (internal use only, never distributed), replace the rasteriser, or buy a licence? | Accept for internal use, record the decision, revisit if the software is ever shipped to others | WS8 |
 | Q6 | Who is the on-site contact for the Windows Server click-through and the first midnight run? | needed | WS9 |
+| Q7 | May a SUPERVISED pilot run before WS2 exists? Until then a one-digit PO misread can still produce a wrong merge (precision rule P2). | Yes, only with the operator checking every merged packet's page count for the first week; no unattended run | G2 |
+| Q8 | After "Move to another PO" the target has two PO documents and the single-PO guard holds it. Accept (operator Force Merges) or exempt a hand-placed PO page with zero line items? | Exempt (spec WS2 option b) | WS2 Move action |
 
 ## 4. Work packets
 
-Order: WS0 first. WS1, WS2, WS5, WS6 can run in parallel in separate OpenCode sessions (disjoint allowed paths, listed). Each packet ends with a Claude review.
+Order (Opus review 2026-10-25): packets that share files run SERIALLY: **WS1b -> PF-11 -> WS2 -> WS1** (they all touch `scripts/ui_test_env.py`, `tests/ui/test_ui_set_detail.py`, `templates/po_set_detail.html`, `dashboard.py` or `poller.py`). WS6 (new test files only) may run in parallel with any of them. WS5 starts after WS1b and each item names its own allowed paths. Each packet ends with a Claude review; reconciliation hunks are written by Claude, not the worker.
 
 ### WS0. Land the review fixes (Claude, now)
 - Run the full suite once more (`uv run python -m pytest -q -W ignore -o addopts= -p no:cacheprovider`), ruff, ruff format, `ty check src`.
@@ -76,7 +79,7 @@ Order: WS0 first. WS1, WS2, WS5, WS6 can run in parallel in separate OpenCode se
 ### WS1. Complete the UI test suite (DeepSeek, then Claude review)
 - Brief: `docs/OPENCODE_UI_TEST_BRIEF.md` (already written, rules included). Work list: `docs/UI_TEST_PLAN.md` (~45 TODO cases).
 - Add cases for the two newest operator states: `settling` (set held during the settle window) and `placed_by_number_only` ("Confirm it belongs here" button, `btn-confirm-placement`; needs a seeded scenario in `scripts/ui_test_env.py`).
-- Allowed: `tests/ui/**`, `scripts/ui_test_env.py`. Forbidden: `src/`, `templates/`, `alembic/`, configs, other tests.
+- Allowed: `tests/ui/**`, `scripts/ui_test_env.py`, and `data-testid`-only edits in `templates/` (the hook `btn-confirm-placement` exists already; check before asking). Forbidden: `src/`, `alembic/`, configs, other tests. Runs AFTER WS1b, PF-11 and WS2 so the cases are written once against the final pages.
 - Acceptance: all cases implemented or marked `xfail(strict)` with "SUSPECTED PRODUCT BUG UI-xx"; whole `tests/ui` suite green twice in a row and in reverse file order; report lists findings. Claude triages each finding into fix / won't-fix / test error.
 
 ### WS1b. Pre-deploy UI fixes from the DeepSeek exploration (reviewed 2026-10-25, APPROVED)
@@ -89,7 +92,7 @@ Order: WS0 first. WS1, WS2, WS5, WS6 can run in parallel in separate OpenCode se
 > Specs written 2026-10-25: docs/SPEC_WS2_MISREAD_HOLD.md (this packet) and docs/SPEC_PF11_SYSTEM_STATUS.md (PF-11). Both are ready for the worker once approved.
 
 1. **Claude writes the design spec** (HANDOFF 6c "D1 design notes"): the exact rule (a PO-only set one digit away from a set that has DN/SI), its false-positive risk, the new reason `possible_po_misread`, the three operator actions (move a document to another PO, "not a misread" flag, Force Merge), audit rows, and the tests that must exist. No code before the spec is approved.
-2. **DeepSeek implements** in `src/app/services/reconciliation.py` (the hold), `src/app/api/routes/po_sets.py` (actions), `templates/po_set_detail.html`, `tests/test_misread_hold.py`. The "move a document to another PO" action is new: no UI path moves an attached document today.
+2. **Claude writes the reconciliation hunk; DeepSeek implements** the routes (`po_sets.py`), `models.py`, the migration (`alembic/versions/`, `scripts/migrate_db.py` marker), `templates/po_set_detail.html`, the seed scenario and `tests/test_misread_hold.py`. Spec rev 2: `docs/SPEC_WS2_MISREAD_HOLD.md`; the Move action waits for owner question Q8. The "move a document to another PO" action is new: no UI path moves an attached document today.
 3. **Claude reviews as Opus** (reconciliation change). Acceptance: the false-positive cases in the spec each have a test (two real POs that differ by one digit and both complete must still merge); `make business-logic` passes; hold is visible on the dashboard and set page.
 
 ### WS3. Settings page (D11): build only after Q1 to Q4 are answered
@@ -139,7 +142,7 @@ All with the canned VLM, no network:
 | Gate | Needs | Allows |
 |---|---|---|
 | **G1 Committed** | WS0 | Anyone can pull the branch and run the suite |
-| **G2 Pilot-ready (supervised)** | G1, WS1 results triaged, WS4 | Install on the target PC, operator watches, `config.yaml` edited by IT |
+| **G2 Pilot-ready (supervised)** | G1, WS1b done (the UI harness no longer spends real API money), WS1 triaged, WS4, Q7 answered | Install on the target PC, operator watches, `config.yaml` edited by IT |
 | **G3 Production-ready (unattended)** | G2, WS2, WS5, WS6, WS7, Q5, and WS3 if Q4 says it is required | Leave it running; the nightly sweep and poller run without a watcher |
 | **G4 Accepted** | WS9 | Handover signed |
 

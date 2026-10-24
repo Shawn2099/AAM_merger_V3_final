@@ -19,10 +19,21 @@ pass/fail; you do not commit.
 - Never weaken or delete an existing test to get green. If an existing test pins the behaviour you are changing, stop and report it.
 - No network, no API keys, no real data (`data/aam_merger.db`, `data/input*`, `config.yaml`, `.env` are off limits; PF-01 must make that true for the harness).
 - Do not use `git` except `git status`/`git diff`. Do not commit.
-- File edits: files use CRLF line endings; keep them. Python escapes in heredocs get mangled; write files with your editor tool.
+- Line endings: do not change them (the repo is LF via `.gitattributes`; some working-tree files may show CRLF, leave each file as you found it). Python escapes in heredocs get mangled; write files with your editor tool.
 - Module names under `tests/` must be unique (`tests/ui/test_ui_<area>.py`).
 - Windows PowerShell; repo root; `uv run ...`. UI tests: `$env:RUN_E2E="1"; uv run python -m pytest tests/ui -q -o addopts= -p no:cacheprovider -W ignore`.
 
 ## Done means (report all of it)
 - After each PF item: the targeted tests, then at the end the full suite (`uv run python -m pytest -q -W ignore -o addopts= -p no:cacheprovider`), `tests/ui` three times in a row, `uv run ruff check .`, `uv run ruff format --check .`, `uv run ty check src`. Paste the final summary lines.
 - A list of files changed per item, assumptions you made, and anything in the product that looks wrong (finding, not a fix).
+
+## Corrections from the Opus review of this plan (2026-10-25, binding; they override the plan text)
+If you already built an item differently, fix it to match.
+1. **PF-07 event:** in htmx 1.9.12 an `HX-Refresh` response reloads the page BEFORE `htmx:beforeSwap` fires. Use an `htmx:beforeOnLoad` listener. Read the message with `DOMParser` and `textContent`; never `innerHTML`/`x-html`. Persist a toast in `sessionStorage` only for actions that are followed by a reload, and restore only when `type` is one of `success`, `info`, `warning`, `error`.
+2. **PF-02 / S-16:** `quarantined_unmatched_vendor_line` is also used by S-04 on a session-scoped harness, so the S-16 test must use its OWN seeded scenario in `scripts/ui_test_env.py` (otherwise S-04 breaks under "x3 / reverse order"). Re-Extract with the default retry backoff [2, 5, 15] can take over a minute: set the harness backoff to 0 or give the test a long timeout. A failed extraction entry is `e.error || e.status !== 'valid'` (the route emits both shapes, `po_sets.py:496-505`). Only the last `else` branch of the Merge Now toast drops the server's `detail`/`reason` (`app.js:166-180`); fix that branch only. The merged toast must show the file NAME only, never `merged_output_path`.
+3. **PF-05:** `manual_status_change` audit rows have no "note" key and new shapes will appear later. For any unknown JSON shape use the action label as the summary; the page must never fail on a detail it cannot parse.
+4. **PF-09:** rename the button only. Leave the reclassify refusal text ("Delete (archive) the set", `dashboard.py` ~1482) alone; `tests/test_reclassify_scope.py:111` pins "Delete".
+5. **PF-03:** a non-integer set id stays a framework 422. Do NOT add a `po_set_id: str` guard.
+6. **PF-08:** restore focus only if `document.contains(trigger)` (the quarantine table is re-rendered every 3 s); handle Shift+Tab; skip disabled and hidden elements.
+7. Stale reference: dotenv loading is at `src/app/core/config.py:440-465`.
+8. The plan's "do not touch dirty files" rule is obsolete (see above); `po_set_detail.html` may be edited.

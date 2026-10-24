@@ -1,6 +1,6 @@
 # SPEC PF-11: operator-visible system status
 
-Status: **design for review, not built.** Author: Claude (architect). Builder: worker (DeepSeek). Reviewer: Claude.
+Status: **rev 2 (after Opus review 2026-10-25); not built.** Author: Claude (architect). Builder: worker (DeepSeek). Reviewer: Claude.
 
 Why: with the 1-minute poller (D5) nobody presses Scan any more. If the provider halts, the poller backs off for an hour, the
 lock is held by a hung sync, or every extraction fails, the dashboard looks idle and fine (finding F-16). The operator needs one
@@ -22,29 +22,41 @@ dashboard under the title. Pill states, first match wins:
 Never show server paths or exception text. Times are the PC's local time (use the app's existing time formatting helper).
 
 ## Data source (no DB change, no migration)
-- New in-memory dataclass `PollerStatus` on `SyncPoller` (`src/app/services/poller.py`): `last_tick_at`, `last_run_started_at`,
-  `last_run_finished_at`, `last_result` (the dict the sync returned: new/duplicate/rejected/errors/unstable counts, `vlm_halted`),
-  `backoff_until`, `queued_since`. Updated inside `tick()` and the run wrapper only; read through `SyncPoller.status()`, which
-  returns a plain dict copy under a small `threading.Lock`.
-- Manual and nightly runs also update `last_run_*`: record the result in a module-level `last_sync_result` holder set at the end of
-  the sync runner (the code that already builds the result dict). Poller and manual share it.
-- State is lost on restart (acceptable: after restart the pill says "Watching" with "No run since start"). Do not persist.
-- New read-only route `GET /status` (in `api/routes/sync.py`) returns `{state, label, detail, last_check, last_run}` built by ONE
-  pure function `build_status(poller_status, sync_running, cfg, now)` in `services/poller.py`, so it is unit-testable without HTTP.
-  `GET /sync/status` keeps its current contract (pinned by tests).
-- The pill is rendered by `base.html` and refreshed by polling `GET /status` every 10 s (reuse an existing poll if the page has
-  one; do not add a second timer on pages that already poll faster).
+Three facts decide the design: the midnight Prefect run is a SEPARATE PROCESS from the web service; the poller lives on
+`app.state.poller` and is `None` when polling is off (`main.py:242-243`); the poller's `_backoff_until` / `_queued_since` are
+`time.monotonic` values and cannot be shown as clock times.
+
+- **Run result is persisted as a file.** `_sync_flow_locked` (`flows/sync.py` ~867) writes `last_sync.json` (write to a temp file,
+  then `os.replace`) next to the sync-lock sidecar, with: `finished_at` (ISO, local tz), `started_at`, `trigger`
+  (`poller|manual|nightly`), `processed`, `extracted`, `errors`, `vlm_halted`, `unstable`. `/status` reads it. This makes nightly and
+  manual runs visible to the web process. A run that ended `skipped` (lock busy) must NOT overwrite it. Manual `_run_sync`
+  (`routes/sync.py:31`) discards the result today; publishing happens inside `_sync_flow_locked`, so it is covered.
+- **Running state** comes from the sync-lock sidecar (works across processes, `sync_lock.py:118,144-166`); the sidecar's start time
+  gives "running for N min". Do not derive it from `_queued_since` (reset every 120 s, `poller.py:199`).
+- **Poller state** (wall-clock `datetime` fields, NOT monotonic): `halted_until`, `last_tick_at`, `last_error_at`. Add them to
+  `SyncPoller` next to the monotonic ones and expose `SyncPoller.status()` returning a plain dict copy under a small lock.
+  A poller sync that raises (300 s backoff, `poller.py:211`) shows as "Needs attention".
+- Time format: `dt.astimezone().strftime("%H:%M")` (same as `reconciliation.py:952`). There is no shared helper; do not invent one.
+- **"All failed"** means `processed > 0 and extracted == 0 and errors > 0`.
+- `GET /status` takes `request: Request`; `request.app.state.poller` may be `None`; polling on/off is read from the CURRENT config
+  (`schedule.poll_enabled`), not from the poller. It is a read-only route built on ONE pure function
+  `build_status(poller_status | None, sync_running, last_sync | None, cfg, now)` in `services/poller.py`, unit-testable without HTTP.
+  `GET /sync/status` keeps its contract.
+- **Timer:** one `setInterval(10000)` in `app.js` on every page that has the pill. The existing 5 s `/sync/status` poll runs only
+  when `#sync-btn` exists (`app.js:211-229`); leave it alone.
+- Poller fields held in memory are lost on restart: acceptable. `last_sync.json` survives restarts; before any run it is absent and
+  the pill says "Watching" with "No run since start".
 
 ## Tests the builder must write (test first)
 1. `tests/test_system_status.py`: pure `build_status` table test, one case per row above, plus precedence (halted beats running).
-2. A failure inside `tick()` does not break `status()`.
+2. A failure inside `tick()` does not break `status()`; `GET /status` works with `app.state.poller` = None (polling off) and with a missing or corrupt `last_sync.json`.
 3. `GET /status` returns 200 JSON with the keys above and no path-like strings (no backslash, no `/data/`).
 4. `tests/ui/test_ui_global.py`: the pill is present on the dashboard and a set page, has `data-testid="system-status"`, its text
    matches the API; with the harness (polling off) it says "Manual".
 5. `GET /sync/status` contract unchanged (existing tests stay green).
 
 ## Rules
-Allowed: `src/app/services/poller.py`, `src/app/api/routes/sync.py`, `src/app/flows/sync.py` (only to publish the result),
+Allowed: `src/app/services/poller.py`, `src/app/api/routes/sync.py`, `src/app/flows/sync.py` (only to write `last_sync.json`), `src/app/services/sync_lock.py` (read the start time only),
 `templates/base.html`, `static/js/app.js`, new tests. Forbidden: reconciliation, grouping, merge, models, config keys.
 No new dependency. The wording above is the source of truth; keep sentences plain (operators are not engineers).
 
