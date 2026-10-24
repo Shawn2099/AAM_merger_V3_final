@@ -638,6 +638,10 @@ Pinned by `test_a_persistent_400_never_condemns_documents_across_passes`, `test_
 `test_a_document_the_breaker_already_refunded_is_judged_on_its_own` and
 `test_a_good_read_between_400s_does_not_trip_the_breaker`.
 
+### L — a delivered packet's customs or shipping file cannot be replaced (D19)
+
+Before a set merges, a wrong CUSTOMS or SHIPPING file can be removed on the set page (the row is detached and archived, audited, the stored file kept) and the right one uploaded before Merge Now. Once the set is merged the removal is refused (409): the packet may already have been sent, so the app never rewrites it with a different file. The only remedy is outside the app. Pinned by `test_known_limitation_delivered_packet_customs_cannot_be_replaced`.
+
 ### L — a one-digit PO misread is not detected (D18, owner decision 2026-10-25)
 
 When the model misreads one digit of the PO number on a continuation page (real run: set 9 against set 8), that page becomes a

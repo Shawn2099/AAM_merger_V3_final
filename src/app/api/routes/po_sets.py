@@ -604,6 +604,90 @@ def confirm_placement(po_set_id: int, doc_id: int):
         _release_lock(po_set_id, cfg, "confirm_placement")
 
 
+@router.post("/{po_set_id}/documents/{doc_id}/remove_supporting")
+def remove_supporting_document(po_set_id: int, doc_id: int):
+    """Take a wrong CUSTOMS / SHIPPING file out of a set that has not merged yet.
+
+    The operator then uploads the right file and presses Merge Now. The row is
+    detached from the set (so no packet can include it) and archived (so it is
+    not offered in the holding area, cannot be reclassified onto a delivered
+    packet, and its bytes can be uploaded again as a new row). The stored file
+    is never deleted. The status is left alone: removing a document can only
+    make the customs gate less satisfied, and Merge Now / the next sync
+    re-evaluates the set. A merged set is refused: its packet is delivered.
+    """
+    from app.models import AuditAction, AuditLog, DocType, Document
+
+    cfg = load_config()
+    _acquire_lock(po_set_id, "remove_supporting", cfg)
+    try:
+        with Session(get_engine(cfg)) as s:
+            # Checked after the lock is held, so a Merge Now that finishes
+            # between a pre-check and the lock cannot slip through.
+            ps = s.get(POSet, po_set_id)
+            if ps is None:
+                raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
+            if ps.archived_at is not None:
+                raise HTTPException(status_code=409, detail="This PO Set is archived and read-only")
+            if ps.status == POSetStatus.merged:
+                raise HTTPException(
+                    status_code=409,
+                    detail="The packet is already delivered; a customs document cannot be replaced.",
+                )
+            doc = s.get(Document, doc_id)
+            if doc is None or doc.po_set_id != po_set_id or doc.archived_at is not None:
+                raise HTTPException(status_code=404, detail="Document is not in this PO Set")
+            doc_type = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
+            if doc_type not in (DocType.CUSTOMS.value, DocType.SHIPPING.value):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Only a CUSTOMS or SHIPPING document can be removed here.",
+                )
+            filename = doc.original_filename or f"document #{doc.id}"
+            doc.po_set_id = None
+            doc.archived_at = datetime.now(UTC)
+            s.flush()
+            types_present = {
+                d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type)
+                for d in s.query(Document)
+                .filter(Document.po_set_id == po_set_id, Document.archived_at.is_(None))
+                .all()
+            }
+            ps.customs_doc_count = (1 if DocType.CUSTOMS.value in types_present else 0) + (
+                1 if DocType.SHIPPING.value in types_present else 0
+            )
+            s.add(
+                AuditLog(
+                    po_set_id=po_set_id,
+                    action=AuditAction.manual_status_change,
+                    detail=json.dumps(
+                        {
+                            "note": f"Removed {doc_type} {filename} (document #{doc_id})",
+                            "document_id": doc_id,
+                            "doc_type": doc_type,
+                            "filename": filename,
+                        }
+                    ),
+                    source="operator",
+                )
+            )
+            count = ps.customs_doc_count
+            set_status = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
+            s.commit()
+        return {
+            "status": "removed",
+            "po_set_id": po_set_id,
+            "customs_doc_count": count,
+            "set_status": set_status,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=_scrub_paths(str(e))) from e
+    finally:
+        _release_lock(po_set_id, cfg, "remove_supporting")
+
+
 @router.post("/{po_set_id}/redo_match")
 def redo_match(po_set_id: int):
     """Redo matching (no VLM) - per-PO locked (FR-CONC-1)."""

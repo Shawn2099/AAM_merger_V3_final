@@ -1,7 +1,7 @@
 # SPEC: replace a customs / shipping document before Merge Now
 
 Status: **rev 2 (Claude, 2026-10-25, after the Opus review: APPROVE WITH CHANGES, all changes applied). Owner-requested (D19).
-Not built; builds after the PF batch is reviewed (same files).** Reviewer: Opus again before commit.
+Route and tests BUILT (po_sets.py, tests/test_customs_replace.py). The template button and UI test wait for the PF batch (same files).** Reviewer: Opus again before commit.
 Decision source: owner, 2026-10-25: "add the merge now button which gives the user the chance to replace any or both
 the docs if needed".
 
@@ -28,7 +28,7 @@ remove (with the toggle OFF it would merge a packet without the replacement), an
 2. INSIDE the locked session, re-read and check (not before the lock; `_refuse_if_merged` runs before the lock and would let a
    finishing Merge Now slip through): set exists (404), not archived (409), status not `merged` (409), document belongs to this set
    (404, like `confirm_placement`), type is CUSTOMS or SHIPPING (422).
-3. DETACH AND ARCHIVE the row: `po_set_id = None` AND `archived_at = now` (plus `archived_by` if the column exists). Detach keeps
+3. DETACH AND ARCHIVE the row: `po_set_id = None` AND `archived_at = now` (`archived_by` is a POSet column only, not on Document). Detach keeps
    it out of the packet (the documents relationship does not filter archived rows). Archive keeps it out of the holding area,
    `unplaced_count`, the upload dedup and the sweeps, and stops an operator reclassifying it onto a merged set (reclassify attaches
    CUSTOMS/SHIPPING even to a merged set and rebuilds the delivered packet). The stored file is never deleted. The partial SHA
