@@ -12,7 +12,7 @@
     </thead>
     <tbody>
       {% for ps in po_sets %}
-      <tr>
+      <tr data-testid="quarantine-row" data-set-id="{{ ps.id }}">
         <td>
           <a href="/po_sets/{{ ps.id }}/view" class="po-link" title="Open PO Set Detail">
             {{ ps.po_no_normalized }}

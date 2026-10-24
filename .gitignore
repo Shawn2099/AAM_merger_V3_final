@@ -101,6 +101,7 @@ worktrees/
 # Local-only working data (real corpus backup, previous run, eval work): never commit
 data/input_corpus_backup/
 data/prev_run_20261024/
+data/ui_test/
 pattern_lab/
 prompt_improvement/
 scratch_*

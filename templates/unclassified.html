@@ -43,7 +43,7 @@
       </thead>
       <tbody>
         {% for doc in documents %}
-        <tr id="doc-row-{{ doc.id }}" x-data="{ poInput: '', docType: '', norm: '', refreshNorm() { const q = this.poInput.trim(); if (!q) { this.norm = ''; return; } fetch('/unclassified/normalize?po_no=' + encodeURIComponent(q)).then(r => r.json()).then(d => { this.norm = d.normalized; }).catch(() => { this.norm = ''; }); } }">
+        <tr id="doc-row-{{ doc.id }}" data-testid="unclassified-row" data-doc-id="{{ doc.id }}" x-data="{ poInput: '', docType: '', norm: '', refreshNorm() { const q = this.poInput.trim(); if (!q) { this.norm = ''; return; } fetch('/unclassified/normalize?po_no=' + encodeURIComponent(q)).then(r => r.json()).then(d => { this.norm = d.normalized; }).catch(() => { this.norm = ''; }); } }">
             <td>
               <div style="font-weight:600; color:var(--text-main);">{{ doc.original_filename }}</div>
               <div class="muted" style="font-size:0.75rem; font-family:ui-monospace, monospace;">
@@ -82,7 +82,7 @@
             </td>
 
             <td>
-              <select name="doc_type" required x-model="docType" style="padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); font-weight:600; background:#fff; width:100%; max-width:240px;">
+              <select name="doc_type" data-testid="select-doc-type" required x-model="docType" style="padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); font-weight:600; background:#fff; width:100%; max-width:240px;">
                 <option value="">-- Select Type --</option>
                 <option value="PO">📄 Purchase Order (PO)</option>
                 <option value="DN">📦 Delivery Note (DN)</option>
@@ -96,6 +96,7 @@
               <input 
                 type="text" 
                 name="po_no" 
+                data-testid="input-po-no"
                 placeholder="e.g. PO-210851" 
                 x-model="poInput"
                 @input.debounce.300ms="refreshNorm()"
@@ -122,6 +123,7 @@
                 <button 
                   type="button"
                   class="btn btn-primary btn-sm"
+                  data-testid="btn-route"
                   hx-post="/unclassified/{{ doc.id }}/reclassify"
                   hx-target="#doc-row-{{ doc.id }}"
                   hx-swap="outerHTML"

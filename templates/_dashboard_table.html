@@ -20,6 +20,8 @@
       {% set status_str = ps.status.value if ps.status.value is defined else (ps.status|string) %}
       <tr 
         class="po-row" 
+        data-testid="po-row"
+        data-set-id="{{ ps.id }}"
         data-po="{{ ps.po_no_normalized }}" 
         data-status="{{ status_str }}"
       >
@@ -78,7 +80,7 @@
           {% endif %}
         </td>
 
-        <td class="reason-cell">
+        <td class="reason-cell" data-testid="row-reason">
           {% if ps.reconcile_reason %}
             {{ ps.reconcile_reason }}
           {% else %}
@@ -87,7 +89,7 @@
         </td>
 
         <td>
-          <span style="font-weight:600; color:var(--text-main);">{{ ps.doc_count }}</span>
+          <span data-testid="row-doc-count" style="font-weight:600; color:var(--text-main);">{{ ps.doc_count }}</span>
           <span class="muted" style="font-size:0.82rem;">doc{{ 's' if ps.doc_count != 1 else '' }}</span>
         </td>
 

@@ -58,7 +58,7 @@ Last updated: 2026-10-24. Branch `fix/mvp-high-priority`, remote `origin` (push 
   visual layout; do a 10-minute click-through on the target PC. Known display quirks: qty-0 numberless PO rows read `0 0 0 Match`; sets whose
   stored status predates the line-number fallback (e.g. 48) show a stale status next to a live matrix that now matches (clears on a re-run).
 - **R-17 decided (2026-10-24, second answer):** subfolders ARE read now; zero-byte files stay skipped (a future module may use them).
-- **Still open:** T7 retest corpus + fresh-DB run (uses the paid provider; needs the user's go-ahead), T8 operator UI
+- **Still open (T13 added: build D1, near-duplicate PO warning):** T7 retest corpus + fresh-DB run (uses the paid provider; needs the user's go-ahead), T8 operator UI
   walk-through, T9 cleanup (list below, user decides), T10 final branch review + gitnexus refresh (`node .gitnexus/run.cjs analyze`).
 - **Decisions made by the user (2026-10-24 night):** R-07 -> a packet-write I/O failure leaves the set `pending` and is retried
   (implemented); R-17 -> subfolders are read, zero-byte files skipped (implemented, PRODUCT section 8);
@@ -183,6 +183,36 @@ review + gitnexus refresh; production-phase items in 6b.
   `robustness_audit_2026-10-24.md`, `MANUAL_MERGER_AUDIT_2026-10-23.md`, `PDF_DB_COMPARISON_2026-10-23.md`.
 - Large data, keep outside git: `data/input_corpus_backup/` (67 MB, the real corpus: do not lose), `data/prev_run_20261024/` (117 MB old DB +
   outputs), `pattern_lab/` (11 MB), `prompt_improvement/` (5 MB, evals behind the P5 prompt). Suggest adding all four plus `scratch_*` to `.gitignore`.
+
+## 6c. UI test harness (built 2026-10-24) and decisions log
+
+**UI test harness (committed):** `scripts/ui_test_env.py` builds a throwaway environment through the real pipeline code
+with a canned VLM reply (no network, no cost), `tests/ui/` holds 20 passing Playwright reference tests,
+`data-testid` hooks were added to the templates (additive), `docs/UI_TEST_PLAN.md` is the case matrix (~45 TODO cases),
+and `docs/OPENCODE_UI_TEST_BRIEF.md` is the brief + rules for DeepSeek via OpenCode. Run:
+`$env:RUN_E2E="1"; uv run python -m pytest tests/ui -o addopts= -p no:cacheprovider -W ignore -q`.
+Next step: hand the brief to DeepSeek, then review its report and triage the "suspected product bug" findings.
+
+**Decisions taken by the user (2026-10-24, late):**
+
+| # | Topic | Decision | Status |
+|---|---|---|---|
+| D1 | I-1: one-digit PO misread (phantom set, packet missing a page) | **Free near-duplicate warning**, no extra API calls: flag a set whose PO number differs from another set's by ONE digit (same letters) as "possible misread of set X" on the dashboard and set page. No second read. | Decided; NOT built yet (task T13) |
+| D2 | POs printed "1 of 6" with only page 1 supplied | If the supplied PDF holds everything the program needs (PO number, line items, quantities), **match and merge it**. The packet uses the **original PDF pages** (the stored upload), never the rasterised PNGs sent to the model. The pipeline already does this (`merge.py` reads `stored_path` with pypdf; images are only sent to the VLM). | Decided; no code change needed (confirm in T10) |
+| D3 | R-13 (split-gate reason overwritten, only with `split_combined: true`) | Defer to the future module for combined files / fragments. | Decided (assistant recommendation, user did not object) |
+| D4 | Extraction validation (hallucination defence) | User asked for an explanation and a proposed plan, and invited questions before deciding. See the discussion below. | **OPEN** |
+| D5 | Production run schedule / folder polling | User wants: **check the input folder every 5 minutes and send the oldest unread file into the program.** Questions to settle before building (below). | **OPEN: needs 4 answers** |
+| D6 | pymupdf licence | Later. | Deferred |
+
+### D5 open questions (answer before any build)
+1. Per 5-minute tick, process **exactly one** file (the oldest) or **all** waiting files, oldest first? Exactly one per tick caps throughput at 12 files/hour (200 files = ~17 h); the real corpus took far longer than 5 minutes for a full run.
+2. Keep the **midnight cron** as well (a full sweep including reconcile of all open sets), or replace it with the 5-minute poll?
+3. A tick that finds the previous one still running: skip it (the sync lock already does this) or queue it?
+4. After each file, should its set be re-reconciled and merged immediately (packet ready within minutes), or only once per day?
+Technical notes: ingestion already has a stability check (file still copying) and the sync lock serialises runs; "oldest" = oldest modification time; Prefect schedule is registered by `scripts/deploy_prefect.py` (must be re-run after any change); more frequent runs mean more provider calls only for NEW files (existing documents are never re-read).
+
+### D4 discussion notes (extraction validation)
+Today a wrong value is caught only if another document disagrees. The risk is a value the model misreads the same way everywhere, or on a document nothing else cross-checks. Candidate controls, cheapest first: (a) format validator for PO/DN/SI numbers (no API); (b) read-only replay audit script over stored extractions that lists suspicious ones (near-duplicate PO numbers, quantity outliers, number of digits that differs from sibling documents) (no API); (c) second independent read of scanned documents or of sets about to merge (extra API cost); (d) the user's rule: never trust the embedded PDF text layer as truth. Recommendation: do (a)+(b) now, together with D1, and decide (c) after the real-corpus run on a new DB shows how often it would matter.
 
 ## 6b. NEXT PHASE (user request 2026-10-24, to be DISCUSSED later; nothing here is approved or started)
 

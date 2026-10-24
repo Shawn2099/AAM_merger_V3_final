@@ -32,7 +32,7 @@
       </a>
       <h1 class="card-title" style="margin:0; font-size:1.5rem;">
         <span>PO Set:</span>
-        <span style="font-family:ui-monospace, monospace; color:var(--primary);">{{ po_set.po_no_normalized }}</span>
+        <span data-testid="set-po" style="font-family:ui-monospace, monospace; color:var(--primary);">{{ po_set.po_no_normalized }}</span>
       </h1>
 
       {% if status_str == 'merged' %}
@@ -113,6 +113,7 @@
   <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border); display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
     <!-- Customs Toggle -->
     <button
+      data-testid="btn-toggle-customs"
       class="btn {% if po_set.has_customs_toggle %}btn-primary{% else %}btn-secondary{% endif %}"
       hx-post="/po_sets/{{ po_set.id }}/toggle_customs"
       hx-swap="none"
@@ -129,6 +130,7 @@
          so pressing it on a set that is not ready simply explains why. -->
     <button
       class="btn btn-primary"
+      data-testid="btn-merge-now"
       hx-post="/po_sets/{{ po_set.id }}/merge"
       hx-swap="none"
       hx-on::after-request="if (event.detail.successful) setTimeout(() => location.reload(), 1200)"
@@ -141,6 +143,7 @@
     <!-- Redo Match (Free, Instant) -->
     <button
       class="btn btn-secondary"
+      data-testid="btn-rematch"
       hx-post="/po_sets/{{ po_set.id }}/redo_match"
       hx-swap="none"
       hx-on::after-request="if (event.detail.successful) location.reload()"
@@ -153,6 +156,7 @@
     <!-- Redo Extract (AI) -->
     <button
       class="btn btn-secondary"
+      data-testid="btn-reextract"
       hx-post="/po_sets/{{ po_set.id }}/redo_extract"
       hx-swap="none"
       hx-on::after-request="if (event.detail.successful) location.reload()"
@@ -166,6 +170,7 @@
     <div style="margin-left:auto;">
       <button 
         class="btn btn-danger" 
+        data-testid="btn-force-merge"
         onclick="document.getElementById('force-merge-modal').classList.add('open')"
         title="Override matching and customs requirements to merge immediately with available documents"
         {% if is_locked or status_str == 'merged' %}disabled title="This set is already merged; use the customs append path"{% endif %}
@@ -194,7 +199,7 @@
 {% else %}
   {% set reason_color = '#64748b' %}
 {% endif %}
-<div class="card" style="border-left:4px solid {{ reason_color }}; margin-bottom:16px;">
+<div class="card" data-testid="reason-card" style="border-left:4px solid {{ reason_color }}; margin-bottom:16px;">
   <div style="font-weight:700; font-size:0.95rem; margin-bottom:4px;">
     {# A merged set can still carry a note — how the packet was named, or that
        an operator force-merged it. Hiding it behind "not merged" left a green
@@ -232,7 +237,7 @@
   {% if flags %}
   <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
     {% for f in flags %}
-    <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:var(--radius-sm); border:1px solid var(--border); background:#ffffff;">
+    <div data-testid="flag" style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:var(--radius-sm); border:1px solid var(--border); background:#ffffff;">
       <span class="badge {{ f.badge }}">{{ f.type }}</span>
       <span style="font-size:0.88rem; color:var(--text-main); flex:1;">{{ f.message }}</span>
       <span style="font-size:0.78rem; color:var(--text-muted); font-weight:600;">Priority {{ f.priority }}</span>
@@ -257,7 +262,7 @@
       </thead>
       <tbody>
         {% for r in matrix_rows %}
-        <tr class="{{ r.row_class }}">
+        <tr class="{{ r.row_class }}" data-testid="matrix-row" data-line="{{ r.line_item_no }}">
           <td style="font-family:ui-monospace, monospace; font-weight:700;">#{{ r.line_item_no }}
             {% if r.mapped_from %}<span class="badge badge-desc" style="display:block; margin-top:4px; font-size:0.7rem;" title="Paired by a line-number rule, not as printed.">&larr; {{ r.mapped_from }}</span>{% endif %}</td>
           <td style="font-weight:500;">{{ r.description }}</td>
@@ -336,7 +341,7 @@
         {% for d in documents %}
         {% set dt = d.doc_type.value if d.doc_type.value is defined else (d.doc_type|string) %}
         {% set es = d.extraction_status.value if d.extraction_status.value is defined else (d.extraction_status|string) %}
-        <tr>
+        <tr data-testid="doc-row" data-doc-id="{{ d.id }}">
           <td>
             {% if dt == 'PO' %}
               <span class="badge badge-pending">📄 Purchase Order</span>
@@ -378,6 +383,7 @@
 
           <td style="text-align:right;">
             <button 
+              data-testid="btn-preview"
               class="btn btn-secondary btn-sm"
               data-preview-url="/documents/{{ d.id }}/preview"
               data-preview-name="{{ d.original_filename }}"
@@ -410,6 +416,7 @@
     </p>
 
     <form 
+      data-testid="upload-form"
       action="/po_sets/{{ po_set.id }}/upload" 
       method="post" 
       enctype="multipart/form-data" 
@@ -452,6 +459,7 @@
   </p>
   <button 
     class="btn btn-danger" 
+    data-testid="btn-archive"
     onclick="document.getElementById('quarantine-delete-modal').classList.add('open')"
     {% if is_locked %}disabled{% endif %}
   >
@@ -474,6 +482,7 @@
       </button>
       <button 
         class="btn btn-danger" 
+        data-testid="btn-confirm-archive"
         hx-delete="/po_sets/{{ po_set.id }}/quarantine" 
         hx-swap="none" 
         onclick="document.getElementById('quarantine-delete-modal').classList.remove('open')"
@@ -509,6 +518,7 @@
       </button>
       <button
         class="btn btn-danger"
+        data-testid="btn-confirm-force-merge"
         hx-post="/po_sets/{{ po_set.id }}/force_merge"
         hx-include="#force-merge-justification"
         hx-swap="none"

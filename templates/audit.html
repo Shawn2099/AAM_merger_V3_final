@@ -29,7 +29,7 @@
       <tbody>
         {% for e in entries %}
         {% set act = e.action.value if e.action.value is defined else (e.action|string) %}
-        <tr>
+        <tr data-testid="audit-row">
           <td class="muted" style="font-family:ui-monospace, monospace; font-size:0.85rem;">
             {{ e.timestamp.strftime('%Y-%m-%d %H:%M:%S') if e.timestamp else '—' }}
           </td>
