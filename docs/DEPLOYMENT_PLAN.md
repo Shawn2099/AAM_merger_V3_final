@@ -86,6 +86,8 @@ Order: WS0 first. WS1, WS2, WS5, WS6 can run in parallel in separate OpenCode se
 - Acceptance: whole suite + `tests/ui` x3 green, ruff/ty clean, Claude re-runs and reads the diff before commit.
 
 ### WS2. D1 misread hold (T13): Opus designs, DeepSeek builds, Opus reviews
+> Specs written 2026-10-25: docs/SPEC_WS2_MISREAD_HOLD.md (this packet) and docs/SPEC_PF11_SYSTEM_STATUS.md (PF-11). Both are ready for the worker once approved.
+
 1. **Claude writes the design spec** (HANDOFF 6c "D1 design notes"): the exact rule (a PO-only set one digit away from a set that has DN/SI), its false-positive risk, the new reason `possible_po_misread`, the three operator actions (move a document to another PO, "not a misread" flag, Force Merge), audit rows, and the tests that must exist. No code before the spec is approved.
 2. **DeepSeek implements** in `src/app/services/reconciliation.py` (the hold), `src/app/api/routes/po_sets.py` (actions), `templates/po_set_detail.html`, `tests/test_misread_hold.py`. The "move a document to another PO" action is new: no UI path moves an attached document today.
 3. **Claude reviews as Opus** (reconciliation change). Acceptance: the false-positive cases in the spec each have a test (two real POs that differ by one digit and both complete must still merge); `make business-logic` passes; hold is visible on the dashboard and set page.
