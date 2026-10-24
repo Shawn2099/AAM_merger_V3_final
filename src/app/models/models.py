@@ -56,6 +56,9 @@ class AuditAction(enum.StrEnum):
     # A set merged after its vendor line numbers were mapped by the line-number
     # fallback (x10 / -1 suffix). The detail records the per-pool rule and map.
     line_mapping_applied = "line_mapping_applied"
+    # An automatic quarantine (set or single document). The detail holds the
+    # exact QUARANTINE.txt text so the audit trail outlives the folder.
+    quarantined = "quarantined"
 
 
 class Document(Base):

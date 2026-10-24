@@ -90,6 +90,99 @@ def _format_qty(value) -> str:
     return f"{int(value) / 1000:g}"
 
 
+# One sentence per reason code telling the operator what to do next. Unknown
+# codes get the generic sentence, so a new reason never produces an empty line.
+WHAT_TO_DO: dict[str, str] = {
+    "document_extraction_failed": "Open the named file; Re-Extract the set or replace the file.",
+    "unclassified_document_in_set": "Reclassify the unclassified document, or remove it.",
+    "multiple_po_documents": "Decide which PO document is correct; remove the other one.",
+    "po_reference_mismatch": "Check the PO number printed on each document; fix the odd one out.",
+    "duplicate_document_number": "Check if the same DN/SI was scanned twice; remove the duplicate.",
+    "po_document_has_no_line_items": "Check the PO has every page; add missing ones, re-extract.",
+    "non_positive_quantity": "Open the document with the bad quantity; fix or replace it.",
+    "unmatched_vendor_line": "Compare DN/SI line numbers with the PO; fix or force-merge.",
+    "quantity_mismatch": "Compare PO, DN and SI quantities on the lines listed; fix the document.",
+    "vendor_document_has_no_line_items": "Open the DN/SI with no items; replace it.",
+    "no_line_item_evidence": "Check the documents are readable and have line items; re-extract.",
+    "packet_naming_failed": "Two packets would get the same name; resolve the PO number clash.",
+    "packet_source_unreadable": "Restore or re-upload the missing PDF, then retry the merge.",
+    "packet_write_failed": "Check the output folder is writable and has free space; retry.",
+}
+_GENERIC_WHAT_TO_DO = "Review the listed documents, fix the source files and re-run the sync."
+
+
+def _reason_sentence(reason: str | None) -> str:
+    from app.services.reconciliation import REASON_TEXT  # lazy: reconciliation imports us
+
+    code = (reason or "").split(":", 1)[0]
+    return REASON_TEXT.get(code) or (reason or "No reason recorded")
+
+
+def _doc_number(doc) -> str:
+    """The document's own number as printed (DN, SI/invoice, or the PO for a PO)."""
+    kind = getattr(doc.doc_type, "value", str(doc.doc_type))
+    if kind == "DN":
+        return doc.dn_no or "-"
+    if kind == "SI":
+        return doc.si_no or doc.invoice_no or "-"
+    return doc.po_no_raw or "-"
+
+
+def _document_rows(docs, names: dict[int, str]) -> list[str]:
+    """Table of the documents: original filename, type, number, PO as printed."""
+    header = f"{'File':<42}{'Type':<10}{'Doc number':<22}PO as printed"
+    out = [header, "-" * 90]
+    for d in docs:
+        kind = getattr(d.doc_type, "value", str(d.doc_type))
+        out.append(
+            f"{(names.get(d.id) or d.original_filename or '?')[:40]:<42}{kind:<10}"
+            f"{_doc_number(d)[:20]:<22}{d.po_no_raw or '-'}"
+        )
+    return out
+
+
+def _copy_documents(folder: Path, docs) -> dict[int, str]:
+    """Copy each document's stored PDF into `folder` under its ORIGINAL filename.
+
+    A clash (two documents with the same original name, or a name this folder
+    uses for its own files) gets `_2`, `_3`. Order is by document id, so
+    re-quarantining the same set reproduces the same names. Returns
+    {document_id: filename written}.
+    """
+    reserved = {"quarantine.txt", ".po_set_id"}
+    used: set[str] = set()
+    names: dict[int, str] = {}
+    for doc in sorted(docs, key=lambda d: d.id or 0):
+        src = _source_file(doc)
+        if src is None:
+            continue
+        base = Path(doc.original_filename or "").name.strip() or src.name
+        stem, suffix = Path(base).stem, Path(base).suffix or src.suffix
+        candidate, n = f"{stem}{suffix}", 1
+        while candidate.lower() in used or candidate.lower() in reserved:
+            n += 1
+            candidate = f"{stem}_{n}{suffix}"
+        used.add(candidate.lower())
+        shutil.copy(str(src), str(folder / candidate))
+        names[doc.id] = candidate
+    return names
+
+
+def _record_quarantine_audit(po_set_id: int | None, cfg, reason, text: str, **extra) -> None:
+    """Persist what the operator is told, so the audit trail survives the folder."""
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        s.add(
+            AuditLog(
+                po_set_id=po_set_id,
+                action=AuditAction.quarantined,
+                detail=json.dumps({"reason": reason, "report": text, **extra}),
+                source="system",
+            )
+        )
+        s.commit()
+
+
 def _write_quarantine_report(
     folder: Path,
     po_no: str | None,
@@ -98,8 +191,9 @@ def _write_quarantine_report(
     detail: str | None,
     flags: list[dict] | None,
     po_line_qty: dict | None = None,
-) -> None:
-    """Make the folder self-describing.
+    documents: list[str] | None = None,
+) -> str:
+    """Make the folder self-describing. Returns the text written.
 
     A quarantined folder is a case a human has to work through. Writing the
     reason and the per-line numbers next to the PDFs means whoever opens the
@@ -113,9 +207,15 @@ def _write_quarantine_report(
         f"Status      : {status}",
         f"Reason      : {reason or '(none recorded)'}",
         f"Detected    : {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        "",
+        "What happened",
+        "-" * 60,
+        _reason_sentence(reason),
     ]
     if detail:
-        lines.append(f"Detail      : {detail}")
+        lines.append(f"Detail: {detail}")
+    if documents:
+        lines += ["", "Documents in this set", "-" * 60, *documents]
 
     # Every PO line, so the reviewer sees the whole set rather than only the
     # rows that failed. Flags then overlay the vendor-side numbers.
@@ -162,12 +262,15 @@ def _write_quarantine_report(
 
     lines += [
         "",
+        "What to do",
         "-" * 60,
-        "To resolve: correct the source documents and re-run, or force-merge",
-        "with a justification. Force-merge ships the packet as-is.",
+        WHAT_TO_DO.get((reason or "").split(":", 1)[0], _GENERIC_WHAT_TO_DO),
+        "Force-merge ships the packet as-is and needs a written justification.",
         "",
     ]
-    (folder / "QUARANTINE.txt").write_text("\n".join(lines), encoding="utf-8")
+    text = "\n".join(lines)
+    (folder / "QUARANTINE.txt").write_text(text, encoding="utf-8")
+    return text
 
 
 def _po_line_quantities(po_set) -> dict[str, int]:
@@ -258,28 +361,26 @@ def quarantine_copy(
             # copy within session context while documents are loaded
             folder = _quarantine_set_folder(ps, cfg)
             docs = list(ps.documents or [])
-            for doc in docs:
-                src = _source_file(doc)
-                if src is None:
-                    continue
-                dst = folder / src.name
-                shutil.copy(str(src), str(dst))
+            names = _copy_documents(folder, docs)
+            doc_rows = _document_rows(docs, names)
+            set_id = ps.id
             status = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
             po_no = ps.po_no_normalized
             po_line_qty = _po_line_quantities(ps)
     else:
         folder = _quarantine_set_folder(po_set, cfg)
-        for doc in po_set.documents or []:
-            src = _source_file(doc)
-            if src is None:
-                continue
-            dst = folder / src.name
-            shutil.copy(str(src), str(dst))
+        docs = list(po_set.documents or [])
+        names = _copy_documents(folder, docs)
+        doc_rows = _document_rows(docs, names)
+        set_id = po_set.id
         status = po_set.status.value if hasattr(po_set.status, "value") else str(po_set.status)
         po_no = po_set.po_no_normalized
         po_line_qty = _po_line_quantities(po_set)
 
-    _write_quarantine_report(folder, po_no, status, reason, detail, flags, po_line_qty)
+    text = _write_quarantine_report(
+        folder, po_no, status, reason, detail, flags, po_line_qty, doc_rows
+    )
+    _record_quarantine_audit(set_id, cfg, reason, text, folder=str(folder))
     return folder
 
 
@@ -312,14 +413,19 @@ def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
         doc_id_out = doc.id
         attempts = doc.extraction_attempt_count or 0
         sha = doc.sha256_hash
+        doc_rows = _document_rows([doc], {})
         s.expunge(doc)
 
     folder = Path(cfg.paths.quarantine_folder) / "_documents" / name.replace(".pdf", "")
     folder.mkdir(parents=True, exist_ok=True)
+    # The copy keeps the operator's own filename (the folder is keyed by hash).
+    out_name = Path(original or "").name.strip() or name
+    if out_name.lower() in ("quarantine.txt", ".po_set_id"):
+        out_name = f"document_{out_name}"
     input_copy = Path(cfg.paths.input_folder) / original if original else None
     try:
         if stored.exists():
-            shutil.copy(str(stored), str(folder / name))
+            shutil.copy(str(stored), str(folder / out_name))
     except OSError:
         logger.warning("Could not copy stored file %s", stored, exc_info=True)
     # Remove the input copy here, not only in the sync caller: the report below
@@ -333,30 +439,40 @@ def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
 
             data = input_copy.read_bytes()
             if hashlib.sha256(data).hexdigest() == sha:
-                if not (folder / name).is_file():
-                    (folder / name).write_bytes(data)
-                if (folder / name).is_file():
+                if not (folder / out_name).is_file():
+                    (folder / out_name).write_bytes(data)
+                if (folder / out_name).is_file():
                     input_copy.unlink(missing_ok=True)
         except OSError:
             logger.warning("Could not remove input copy %s", input_copy, exc_info=True)
-    (folder / "QUARANTINE.txt").write_text(
-        "\n".join(
-            [
-                "QUARANTINED DOCUMENT",
-                "",
-                f"File        : {original}",
-                f"Document id : {doc_id_out}",
-                f"Attempts    : {attempts}/3 (cap reached, no further automatic attempts)",
-                f"Reason      : {reason}",
-                "",
-                "This file could not be read, so nothing about it could be verified.",
-                "It has been removed from the input folder so it is not retried nightly.",
-                "To retry: enter its PO number on the Unclassified page to attach it to a",
-                "PO Set, then press Redo/Re-extract on that set.",
-            ]
-        ),
-        encoding="utf-8",
+    text = "\n".join(
+        [
+            "QUARANTINED DOCUMENT",
+            "=" * 60,
+            f"File        : {original}",
+            f"Document id : {doc_id_out}",
+            f"Attempts    : {attempts}/3 (cap reached, no further automatic attempts)",
+            f"Reason      : {reason}",
+            f"Detected    : {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+            "",
+            "What happened",
+            "-" * 60,
+            "This file could not be read, so nothing about it could be verified.",
+            "It has been removed from the input folder so it is not retried nightly.",
+            "",
+            "Documents in this set",
+            "-" * 60,
+            *doc_rows,
+            "",
+            "What to do",
+            "-" * 60,
+            "Enter its PO number on the Unclassified page to attach it to a PO Set,",
+            "then press Re-extract on that set. Or replace the file with a readable copy.",
+            "",
+        ]
     )
+    (folder / "QUARANTINE.txt").write_text(text, encoding="utf-8")
+    _record_quarantine_audit(None, cfg, reason, text, document_id=doc_id_out, folder=str(folder))
     return folder
 
 

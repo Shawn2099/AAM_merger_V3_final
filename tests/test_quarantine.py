@@ -17,6 +17,11 @@ def _cfg_with_tmp(tmp_path):
     return cfg
 
 
+def _orig(stored: Path) -> str:
+    """Quarantine copies keep the document's original filename (stored name minus the PO prefix)."""
+    return stored.name.split("_", 1)[1]
+
+
 def _tiny_pdf(p: Path, width: int = 200, height: int = 200) -> Path:
     from pypdf import PdfWriter
 
@@ -103,7 +108,7 @@ def test_delete_keeps_files(tmp_path):
         assert q_folder == Path(cfg.paths.quarantine_folder) / ps.po_no_normalized
         # quarantine copies exist
         for p in stored_paths:
-            qp = q_folder / p.name
+            qp = q_folder / _orig(p)
             assert qp.exists(), f"quarantine copy missing: {qp}"
             # original still exists (copy not move)
             assert p.exists(), f"original should still exist after copy (not move): {p}"
@@ -145,8 +150,8 @@ def test_delete_keeps_files(tmp_path):
     # files still exist after archive, and the export has its own copies
     for p in stored_paths:
         assert p.exists(), f"stored_path should still exist after archive: {p}"
-        assert (q_folder / p.name).exists(), (
-            f"quarantine copy should still exist after archive: {q_folder / p.name}"
+        assert (q_folder / _orig(p)).exists(), (
+            f"quarantine copy should still exist after archive: {q_folder / _orig(p)}"
         )
         assert (archive_path / "files").is_dir(), "archive must contain copied files"
 
@@ -170,9 +175,9 @@ def test_quarantine_copy_uses_copy_not_move(tmp_path):
         q = quarantine_copy(ps, cfg)
         for p in stored:
             assert p.exists()
-            assert (q / p.name).exists()
+            assert (q / _orig(p)).exists()
             # content equal (size same)
-            assert (q / p.name).stat().st_size == p.stat().st_size
+            assert (q / _orig(p)).stat().st_size == p.stat().st_size
 
 
 def test_delete_only_when_quarantined(tmp_path):

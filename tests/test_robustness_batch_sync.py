@@ -340,14 +340,14 @@ def _audit_rows(cfg) -> list[tuple[str, int | None]]:
         return [(str(a.action), a.po_set_id) for a in s.query(AuditLog).all()]
 
 
-def test_no_audit_row_is_written_for_any_automatic_quarantine(batch):
-    """Observed (pinned): this run quarantined ~15 documents and ~12 sets, and the
-    audit_log table is EMPTY. Engine and document quarantines leave only
-    QUARANTINE.txt files; AuditAction has no quarantine value. CLAUDE.md says
-    quarantine.py 'writes audit rows' - true only for archive/force/customs."""
+def test_every_automatic_quarantine_writes_an_audit_row(batch):
+    """Every automatic quarantine (set or single document) leaves an audit row
+    holding the QUARANTINE.txt text, so the trail outlives the folder."""
     quarantined = [s for s in batch["sets"].values() if s.status == POSetStatus.quarantined]
     assert len(quarantined) >= 10
-    assert batch["audit_rows"] == []
+    rows = batch["audit_rows"]
+    assert rows and all(action.endswith("quarantined") for action, _ in rows), rows
+    assert {ps_id for _, ps_id in rows if ps_id is not None} >= {s.id for s in quarantined}
 
 
 def _set(batch, key):
@@ -434,8 +434,12 @@ def test_schema_invalid_or_unreadable_reply_fails_doc_and_quarantines_it(batch, 
     assert name not in batch["input"], "a failed document is removed from input"
     stem = Path(d.stored_path).stem
     assert any(q.startswith(stem) or q == "QUARANTINE.txt" for q in batch["qdocs"])
+    # The quarantined copy keeps the operator's original filename.
     assert (
-        Path(batch["cfg"].paths.quarantine_folder) / "_documents" / stem / Path(d.stored_path).name
+        Path(batch["cfg"].paths.quarantine_folder)
+        / "_documents"
+        / stem
+        / Path(d.original_filename).name
     ).is_file()
 
 
