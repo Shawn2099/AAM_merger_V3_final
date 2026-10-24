@@ -39,6 +39,18 @@ Last updated: 2026-10-24. Branch `fix/mvp-high-priority`, remote `origin` (push 
 
 ## 3. Status (2026-10-24)
 
+- **Cards done (evening 2026-10-24):** T1 (suite green), T2 quarantine report/filenames/audit row (12d4950), T3 config + DELIVERY
+  (3f954b1), T4 Prefect test-server cleanup (3f954b1, conftest fixture), T5 R-03/R-06/R-16 (938188f), T11 licence note (in
+  DELIVERY, decision still the client's), T12 manual merger committed after Opus review (ea2f511; review defects 1+2 fixed).
+  Repair commit 6bb1384: 3586491 had been pushed with SYNTAX ERRORS in config.py, quarantine.py and a misplaced
+  `line_number_fallback` block in config.example.yaml (partial-hunk staging). Fixed. **Lesson: after staging hunks, always
+  `git checkout-index -a --prefix=<tmp>/` and run the tests against that tree before committing.**
+- **Still open:** T6 (R-09, R-08, R-07, R-15, R-17, R-18), T7 retest corpus + fresh-DB run, T8 operator UI walk-through,
+  T9 cleanup list (ask the user), T10 final Opus branch review + `make business-logic` + gitnexus refresh. Full suite at 938188f:
+  6288 passed, 6 skipped, 49 xfailed.
+- Windows note: Application Control (WDAC) blocked the venv python for a while on this PC; it works again. If `uv run`
+  fails with os error 4551, see the Code Integrity event log (not an antivirus issue).
+
 - **Line-number fallback implemented, Opus-reviewed 2026-10-24** (LINE_NUMBER_FALLBACK_PLAN.md rev 2): rules x10/div10/add_rel/strip_rel per pool,
   `matching.line_number_fallback` switches, `po_sets.line_mapping_rule` + migration `e8f9a0b1c2d3`, audit `line_mapping_applied`,
   `scripts/requeue_line_mapping.py` (dry run by default; `--apply` re-runs exactly the sets whose verdict changes). Replay of the real run on a DB copy: merged 39,40,42,48,50.
@@ -125,6 +137,29 @@ non-server mode or stop the server at session end (e.g. `PREFECT_SERVER_ALLOW_EP
 - 2026-10-24 task cards T1-T11 written; OC/DeepSeek assignment proposed (CLAUDE keeps reconcile/grouping/quarantine/sync logic and all reviews).
 - 2026-10-24 real run, verification, R-01/R-14/R-12 + dup-guard refinement, R-02/04/05/10 fixes (uncommitted until step 1).
 - 2026-10-24 T1 done: commits 395a7a0, 254bba3, 339f821 pushed to origin/fix/mvp-high-priority. T12 (manual merger) added.
+
+- 2026-10-24 evening: repaired broken push (6bb1384); T2 12d4950; manual merger ea2f511; T3/T4/T11 3f954b1; T5 938188f.
+
+## 6b. NEXT PHASE (user request 2026-10-24, to be DISCUSSED later; nothing here is approved or started)
+
+After the handoff cards above are finished, move to **production deployment: final decisions, then full-fledged testing.**
+Items the user wants decided/built (record only):
+
+1. **All configuration editable from the UI** (a settings page), not by editing `config.yaml` by hand. Open questions for the
+   discussion: which keys are safe to edit live vs need a restart (`manual_merge` limits already need one); validation and
+   rollback of a bad value (the app fails fast on invalid config today); who may edit (LAN, no login yet); audit row per change;
+   secrets (OPENROUTER_API_KEY) stay out of the UI/file; paths must stay inside the data root; Prefect deployment captures
+   settings, so a schedule change must re-register the deployment.
+2. **Auto-run timings finalised:** the midnight Prefect cron (today `prefect.*` in config + `scripts/deploy_prefect.py`),
+   timezone, whether a second daytime run is wanted, and what happens when a run overlaps the next one.
+3. **Folder polling finalised:** today a sync only runs on the cron or a manual Scan; there is no continuous watcher. Decide
+   cron-only vs a polling interval, plus the file-stability check (`ingestion.stability_poll_*`) and the recent-write window
+   (`_RECENT_WRITE_SECONDS = 300`).
+4. **Then full-fledged testing** on the target machine: fresh DB, real corpus, midnight run, concurrent Force Merge, restart
+   and power-loss recovery, backup/restore, the operator UI walk-through (T8) and the Opus branch review (T10).
+
+Related decisions already waiting: pymupdf AGPL (buy / replace rasteriser / accept), second-read extraction validation (section 7),
+whether POs printed "1 of 6" supplied as page 1 only should be held, and I-1 (one-digit PO misread on a continuation page).
 
 ## 7. Deferred topic: extraction validation / hallucination defence (decided 2026-10-24: NOT now, discuss in a later session)
 
