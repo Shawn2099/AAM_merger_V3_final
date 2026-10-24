@@ -99,8 +99,8 @@ def test_unique_open_set_index_refuses_a_second_open_set(tmp_path):
 
 def test_get_or_create_po_set_is_idempotent(tmp_path):
     cfg, eng = _cfg(tmp_path)
-    first = get_or_create_po_set("PO-ONE", cfg)
-    second = get_or_create_po_set("PO-ONE", cfg)
+    first = get_or_create_po_set("PO-1001", cfg)
+    second = get_or_create_po_set("PO-1001", cfg)
     assert first.id == second.id
     with Session(eng) as s:
         assert s.query(POSet).count() == 1
@@ -311,7 +311,7 @@ def test_get_or_create_po_set_recovers_from_an_insert_race(tmp_path, monkeypatch
     """
     cfg, eng = _cfg(tmp_path)
     with Session(eng) as s:
-        existing = POSet(po_no_normalized="RACE", status=POSetStatus.pending)
+        existing = POSet(po_no_normalized="1002", status=POSetStatus.pending)
         s.add(existing)
         s.commit()
         existing_id = existing.id
@@ -336,7 +336,7 @@ def test_get_or_create_po_set_recovers_from_an_insert_race(tmp_path, monkeypatch
         return real_query(self, *args, **kwargs)
 
     monkeypatch.setattr(Session, "query", fake_query)
-    got = get_or_create_po_set("PO-RACE", cfg)
+    got = get_or_create_po_set("PO-1002", cfg)
     assert got.id == existing_id
     with Session(eng) as s:
         assert s.query(POSet).count() == 1

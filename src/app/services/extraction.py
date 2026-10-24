@@ -588,7 +588,17 @@ def populate_from_raw_dict(doc: Document, result: dict, s: Session, cfg) -> None
         # not left attached to the set its PREVIOUS read was placed in. The
         # reconciliation drift guard only looks at documents that still carry a
         # number, so a cleared number would otherwise compare unmoved.
-        if not result.get("po_no_raw"):
+        # A number with no digits ("OPG") keys as "" and the drift guard skips
+        # an empty key, so it is treated the same as no number at all.
+        from app.services.grouping import normalize_po_no as _norm
+
+        _raw = result.get("po_no_raw")
+        if not _raw or not isinstance(_raw, str) or not _norm(_raw):
+            doc.po_set_id = None
+        # A read that shows more than one PO number is never placed (both
+        # attach sweeps refuse it), so it must not stay in the set an earlier
+        # read put it in either: its first number can still match the set's.
+        if result.get("po_reference_ambiguous"):
             doc.po_set_id = None
     # The current read's ambiguity, true or false — never the previous read's.
     # A manual PO is a human decision, so it resolves the model's uncertainty

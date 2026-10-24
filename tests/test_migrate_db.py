@@ -76,6 +76,7 @@ def _drop_legacy_gap(db_path: Path) -> None:
         conn.execute("ALTER TABLE documents DROP COLUMN po_no_source")
         conn.execute("ALTER TABLE po_sets DROP COLUMN description_match_count")
         conn.execute("ALTER TABLE po_sets DROP COLUMN customs_append_pending")
+        conn.execute("ALTER TABLE po_sets DROP COLUMN po_no_letters")
         conn.execute("CREATE UNIQUE INDEX ix_documents_sha256_hash ON documents (sha256_hash)")
         conn.execute("DROP TABLE IF EXISTS alembic_version")
         conn.commit()

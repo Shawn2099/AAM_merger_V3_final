@@ -385,9 +385,9 @@ def test_reclassify_with_busy_lock_still_records_pending_append(cfg, client):
     from app.models import POSet
     from app.services.locking import acquire_lock
 
-    pid = _std(cfg, "BUSY")
+    pid = _std(cfg, "5005")
     assert reconcile_po_set(pid, cfg)["status"] == "merged"
-    _doc(cfg, pid, DocType.CUSTOMS, "busy-c.pdf", [], po_no="BUSY", seed="busy-c")
+    _doc(cfg, pid, DocType.CUSTOMS, "busy-c.pdf", [], po_no="5005", seed="busy-c")
     assert client.post(f"/po_sets/{pid}/toggle_customs").status_code == 200
     assert _status(cfg, pid).customs_append_pending is False  # only one of two attached
 
@@ -409,7 +409,7 @@ def test_reclassify_with_busy_lock_still_records_pending_append(cfg, client):
 
     r = client.post(
         f"/unclassified/{doc_id}/reclassify",
-        data={"doc_type": "SHIPPING", "po_no": "PO-BUSY"},
+        data={"doc_type": "SHIPPING", "po_no": "PO-5005"},
         follow_redirects=False,
     )
     assert r.status_code in (200, 302), r.text

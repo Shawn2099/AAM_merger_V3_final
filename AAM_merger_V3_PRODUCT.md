@@ -162,6 +162,7 @@ approximation.
 | `mismatched` | `quantity_mismatch` | both sides reported a line and the quantities differ |
 | `quarantined` | `non_positive_quantity` | any quantity zero, negative, or unparseable |
 | `quarantined` | `po_reference_mismatch` | a document's PO number disagrees with its set's |
+| `quarantined` | `duplicate_document_number` | two delivery notes (or two invoices) in one set carry the same document number: a re-scan or re-issue would be summed twice, so the set is held for review; part-deliveries have distinct numbers |
 | `quarantined` | `po_line_missing_line_item_no` | a PO line has neither a number nor a description to compare on |
 | `pending` | `multiple_po_documents` | the set holds more than one PO document (config `reconciliation.single_po_document`); held for review, never summed or auto-merged |
 | `quarantined` | `unmatched_vendor_line` | a vendor row resolved to no PO line (see 3.2) |
@@ -809,11 +810,43 @@ be grouped into one set.
 ### L — a PO number that starts with the letters PO loses them
 
 The leading `PO` label is stripped even when it is part of the number, so
-`POST123` keys as `ST123`. A PO printed as `POST123` would group with any
-document that prints `ST123`.
+`POST123` keys as `123` with letters `ST` (the key is the digits). A document
+that prints `ST123` or a plain `123` groups with it.
 
 > Mitigation today: a person reviews the packet. Pinned by
 > `test_known_limitation_po_prefix_strip_eats_the_letters_po`.
+
+### M — the PO key is the digits; letters only veto a clash
+
+The grouping key is the digits of the PO number. Letters on one side only do
+not split a PO (`60213576 OPG` = `60213576`, `P213899` = `213899`), so a plain
+`213899` from a different vendor would join the `P213899` set. Letters on both
+sides that differ (`TOGA-PO-25-26-163` vs `ARM-PO-25-26-163`) are held
+(`po_letters_conflict`), and reconcile quarantines a set whose documents carry
+two different letter groups (`po_reference_mismatch`). Accepted failures:
+`J255-300115876` keys as `255300115876` and never joins a plain `300115876`;
+a PO number with no digits (`OPG`) has no key and is held.
+
+**Fresh database required.** Migration `a9b0c1d2e3f4` adds `po_no_letters` but does
+not rewrite `po_no_normalized` keys created before the digit key. A database from
+before this change must not be upgraded in place: open sets would not receive new
+DN/SI documents, re-reading their documents would raise a drift quarantine, and
+a re-uploaded PO would mint a second open set. Start from a fresh database
+(`scripts/migrate_db.py`).
+
+> Mitigation today: quantities must still agree exactly, and a person reviews
+> the packet. Pinned by
+> `test_known_limitation_letters_on_one_side_join_any_po_with_the_same_digits`,
+> `test_known_limitation_j_prefix_digits_do_not_match_the_plain_number`,
+> `test_known_limitation_a_po_number_without_digits_never_groups`.
+
+### L — a bare `R` revision stays in the key
+
+`Rev`/`Revision` is stripped as a revision, also when glued to the number
+(`161538Rev2` = `161538`). A bare `R` is not: `161538 R2` keys as `1615382`
+with letter `R`. It waits unattached rather than joining `161538`, but it would
+join a genuine open PO `1615382`, where only quantities keep it from merging.
+Pinned by `test_known_limitation_a_bare_r_revision_stays_in_the_key`.
 
 ---
 

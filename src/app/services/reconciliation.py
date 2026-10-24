@@ -138,10 +138,13 @@ REASON_TEXT: dict[str, str] = {
     "packet_write_failed": "The merged packet could not be written to the output folder",
     "no_line_item_evidence": "The set has no line-item evidence, so there is nothing to reconcile",
     "po_reference_mismatch": "A document references a different PO number",
+    "duplicate_document_number": (
+        "Two delivery notes or two invoices in this set carry the same document number"
+    ),
     "quantity_mismatch": "PO, delivery, and invoice quantities do not agree",
     "po_document_has_no_line_items": (
-        "The PO document was read but contains no line items — "
-        "re-extract or contact the VLM operator"
+        "The PO document was read but contains no line items — pages with the "
+        "items may be missing from the input; re-extract or add the missing pages"
     ),
 }
 
@@ -195,6 +198,8 @@ _DETAILED_REASONS = {
     "unclassified_document_in_set",
     "multiple_po_documents",
     "po_reference_mismatch",
+    "duplicate_document_number",
+    "vendor_document_has_no_line_items",
     "packet_naming_failed",
     "packet_source_unreadable",
     "packet_write_failed",
@@ -472,6 +477,97 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                     ],
                 }
 
+        # The PO key is the digits only; letters are the safety check. Each
+        # attach path compares a document with the set's minting letters, so a
+        # set minted from a letterless PO accepts TOGA-... and ARM-... alike, and
+        # a re-read can change a document's letters while it stays attached.
+        # Two different non-empty letter groups in one set are two different
+        # POs sharing their digits: never merge them.
+        from app.services.grouping import po_letters
+
+        letter_groups: dict[str, list[str]] = {}
+        if ps.po_no_letters:
+            letter_groups.setdefault(ps.po_no_letters.upper(), []).append("PO Set")
+        for d in docs:
+            if _get_type(d) not in _set_types:
+                continue
+            try:
+                letters = po_letters(d.po_no_raw)
+            except TypeError:
+                letters = ""
+            if letters:
+                letter_groups.setdefault(letters, []).append(d.original_filename or "?")
+        if len(letter_groups) > 1:
+            parts = "; ".join(
+                f"{k}: {', '.join(sorted(v))}" for k, v in sorted(letter_groups.items())
+            )
+            msg = (
+                f"PO reference mismatch: same PO digits ({ps.po_no_normalized}) but "
+                f"different letters in the PO numbers ({parts})"
+            )
+            logger.warning("PO letters conflict in PO Set %s: %s", ps.id, parts)
+            ps.status = POSetStatus.quarantined
+            s.commit()
+            quarantine_copy(ps.id, cfg, reason="po_reference_mismatch", detail=msg)
+            return {
+                "status": "quarantined",
+                "reason": "po_reference_mismatch",
+                "detail": msg,
+                "po_set_id": po_set_id,
+                "flags": [{"priority": 1, "type": "identification", "message": msg}],
+            }
+
+        # The same DN (or invoice) number on two documents is either one document
+        # scanned twice (or re-issued) or the pages of one document. Summing a
+        # re-scan would double the delivered (or invoiced) quantity and could
+        # complete a PO that was only half delivered. Pages of one document carry
+        # different line numbers and are safe to sum. So the set is held only
+        # when the documents sharing a number also share a line number; a line
+        # with no number counts as shared, since it cannot be told apart.
+        for label, vendor_docs, attr in (
+            ("DN", dn_docs, "dn_no"),
+            ("SI", si_docs, "invoice_no"),
+        ):
+            by_number: dict[str, list] = {}
+            shown: dict[str, str] = {}
+            for d in vendor_docs:
+                raw_no = getattr(d, attr, None) or (d.si_no if label == "SI" else None)
+                key = "".join(c for c in (raw_no or "") if c.isalnum()).upper()
+                if key:
+                    by_number.setdefault(key, []).append(d)
+                    shown.setdefault(key, (raw_no or "").strip())
+            clashes: list[str] = []
+            for key, group in sorted(by_number.items()):
+                if len(group) < 2:
+                    continue
+                seen_lines: set[str] = set()
+                overlap = False
+                for d in group:
+                    mine = {(li.line_item_no or "").strip().upper() for li in d.line_items}
+                    if "" in mine or mine & seen_lines:
+                        overlap = True
+                    seen_lines |= mine
+                if overlap:
+                    names = ", ".join(sorted(d.original_filename or "?" for d in group))
+                    clashes.append(f"{shown[key]}: {names}")
+            if clashes:
+                parts = "; ".join(clashes)
+                msg = (
+                    f"Duplicate {label} number in one PO Set ({parts}) with the same line "
+                    "numbers; remove the extra copy or check that they are different documents"
+                )
+                logger.warning("Duplicate %s number in PO Set %s: %s", label, ps.id, parts)
+                ps.status = POSetStatus.quarantined
+                s.commit()
+                quarantine_copy(ps.id, cfg, reason="duplicate_document_number", detail=msg)
+                return {
+                    "status": "quarantined",
+                    "reason": "duplicate_document_number",
+                    "detail": msg,
+                    "po_set_id": po_set_id,
+                    "flags": [{"priority": 1, "type": "identification", "message": msg}],
+                }
+
         # More than one PO document is a human decision, not an engine guess.
         # Do not sum them (a re-issue would double quantities) and do not
         # quarantine them (they may be legitimate page fragments). Hold the
@@ -555,7 +651,15 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
         # the nightly sweep will report "waiting" forever. Quarantine the set
         # and name the file, so the operator can re-extract it.
         for label, vendor_docs in (("DN", dn_docs), ("SI", si_docs)):
-            empty = [d for d in vendor_docs if not d.line_items]
+            # A page with no lines (an invoice totals page) is covered when another
+            # page of the same document number carries the lines.
+            attr = "dn_no" if label == "DN" else "invoice_no"
+
+            def _num(d, attr=attr) -> str:
+                return "".join(c for c in (getattr(d, attr, None) or "") if c.isalnum()).upper()
+
+            covered = {_num(d) for d in vendor_docs if d.line_items and _num(d)}
+            empty = [d for d in vendor_docs if not d.line_items and _num(d) not in covered]
             if empty:
                 names = ", ".join(sorted(d.original_filename or "?" for d in empty))
                 detail_msg = (

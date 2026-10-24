@@ -439,7 +439,7 @@ def test_unclassified_view_and_reclassify(tmp_cfg, client):
     # POST /unclassified/{doc_id}/reclassify
     r_post = client.post(
         f"/unclassified/{doc_id}/reclassify",
-        data={"doc_type": "PO", "po_no": "MANUALPO999"},
+        data={"doc_type": "PO", "po_no": "999"},
         headers={"HX-Request": "true"},
     )
     assert r_post.status_code == 200
@@ -448,10 +448,10 @@ def test_unclassified_view_and_reclassify(tmp_cfg, client):
     with Session(eng) as s:
         d = s.get(Document, doc_id)
         assert d.doc_type == DocType.PO
-        assert d.po_no_normalized == "MANUALPO999"
+        assert d.po_no_normalized == "999"
         assert d.po_set_id is not None
         ps = s.get(POSet, d.po_set_id)
-        assert ps.po_no_normalized == "MANUALPO999"
+        assert ps.po_no_normalized == "999"
 
 
 def test_manual_merger_back_link_points_to_dashboard(client):
@@ -1044,7 +1044,7 @@ def test_a_failed_split_parent_is_visible_and_recoverable(client, tmp_cfg):
 
     r = client.post(
         f"/unclassified/{doc_id}/reclassify",
-        data={"doc_type": "PO", "po_no": "PO-RECOVERED"},
+        data={"doc_type": "PO", "po_no": "PO-5006"},
         follow_redirects=False,
     )
     assert r.status_code == 302

@@ -113,7 +113,7 @@ def test_ambiguous_doc_never_attaches(tmp_path):
     from app.services.grouping import attach_unattached_to_open_sets, get_or_create_po_set
 
     cfg, eng = _cfg(tmp_path, "amb.db")
-    anchor = get_or_create_po_set("PO-AMB", cfg)
+    anchor = get_or_create_po_set("PO-7773", cfg)
     with Session(eng) as s:
         d = Document(
             sha256_hash="h_amb",
@@ -121,8 +121,8 @@ def test_ambiguous_doc_never_attaches(tmp_path):
             stored_path="x.pdf",
             doc_type=DocType.DN,
             extraction_status=ExtractionStatus.valid,
-            po_no_normalized="POAMB",
-            po_no_raw="PO-AMB",
+            po_no_normalized="PO7773",
+            po_no_raw="PO-7773",
             po_reference_ambiguous=True,
         )
         s.add(d)

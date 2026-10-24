@@ -26,7 +26,8 @@ contract is pinned by `tests/test_business_scenarios_ui.py`.
 | DN and SI documents never create a set; they attach to the open set with the **same normalised PO number**. | `grouping.py` (`ANCHOR_TYPES`, `get_or_create_po_set(create=False)`) |
 | A set is formed **only** by PO, DN and SI documents (customs/shipping are the separate add-ons, §5). An `UNKNOWN` or `COMBINED` document is never attached to a set, even if it carries a PO number, until an operator reclassifies it. A legacy row attached anyway quarantines the set (`unclassified_document_in_set`). | `grouping.py` (`_ATTACHABLE`); `reconciliation.py` |
 | Any number of DN and SI documents may attach. All of them are included in the packet. | `reconciliation.py` (`dn_docs`, `si_docs`); `merge.py::_ordered_docs` |
-| The PO number is normalised (labels/leading `PO`, spacing, case, revision suffix). `PO 161538`, `161538` and `PO, Rev # 161538,0` are the same set. | `grouping.normalize_po_no` |
+| The PO grouping key is the **digits** of the PO number (labels, a leading `PO`/`LPO` and a trailing revision such as `, 0` / `Rev 2` are removed first). `PO 161538`, `161538` and `PO, Rev # 161538,0` are the same set; so are `60213576 OPG` and `60213576`, `P213899` and `213899`, `LPO26/2360` and `PO 26/2360`. A number with no digits has no key: the document is held (`missing_po_number`) and never groups. | `grouping.normalize_po_no` |
+| Letters are a **safety check**, not part of the key. Letters on one side only still attach. Letters on **both** sides that differ after case-folding (`TOGA-PO-25-26-163` vs `ARM-PO-25-26-163`) are different POs that share digits: the document is **held** unattached with `po_letters_conflict` and never grouped; a PO document does not mint a second open set under the same digits. The set's letters are those of its anchoring PO (`po_sets.po_no_letters`). Accepted failure: `J255-300115876` keys as `255300115876` and does not match a plain `300115876`; it waits for an operator. | `grouping.po_letters`, `letters_compatible`, `PoLettersConflict`; `po_sets.po_no_letters` |
 | A document whose printed PO number differs from the set's quarantines the set (`po_reference_mismatch`). | `reconciliation.py` |
 | Duplicate bytes are one document (SHA-256 unique). The same content cannot be attached twice. | `ingestion.py`, upload route |
 
@@ -78,6 +79,7 @@ partial merge.
 | `pending` | A required side is missing, the vendor reported **nothing** for a PO line, a document is not read yet (`document_not_yet_read`), or the set holds more than one PO document (review hold). **Not a pass.** |
 | `pending` (`documents_changed_during_merge`) | A document was attached to, or changed in, the set after reconcile read it and before the packet was written. No packet is written; the next reconcile re-checks the set. **Not a pass.** |
 | `quarantined` | A line could not be identified, a quantity is zero/unreadable, a PO reference mismatch, a document failed extraction (`document_extraction_failed`), an unclassified document is attached (`unclassified_document_in_set`), any single DN/SI has no lines (`vendor_document_has_no_line_items`), or the packet cannot be named. Whole set, never a line. |
+| held (document, not a set) | A document that cannot be placed waits unattached in the holding area with its reason: `missing_po_number`, `ambiguous_po_number`, or `po_letters_conflict` (the digits match an open set but the letters differ, so they are different POs). The holding area prints the reason; naming a clashing PO by hand is refused with a 409. |
 
 Zero or unreadable quantities quarantine (`non_positive_quantity`); a row is
 never silently dropped.
@@ -139,6 +141,9 @@ belonging to another set is never overwritten — that set quarantines as
 | Second PO document holds the set pending | `test_two_po_documents_hold_the_set_pending_for_review` |
 | Identical bytes are one document | `test_identical_po_bytes_are_one_document_not_a_second_po` |
 | Same PO number is required | `test_po_reference_mismatch_quarantines_with_the_offending_file` |
+| PO key is the digits; letters on one side only attach | `test_letters_on_one_side_only_attach_in_both_directions` |
+| Different letters on both sides are held, with the reason on the page | `test_different_letters_same_digits_are_held_not_grouped`, `test_the_holding_area_says_why_a_lettered_document_was_held` |
+| `J255-300115876` does not join `300115876`; a digit-less PO never groups | `test_j_prefixed_number_does_not_join_the_plain_one`, `test_a_po_with_no_digits_is_held_and_never_groups` |
 | Partial delivery is a wait, not a pass | `test_partial_delivery_is_pending_not_quarantined` |
 | Customs off (default) → the merge is the end | `test_one_po_two_dn_two_si_sum_and_merge` |
 | Customs on before merge → blocked then merged | `test_customs_on_before_merge_blocks_then_merges_after_both_docs` |

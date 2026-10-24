@@ -82,7 +82,7 @@ def test_fr_10_1_pinned(tmp_path) -> None:
             extraction_status=ExtractionStatus.valid,
             po_set_id=ps_id,
             po_no_normalized="PO100",
-            invoice_no="INV-100",
+            invoice_no="INV-101",
         )
         s.add_all([doc_po, doc_dn1, doc_dn2, doc_si1, doc_si2])
         s.commit()

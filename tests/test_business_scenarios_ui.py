@@ -835,8 +835,8 @@ def test_customs_docs_uploaded_before_the_requirement_is_switched_on_rebuild_on_
 def test_customs_doc_placed_from_the_holding_area_also_rebuilds_the_packet(cfg, client):
     """A customs/shipping document can arrive through the holding area, not
     only the upload form. It must reach an already-merged packet too."""
-    pid = _standard_set(cfg, "PLACED")
-    _doc(cfg, pid, DocType.DN, "placed-dn.pdf", [("1", "BOLT", 100)], po_no="PLACED")
+    pid = _standard_set(cfg, "5001")
+    _doc(cfg, pid, DocType.DN, "placed-dn.pdf", [("1", "BOLT", 100)], po_no="5001")
     _doc(
         cfg,
         pid,
@@ -844,7 +844,7 @@ def test_customs_doc_placed_from_the_holding_area_also_rebuilds_the_packet(cfg, 
         "placed-si.pdf",
         [("1", "BOLT", 100)],
         si_no="INV-PLACED",
-        po_no="PLACED",
+        po_no="5001",
     )
     assert reconcile_po_set(pid, cfg)["status"] == "merged"
     packet = Path(_status(cfg, pid).merged_output_path)
@@ -878,7 +878,7 @@ def test_customs_doc_placed_from_the_holding_area_also_rebuilds_the_packet(cfg, 
 
     r = client.post(
         f"/unclassified/{doc_id}/reclassify",
-        data={"doc_type": "SHIPPING", "po_no": "PO-PLACED"},
+        data={"doc_type": "SHIPPING", "po_no": "PO-5001"},
         follow_redirects=False,
     )
     assert r.status_code in (200, 302), r.text
@@ -1024,7 +1024,7 @@ def test_archive_keeps_rows_manifest_and_hides_from_worklists(cfg, client):
 def test_archive_allows_a_new_set_for_the_same_po(cfg):
     from app.services.grouping import get_or_create_po_set
 
-    po_no = "PO-REUSE"
+    po_no = "5002"
     pid = _quarantined_set(cfg, po_no)
     from app.services.quarantine import delete_quarantined
 
@@ -1271,8 +1271,8 @@ def test_a_second_po_after_the_first_set_merged_starts_a_new_set(cfg):
     from app.models import Document as Doc
     from app.services.grouping import group_document
 
-    pid = _standard_set(cfg, "PO-AGAIN")
-    _doc(cfg, pid, DocType.DN, "again-dn.pdf", [("1", "BOLT", 100)], po_no="PO-AGAIN")
+    pid = _standard_set(cfg, "5003")
+    _doc(cfg, pid, DocType.DN, "again-dn.pdf", [("1", "BOLT", 100)], po_no="5003")
     _doc(
         cfg,
         pid,
@@ -1280,7 +1280,7 @@ def test_a_second_po_after_the_first_set_merged_starts_a_new_set(cfg):
         "again-si.pdf",
         [("1", "BOLT", 100)],
         si_no="INV-AGAIN",
-        po_no="PO-AGAIN",
+        po_no="5003",
     )
     assert reconcile_po_set(pid, cfg)["status"] == "merged"
 
@@ -1293,8 +1293,8 @@ def test_a_second_po_after_the_first_set_merged_starts_a_new_set(cfg):
             stored_path="",
             doc_type=DocType.PO,
             extraction_status=ExtractionStatus.valid,
-            po_no_normalized="PO-AGAIN",
-            po_no_raw="PO-AGAIN",
+            po_no_normalized="5003",
+            po_no_raw="5003",
         )
         s.add(doc)
         s.commit()
@@ -1424,9 +1424,9 @@ def test_holding_area_count_is_the_same_everywhere(cfg, client):
 
 def test_naming_the_po_on_a_held_document_reconciles_its_set(cfg, client):
     """A human naming the PO must close the loop, not wait for the next scan."""
-    pid = _set(cfg, "HUMAN")
-    _doc(cfg, pid, DocType.PO, "human-po.pdf", [("1", "BOLT", 100)], po_no="HUMAN")
-    _doc(cfg, pid, DocType.DN, "human-dn.pdf", [("1", "BOLT", 100)], po_no="HUMAN")
+    pid = _set(cfg, "5004")
+    _doc(cfg, pid, DocType.PO, "human-po.pdf", [("1", "BOLT", 100)], po_no="5004")
+    _doc(cfg, pid, DocType.DN, "human-dn.pdf", [("1", "BOLT", 100)], po_no="5004")
 
     # The invoice was read but carries no PO reference: it waits in the holding area.
     eng = get_engine(cfg)
@@ -1461,7 +1461,7 @@ def test_naming_the_po_on_a_held_document_reconciles_its_set(cfg, client):
 
     r = client.post(
         f"/unclassified/{doc_id}/reclassify",
-        data={"doc_type": "SI", "po_no": "PO-HUMAN"},
+        data={"doc_type": "SI", "po_no": "PO-5004"},
         follow_redirects=False,
     )
     assert r.status_code in (200, 302), r.text

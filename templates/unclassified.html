@@ -48,8 +48,11 @@
               <div style="font-weight:600; color:var(--text-main);">{{ doc.original_filename }}</div>
               <div class="muted" style="font-size:0.75rem; font-family:ui-monospace, monospace;">
                 SHA: {{ doc.sha256_hash[:12] }}…
-                {% if doc.po_no_normalized %}<br>Extracted PO: {{ doc.po_no_normalized }}{% endif %}
+                {% if doc.po_no_normalized %}<br>Extracted PO: {{ doc.po_no_raw or doc.po_no_normalized }} (key {{ doc.po_no_normalized }}){% endif %}
               </div>
+              {% if hold_notes and hold_notes.get(doc.id) %}
+              <div style="font-size:0.75rem; margin-top:4px; color:var(--danger, #b91c1c);">{{ hold_notes[doc.id] }}</div>
+              {% endif %}
             </td>
 
             <td class="muted" style="font-size:0.85rem;">

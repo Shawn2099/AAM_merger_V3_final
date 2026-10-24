@@ -24,6 +24,7 @@ The stamp is derived from structural markers, never guessed from a date:
     unique index uq_po_sets_open_po_no-> a1b2c3d4e5f6
     archive columns + both partial indexes -> c3d4e5f6a7b8
     po_sets.customs_append_pending    -> e7f8a9b0c1d2
+    po_sets.po_no_letters             -> a9b0c1d2e3f4
 
 Usage:
     python scripts/migrate_db.py [--no-backup]
@@ -65,6 +66,7 @@ _MARKERS: list[tuple[str, str]] = [
     # both archive columns and both archive-aware predicates.
     ("archive_schema", "c3d4e5f6a7b8"),
     ("po_sets.customs_append_pending", "e7f8a9b0c1d2"),
+    ("po_sets.po_no_letters", "a9b0c1d2e3f4"),
 ]
 
 
@@ -192,7 +194,7 @@ def _alembic_config():
     return cfg
 
 
-HEAD_REVISION = "e7f8a9b0c1d2"
+HEAD_REVISION = "a9b0c1d2e3f4"
 
 
 def _current_revision(db_path: Path) -> str | None:

@@ -8,7 +8,7 @@ in AAM_merger_V3_PRODUCT.md section 8 and mitigated by a person reviewing the pa
 
 from __future__ import annotations
 
-from app.services.grouping import normalize_po_no
+from app.services.grouping import normalize_po_no, po_letters
 from app.services.matching import normalize_line_no
 from app.services.reconciliation import compare_po_set_lines
 
@@ -80,6 +80,35 @@ def test_known_limitation_po_prefix_strip_eats_the_letters_po():
     """PRODUCT §8 'L - a PO number starting with the letters PO loses them'.
 
     The leading 'PO' prefix is stripped even when it is part of the number,
-    so 'POST123' keys as 'ST123'.
+    so 'POST123' loses 'PO' (letters 'ST'). The grouping key is now the digits
+    only ('123'), so the lost 'PO' no longer changes the key; the letters
+    check sees 'ST' rather than 'POST'.
     """
-    assert normalize_po_no("POST123") == "ST123"
+    assert normalize_po_no("POST123") == "123"
+    assert po_letters("POST123") == "ST"
+
+
+def test_known_limitation_letters_on_one_side_join_any_po_with_the_same_digits():
+    """PRODUCT §8 'M - the PO key is the digits; letters only veto a clash'.
+
+    Letters on one side only never split a PO, so 'P213899' and another
+    vendor's plain '213899' share a set. Only letters on BOTH sides that differ
+    are refused (and reconcile quarantines a set whose documents disagree).
+    """
+    from app.services.grouping import letters_compatible
+
+    assert normalize_po_no("P213899") == normalize_po_no("213899") == "213899"
+    assert letters_compatible(po_letters("P213899"), po_letters("213899"))
+    assert not letters_compatible(po_letters("TOGA-PO-25-26-163"), po_letters("ARM-PO-25-26-163"))
+
+
+def test_known_limitation_j_prefix_digits_do_not_match_the_plain_number():
+    """PRODUCT §8: 'J255-300115876' keys as 255300115876, not 300115876 (held)."""
+    assert normalize_po_no("J255-300115876") == "255300115876"
+    assert normalize_po_no("J255-300115876") != normalize_po_no("300115876")
+
+
+def test_known_limitation_a_po_number_without_digits_never_groups():
+    """PRODUCT §8: a letters-only PO number has no key; the document is held."""
+    assert normalize_po_no("OPG") == ""
+    assert normalize_po_no("N/A") == ""

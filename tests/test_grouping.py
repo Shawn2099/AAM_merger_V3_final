@@ -15,9 +15,10 @@ def test_normalize():
     # trailing ", 0" is an ERP revision counter, not part of the number
     assert normalize_po_no("22398, 0") == "22398"
     assert normalize_po_no("100-060-0000") == "1000600000"
-    # structured codes keep every real segment
-    assert normalize_po_no("D7264-PO-186000-013-01") == "D7264PO18600001301"
-    assert normalize_po_no("P106420232") == "P106420232"
+    # structured codes keep every digit; the letters are not part of the key
+    # (they are a safety check, see test_po_digit_key.py)
+    assert normalize_po_no("D7264-PO-186000-013-01") == "726418600001301"
+    assert normalize_po_no("P106420232") == "106420232"
 
 
 def test_grouping_same_set():
@@ -258,12 +259,12 @@ def test_dn_never_mints_orphan_set(tmp_path):
     Base.metadata.create_all(eng)
 
     # DN key with no open set: attach-only returns None, mints nothing
-    assert get_or_create_po_set("PO_DECOY", cfg, create=False) is None
+    assert get_or_create_po_set("PO_7771", cfg, create=False) is None
     with Session(eng) as s:
         assert s.query(POSet).count() == 0
 
     # PO anchors the key (mints)
-    ps = get_or_create_po_set("PO_DECOY", cfg, create=True)
+    ps = get_or_create_po_set("PO_7771", cfg, create=True)
     assert ps is not None
 
     with Session(eng) as s:
@@ -276,8 +277,8 @@ def test_dn_never_mints_orphan_set(tmp_path):
                 extraction_status=ExtractionStatus.valid,
                 po_set_id=None,
                 # F1: the "PO" label is stripped from the grouping key, so the
-                # stored key for "PO_DECOY" is "DECOY" (see test_normalize).
-                po_no_normalized="DECOY",
+                # stored key for "PO_7771" is "7771" (see test_normalize).
+                po_no_normalized="7771",
                 dn_no="DN-X",
             )
         )

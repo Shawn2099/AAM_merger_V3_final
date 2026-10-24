@@ -51,11 +51,25 @@ _LEADING_LABEL_RE = re.compile(r"^\s*(?:P\.\s*O\.?|P/0|LPO|PO)(?![A-Za-z])", re.
 #: A trailing revision token: "161538 Rev 2", "PO No. 161538 Rev. 0". Without
 #: this the trailing digit stays and "161538 Rev 2" keys as "1615382", which
 #: collides with a genuinely different PO numbered 1615382.
-_REVISION_RE = re.compile(r"\b(?:rev(?:ision)?)\b\.?\s*#?\s*\d{1,3}\b", re.IGNORECASE)
+#: Bounded by non-LETTERS, not `\b`: a digit or "_" next to the word is not a
+#: word boundary, so `\b` missed "161538Rev2" / "161538_Rev_2" and keyed them
+#: as 1615382. "PREV"/"REVISED" stay plain letters.
+_REV_WORD_RE = re.compile(r"(?<![A-Za-z])rev(?:ision)?(?![A-Za-z])\.?", re.IGNORECASE)
+_REVISION_TAIL_RE = re.compile(r"\s*#?\s*\d{1,3}\s*")
 
 
-def normalize_po_no(raw: str) -> str:
-    """Normalize a PO number to a stable grouping key.
+#: Letters a VLM reads for a digit (O/0, I and L/1, S/5, B/8, Z/2) when they sit INSIDE a
+#: run of digits: "45OO123" is a misread "4500123", not a PO numbered 45123. Deleting
+#: them would give a shorter, plausible key that attaches to an unrelated open set.
+_CONFUSABLE_INSIDE_DIGITS_RE = re.compile(r"(?<=\d)[OILSBZ]{1,3}(?=\d)")
+
+
+def _alnum_key(raw: str | None) -> str:
+    """Strip labels and the revision counter; return the upper-cased alphanumerics.
+
+    The shared first half of `normalize_po_no` (digits) and `po_letters`
+    (letters). Revision stripping happens here, BEFORE digits are taken, so
+    "22613 , 0" is 22613 and not 226130.
 
     Built from the real vendor sample inventory (NotebookLM Section 2): the same
     PO is printed as "161538", "PO 161538" and "PO, Rev # 161538,0" on the PO
@@ -64,10 +78,6 @@ def normalize_po_no(raw: str) -> str:
 
     Steps: drop a trailing ERP revision counter, drop label words, strip a
     leading "PO"-style prefix, then flatten to alphanumerics and upper-case.
-
-    Two properties are load-bearing and covered by tests:
-      - different spellings of one PO collapse to one key
-      - genuinely different POs never collide
     """
     if raw is None:
         return ""
@@ -81,8 +91,27 @@ def normalize_po_no(raw: str) -> str:
     # Labels that punctuation would otherwise split into tokens ("P.O.",
     # "P/0", "LPO"). Done on the raw string, before tokenising.
     s = _LEADING_LABEL_RE.sub("", s, count=1).strip()
-    # A trailing revision counter: "161538 Rev 2" -> "161538".
-    s = _REVISION_RE.sub(" ", s)
+    # A revision marker is either a trailing counter ("161538 Rev 2" -> "161538")
+    # or part of the printed header label ("PO, Rev # 25-26-163": the "Rev #" is
+    # the label and the value follows it). Anything else is ambiguous and gets
+    # no key rather than a guessed one.
+    markers = list(_REV_WORD_RE.finditer(s))
+    if len(markers) > 1:
+        return ""
+    if markers:
+        m = markers[0]
+        prefix, rest = s[: m.start()], s[m.end() :]
+        if re.search(r"\d", prefix):
+            # The PO number precedes the marker: only a bare 1-3 digit revision may follow.
+            if not _REVISION_TAIL_RE.fullmatch(rest):
+                return ""
+            s = prefix
+        else:
+            # Nothing numeric before the marker: it is a label and must be "Rev #".
+            rest = rest.lstrip()
+            if not rest.startswith("#"):
+                return ""
+            s = prefix + " " + rest[1:]
     # SAP revision counter: "PO, Rev # 161538,0" -> "PO, Rev # 161538".
     # A revision counter is 1-2 digits. A 3-digit tail is thousands grouping
     # ("12,345", "1,000", "1,00,000") and is kept, not stripped: stripping it
@@ -91,6 +120,10 @@ def normalize_po_no(raw: str) -> str:
         before, after = s.rsplit(",", 1)
         if re.search(r"\d", before) and re.match(r"^\s*(?:0|[1-9]\d?)\s*$", after):
             s = before
+    if any(c.isalnum() and not c.isascii() for c in s):
+        # Full-width digits or other non-ASCII letters: the split below would drop them
+        # and key the rest as a different PO. No key -> the document is held.
+        return ""
     toks = [t for t in re.split(r"[^A-Za-z0-9]+", s) if t]
     kept: list[str] = []
     for i, t in enumerate(toks):
@@ -108,7 +141,99 @@ def normalize_po_no(raw: str) -> str:
         if up in _LABEL_WORDS:
             continue
         kept.append(t)
-    return "".join(kept).upper()
+    key = "".join(kept).upper()
+    if _CONFUSABLE_INSIDE_DIGITS_RE.search(key):
+        return ""
+    return key
+
+
+def normalize_po_no(raw: str) -> str:
+    """The PO grouping key: the DIGITS of the PO number, nothing else.
+
+    The same PO prints as "60213576 OPG" on one document and "60213576" on
+    another, "LPO26/2360" against "PO 26/2360", "P213899" against "213899".
+    Letters are not reliable enough to be part of the key, so they are kept
+    apart (`po_letters`) and used only as a safety check
+    (`letters_compatible`). Labels, the leading PO and a trailing revision
+    counter are stripped first (see `_alnum_key`).
+
+    Returns "" when there are no digits ("OPG", "N/A"). An empty key must never
+    group anything: callers treat it as "no PO reference".
+
+    Accepted failure: "J255-300115876" keys as 255300115876 and does not match
+    a plain "300115876". The document waits, visible, for an operator.
+    """
+    return "".join(c for c in _alnum_key(raw) if c.isdigit())
+
+
+def po_letters(raw: str | None) -> str:
+    """The letters of a PO number, upper-cased ("" when it has none).
+
+    Used only to refuse a merge of two different POs that share their digits
+    (TOGA-PO-25-26-163 vs ARM-PO-25-26-163).
+    """
+    if not raw:
+        return ""
+    return "".join(c for c in _alnum_key(raw) if c.isalpha())
+
+
+def letters_compatible(a: str | None, b: str | None) -> bool:
+    """True when the letters do not contradict each other.
+
+    One side without letters is compatible with anything; both sides with
+    letters must be equal after case-folding.
+    """
+    a = (a or "").upper()
+    b = (b or "").upper()
+    return not a or not b or a == b
+
+
+class PoLettersConflict(ValueError):
+    """A PO number shares its digits with an open set but has different letters."""
+
+    def __init__(self, po_no: str, set_id: int, set_letters: str | None):
+        self.po_no = po_no
+        self.set_id = set_id
+        self.set_letters = set_letters or ""
+        super().__init__(
+            f"PO number {po_no!r} has the same digits as open PO Set {set_id} but different "
+            f"letters ({po_letters(po_no)!r} vs {self.set_letters!r}); not grouped"
+        )
+
+
+#: Why a document was left unattached, for the holding area. Hold reasons
+#: belong to documents; `reconciliation.REASON_TEXT` is for sets.
+HOLD_REASON_TEXT: dict[str, str] = {
+    "po_letters_conflict": (
+        "The digits match an open PO Set but the letters in the PO number differ, so these "
+        "are treated as different POs. Check the PO number and enter the right one to place it."
+    ),
+}
+
+
+def _find_open_set(session, norm: str):
+    from app.models import POSet, POSetStatus
+
+    return (
+        session.query(POSet)
+        .filter(
+            POSet.po_no_normalized == norm,
+            POSet.status != POSetStatus.merged,
+            POSet.archived_at.is_(None),
+        )
+        .order_by(POSet.id.asc())
+        .first()
+    )
+
+
+def held_letters_conflict(session, doc):
+    """The open set a document is being held away from by a letters clash, or None."""
+    if not doc.po_no_normalized or doc.po_set_id is not None:
+        return None
+    ps = _find_open_set(session, doc.po_no_normalized)
+    if ps is None or letters_compatible(ps.po_no_letters, po_letters(doc.po_no_raw)):
+        return None
+    return ps
 
 
 #: The only document type that may mint a PO Set. A PO Set is expected to
@@ -152,6 +277,9 @@ def group_document(doc, cfg) -> tuple[int | None, str | None]:
                                an ambiguous PO would mint one under
                                whichever number was named first and strand
                                the others. It waits for a human.
+      "po_letters_conflict" - the digits match an open set but the letters
+                               differ (TOGA-PO-25-26-163 vs ARM-PO-25-26-163).
+                               Different POs: held, never grouped.
     """
     dtype = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
     if dtype not in _ATTACHABLE:
@@ -167,17 +295,26 @@ def group_document(doc, cfg) -> tuple[int | None, str | None]:
         # wrong set. The two attach sweeps already refuse all types; this path
         # is the third one and used to be the exception.
         return None, "ambiguous_po_number"
-    ps = get_or_create_po_set(
-        doc.po_no_raw or doc.po_no_normalized,
-        cfg,
-        create=dtype in ANCHOR_TYPES,
-    )
+    try:
+        ps = get_or_create_po_set(
+            doc.po_no_raw or doc.po_no_normalized,
+            cfg,
+            create=dtype in ANCHOR_TYPES,
+        )
+    except PoLettersConflict:
+        return None, "po_letters_conflict"
     if ps is None:
         return None, None
     return ps.id, None
 
 
 def get_or_create_po_set(po_no: str, cfg, create: bool = True):
+    """The open set for this PO number's digits, minting it when `create`.
+
+    Raises `PoLettersConflict` when an open set has the same digits but
+    contradicting letters; `ValueError` when `create` and the number has no
+    digits. Returns None for a digit-less number when not creating.
+    """
     from sqlalchemy.exc import IntegrityError
     from sqlalchemy.orm import Session
 
@@ -186,28 +323,34 @@ def get_or_create_po_set(po_no: str, cfg, create: bool = True):
     from app.models.base import Base
 
     norm = normalize_po_no(po_no)
+    letters = po_letters(po_no)
+    if not norm:
+        if create:
+            raise ValueError(f"PO number {po_no!r} has no digits; it cannot key a PO Set")
+        return None
     eng = get_engine(cfg)
     # ensure tables exist (handles isolated tmp_path DB in tests)
     Base.metadata.create_all(eng)
+
+    def _checked(ps):
+        if not letters_compatible(ps.po_no_letters, letters):
+            raise PoLettersConflict(po_no, ps.id, ps.po_no_letters)
+        return ps
+
     with Session(eng) as s:
-        ps = (
-            s.query(POSet)
-            .filter(
-                POSet.po_no_normalized == norm,
-                POSet.status != POSetStatus.merged,
-                POSet.archived_at.is_(None),
-            )
-            .order_by(POSet.id.asc())
-            .first()
-        )
+        ps = _find_open_set(s, norm)
         if ps is not None:
-            return ps
+            return _checked(ps)
         if not create:
             # Attach-only (BLOCKER-5): DN/SI/UNKNOWN docs must never mint
             # orphan sets from decoy codes — they wait visibly unattached
             # (unclassified view) until a PO anchors the key.
             return None
-        ps = POSet(po_no_normalized=norm, status=POSetStatus.pending)
+        ps = POSet(
+            po_no_normalized=norm,
+            po_no_letters=letters or None,
+            status=POSetStatus.pending,
+        )
         s.add(ps)
         try:
             s.commit()
@@ -216,19 +359,10 @@ def get_or_create_po_set(po_no: str, cfg, create: bool = True):
             # missed the SELECT cannot both insert. The loser joins the winner
             # instead of surfacing a 500 or minting a duplicate set.
             s.rollback()
-            ps = (
-                s.query(POSet)
-                .filter(
-                    POSet.po_no_normalized == norm,
-                    POSet.status != POSetStatus.merged,
-                    POSet.archived_at.is_(None),
-                )
-                .order_by(POSet.id.asc())
-                .first()
-            )
+            ps = _find_open_set(s, norm)
             if ps is None:
                 raise
-            return ps
+            return _checked(ps)
         s.refresh(ps)
         return ps
 
@@ -244,7 +378,7 @@ def attach_unattached_to_open_sets(cfg) -> set[int]:
     from sqlalchemy.orm import Session
 
     from app.core.database import get_engine
-    from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus
+    from app.models import DocType, Document, ExtractionStatus
 
     eng = get_engine(cfg)
     touched: set[int] = set()
@@ -255,6 +389,7 @@ def attach_unattached_to_open_sets(cfg) -> set[int]:
                 Document.po_set_id.is_(None),
                 Document.extraction_status == ExtractionStatus.valid,
                 Document.po_no_normalized.isnot(None),
+                Document.po_no_normalized != "",
                 Document.is_split_parent.is_(False),
                 Document.doc_type.in_([DocType.PO, DocType.DN, DocType.SI]),
             )
@@ -266,18 +401,13 @@ def attach_unattached_to_open_sets(cfg) -> set[int]:
                 # it to any one PO would silently strand the others, so it stays
                 # unattached and the set is surfaced for a human.
                 continue
-            ps = (
-                s.query(POSet)
-                .filter(
-                    POSet.po_no_normalized == doc.po_no_normalized,
-                    POSet.status != POSetStatus.merged,
-                    POSet.archived_at.is_(None),
-                )
-                .order_by(POSet.id.asc())
-                .first()
-            )
+            if not doc.po_no_normalized:
+                continue
+            ps = _find_open_set(s, doc.po_no_normalized)
             if ps is None:
                 continue  # no anchor yet — keep waiting, stay visible
+            if not letters_compatible(ps.po_no_letters, po_letters(doc.po_no_raw)):
+                continue  # same digits, different letters: a different PO
             doc.po_set_id = ps.id
             touched.add(ps.id)
         s.commit()
@@ -419,6 +549,8 @@ def resolve_unattached_documents(cfg) -> set[int]:
 
             if matched_ps_id:
                 ps = s.get(POSet, matched_ps_id)
+                if ps and not letters_compatible(ps.po_no_letters, po_letters(doc.po_no_raw)):
+                    continue  # the document's own PO letters contradict the set's
                 if ps and ps.status != POSetStatus.merged and ps.archived_at is None:
                     doc.po_set_id = matched_ps_id
                     if not doc.po_no_normalized and matched_po_norm:

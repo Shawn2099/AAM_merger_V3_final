@@ -1098,6 +1098,19 @@ def unclassified_view(request: Request):
         unplaced_count = sum(
             1 for d in docs if d.extraction_status == ExtractionStatus.valid and d.po_set_id is None
         )
+        # Documents held away from an open set because their PO letters differ
+        # from the set's (same digits, different PO). Say so on the row.
+        from app.services.grouping import HOLD_REASON_TEXT, held_letters_conflict
+
+        hold_notes: dict[int, str] = {}
+        for d in docs:
+            clash = held_letters_conflict(s, d)
+            if clash is not None:
+                hold_notes[d.id] = (
+                    f"Held: {HOLD_REASON_TEXT['po_letters_conflict']} "
+                    f"(open PO Set #{clash.id}, key {clash.po_no_normalized}, "
+                    f"letters {clash.po_no_letters or 'none'})"
+                )
         return _templates.TemplateResponse(
             request,
             "unclassified.html",
@@ -1108,6 +1121,7 @@ def unclassified_view(request: Request):
                 "failed_count": failed_count,
                 "ambiguous_count": ambiguous_count,
                 "unplaced_count": unplaced_count,
+                "hold_notes": hold_notes,
                 "attempt_cap": int(getattr(cfg.extraction, "max_retries", 3) or 3),
             },
         )
@@ -1129,6 +1143,16 @@ def normalize_po_preview(po_no: str = ""):
         return {"normalized": ""}
 
 
+def _open_set_or_409(raw: str, cfg, *, create: bool):
+    """`get_or_create_po_set`, with a letters clash reported as a 409 to the operator."""
+    from app.services.grouping import PoLettersConflict, get_or_create_po_set
+
+    try:
+        return get_or_create_po_set(raw, cfg, create=create)
+    except PoLettersConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/unclassified/{doc_id}/reclassify", response_class=HTMLResponse)
 def reclassify_document(
     doc_id: int,
@@ -1140,7 +1164,6 @@ def reclassify_document(
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     from app.services import sync_lock
-    from app.services.grouping import get_or_create_po_set
 
     # Reclassifying writes a document's type/PO while the sync may be
     # attaching the same row. Refuse rather than race the sweep.
@@ -1250,8 +1273,8 @@ def reclassify_document(
                 raise HTTPException(
                     status_code=422,
                     detail=(
-                        f"PO number {raw!r} normalises to an empty key; enter the "
-                        "number printed on the document."
+                        f"PO number {raw!r} has no digits, so it cannot key a PO Set; "
+                        "enter the number printed on the document."
                     ),
                 )
             doc.po_no_raw = raw
@@ -1268,16 +1291,22 @@ def reclassify_document(
                 # already been delivered; that is the append workflow. The
                 # generic lookup excludes merged sets, which would strand the
                 # document in a new empty set that can never merge.
-                merged = (
-                    s.query(POSet)
-                    .filter(
-                        POSet.po_no_normalized == norm,
-                        POSet.status == POSetStatus.merged,
-                        POSet.archived_at.is_(None),
+                from app.services.grouping import letters_compatible, po_letters
+
+                merged = [
+                    m
+                    for m in (
+                        s.query(POSet)
+                        .filter(
+                            POSet.po_no_normalized == norm,
+                            POSet.status == POSetStatus.merged,
+                            POSet.archived_at.is_(None),
+                        )
+                        .order_by(POSet.id.desc())
+                        .all()
                     )
-                    .order_by(POSet.id.desc())
-                    .all()
-                )
+                    if letters_compatible(m.po_no_letters, po_letters(raw))
+                ]
                 if len(merged) > 1:
                     raise HTTPException(
                         status_code=409,
@@ -1292,14 +1321,14 @@ def reclassify_document(
                 else:
                     # No delivered packet yet: attach to an open set if one
                     # exists, otherwise leave it waiting for a human.
-                    open_ps = get_or_create_po_set(raw, cfg, create=False)
+                    open_ps = _open_set_or_409(raw, cfg, create=False)
                     if open_ps is not None:
                         doc.po_set_id = open_ps.id
             else:
                 # A human naming a PO is the explicit gate PRODUCT 8 describes:
                 # place the document, creating the set when no open one exists.
                 # Unlike the automatic sweeps, this is not a filename guess.
-                ps = get_or_create_po_set(raw, cfg)
+                ps = _open_set_or_409(raw, cfg, create=True)
                 doc.po_set_id = ps.id
 
         # Update customs_doc_count and status transition if attached to a PO Set

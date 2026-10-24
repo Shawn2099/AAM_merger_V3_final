@@ -94,7 +94,7 @@ def test_a_held_dn_can_be_named_and_attaches(tmp_cfg, client):
     with Session(get_engine(tmp_cfg)) as s:
         doc = s.get(Document, doc_id)
         assert doc.po_set_id is not None
-        assert s.get(POSet, doc.po_set_id).po_no_normalized == "HELD1"
+        assert s.get(POSet, doc.po_set_id).po_no_normalized == "1"
 
 
 def test_known_limitation_an_attached_document_cannot_be_reclassified(tmp_cfg, client):

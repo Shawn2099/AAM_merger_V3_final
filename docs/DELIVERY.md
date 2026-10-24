@@ -47,6 +47,11 @@ the Prefect deployment's paths are fixed at deploy time.
 
 ## 3. Install
 
+> **Fresh database required.** The PO grouping key changed to digits-only
+> (PRODUCT section 8, entry M) and old keys are not migrated. Do not upgrade a
+> database created before this change in place; install with a new, empty one
+> (`uv run python scripts/migrate_db.py`).
+
 Allow the scripts to run in this PowerShell session and unblock the downloaded files first:
 
 ```powershell

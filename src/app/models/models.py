@@ -162,7 +162,12 @@ class POSet(Base):
     __tablename__ = "po_sets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # The DIGITS of the PO number: the grouping key and the unique-index column.
     po_no_normalized: Mapped[str] = mapped_column(Text, index=True, nullable=False)
+    # The upper-cased LETTERS of the anchoring PO's number, NULL when it had
+    # none. Not part of the key: a safety check so that two POs sharing digits
+    # but carrying different letters are never grouped (grouping.letters_compatible).
+    po_no_letters: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[POSetStatus] = mapped_column(Enum(POSetStatus), nullable=False)
     has_customs_toggle: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     customs_doc_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
