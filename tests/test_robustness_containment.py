@@ -634,6 +634,31 @@ def test_resent_identical_po_after_merge_does_not_mint_a_phantom_set(rcfg, monke
     assert len(all_sets) == 1, [(s.id, s.status, len(s.documents)) for s in all_sets]
 
 
+def test_a_full_set_dropped_in_subfolders_merges_and_clears_its_inputs(rcfg, monkeypatch):
+    """R-17: files may sit in subfolders (one per supplier or per day)."""
+    HttpVLM(monkeypatch, _good())
+    inp = Path(rcfg.paths.input_folder)
+    (inp / "supplier_a").mkdir()
+    (inp / "supplier_b" / "2026-10-24").mkdir(parents=True)
+    write_pdf(inp / "supplier_a" / "PO.pdf", W_PO)
+    write_pdf(inp / "supplier_b" / "2026-10-24" / "DN.pdf", W_DN)
+    write_pdf(inp / "supplier_a" / "SI.pdf", W_SI)
+    run_sync()
+    (ps,) = sets(rcfg)
+    assert ps.status == POSetStatus.merged, ps.reconcile_reason
+    assert list(inp.rglob("*.pdf")) == [], "merged inputs are cleared from subfolders too"
+
+
+def test_a_hidden_or_data_folder_inside_input_is_not_scanned(rcfg, monkeypatch):
+    HttpVLM(monkeypatch, _good())
+    inp = Path(rcfg.paths.input_folder)
+    (inp / ".trash").mkdir()
+    write_pdf(inp / ".trash" / "PO.pdf", W_PO)
+    run_sync()
+    assert all_docs(rcfg) == []
+    assert (inp / ".trash" / "PO.pdf").exists()
+
+
 def test_a_failing_attach_sweep_does_not_stop_reconciliation(rcfg, monkeypatch):
     import app.services.grouping as grouping
 

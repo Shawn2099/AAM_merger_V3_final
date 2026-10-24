@@ -243,6 +243,8 @@ SET_W = _set_widths()
 
 def _responses():
     resp: dict[float, object] = {w: spec for w, (_name, spec) in SINGLES.items()}
+    # A PDF in input/sub/ is read now (R-17): a DN that cites no PO, so it is held unattached.
+    resp[396.0] = extraction("DN", "DN-SUB", None, [line("1", "10")])
     for key, (po_no, dn_ref, si_ref, po_l, dn_l, si_l) in SETS.items():
         wp, wd, ws = SET_W[key]
         resp[wp] = extraction("PO", po_no, None, po_l)
@@ -519,33 +521,19 @@ def test_menu_misread_as_si_without_po_is_held(batch):
 # ======================================================================= file faults
 
 
-def test_zero_byte_file_is_skipped_silently_every_night(batch):
-    """Observed: no row, no quarantine, not counted; it stays in input forever.
+def test_limitation_zero_byte_file_is_skipped_every_night(batch):
+    """Decided 2026-10-24: a zero-byte .pdf is skipped for now (a later module may use it).
 
-    `is_file_stable` refuses size 0, so the ingest-time rejection is never
-    reached. Acceptable only because nothing is lost; the operator is never told.
+    No row, no quarantine, not counted; it stays in input. `is_file_stable` refuses
+    size 0, so the ingest-time rejection is never reached. Nothing is lost.
     """
     assert "zero.pdf" in batch["input"]
     assert "zero.pdf" not in batch["docs"]
 
 
-def test_files_in_subfolders_are_never_scanned(batch):
-    """Observed: input/sub/*.pdf is ignored with no log or count."""
-    assert "in_subfolder.pdf" in batch["input"]
-    assert "in_subfolder.pdf" not in batch["docs"]
-
-
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="DEFECT R-17 (low): a zero-byte .pdf and any PDF in a subfolder of input/ are "
-    "skipped every night with no Document row, no error count and (subfolder) no log line. "
-    "The operator is never told; a vendor drop into a subfolder is silently never processed.",
-)
-@pytest.mark.parametrize("name", ["zero.pdf", "in_subfolder.pdf"])
-def test_skipped_input_is_visible_to_the_operator(batch, name):
-    assert name in batch["input"]  # precondition: still sitting in input
-    assert name in batch["docs"], "no row -> not on the Unclassified page"
+def test_files_in_subfolders_are_read(batch):
+    """R-17 (decided 2026-10-24): input/sub/*.pdf is ingested like a top-level file."""
+    assert "in_subfolder.pdf" in batch["docs"], "a PDF in a subfolder must be read"
 
 
 def test_recently_written_truncated_pdf_stays_in_input_for_retry(batch):

@@ -689,8 +689,8 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     )
     from app.services.grouping import group_document
     from app.services.ingestion import (
-        find_input_pdfs,
         ingest_file,
+        input_pdfs,
     )
 
     reset_provider_breaker()
@@ -716,7 +716,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     # Discover PDFs in input folder. find_input_pdfs matches the suffix
     # case-insensitively in ONE pass — globbing "*.pdf" and "*.PDF" separately
     # would double the list on Windows and send every document to the VLM twice.
-    files = find_input_pdfs(input_folder)
+    files = input_pdfs(cfg)
 
     # Stability poll (FR-4.5) for the whole batch, taken together.
     stable_map = _poll_stability(files, cfg)

@@ -49,10 +49,19 @@ Last updated: 2026-10-24. Branch `fix/mvp-high-priority`, remote `origin` (push 
   breaker quarantining before the trip, document-specific 400s able to halt every night, shared breaker state, rejected rows
   reclassifiable/previewable/uploadable, and unsafe quarantine filenames: all fixed in bf7a294 (see PRODUCT section 8 R-06 entry).
   `make business-logic` files: 183 passed. Full suite at bf7a294: 6309 passed, 6 skipped, 46 xfailed.
+- **T8 UI accuracy audit (2026-10-24, on a COPY of the migrated live DB, GET-only, the real app via TestClient):** 7 pages + 57 set
+  pages rendered; 805 independent checks (DB and files vs what the page shows: every dashboard row's PO/status/reason/doc count/PDF link, KPI cards,
+  tab counts, nav badges, per-set matrix totals vs line_items, attached-document tables, Unclassified and Quarantine lists, merged packet page
+  counts vs their source PDFs) -> all pass. 200/200 document previews and 12/12 merged downloads serve the exact file. One real gap found and
+  FIXED: pending sets hid vendor lines that match no PO line (sets 14, 22, 23, 52: quantities in the DB shown nowhere); they are now listed as
+  "Not on the PO" notes. Not covered: browser-side behaviour (Alpine/HTMX, drawer, buttons: the opt-in Playwright tests are skipped) and
+  visual layout; do a 10-minute click-through on the target PC. Known display quirks: qty-0 numberless PO rows read `0 0 0 Match`; sets whose
+  stored status predates the line-number fallback (e.g. 48) show a stale status next to a live matrix that now matches (clears on a re-run).
+- **R-17 decided (2026-10-24, second answer):** subfolders ARE read now; zero-byte files stay skipped (a future module may use them).
 - **Still open:** T7 retest corpus + fresh-DB run (uses the paid provider; needs the user's go-ahead), T8 operator UI
   walk-through, T9 cleanup (list below, user decides), T10 final branch review + gitnexus refresh (`node .gitnexus/run.cjs analyze`).
 - **Decisions made by the user (2026-10-24 night):** R-07 -> a packet-write I/O failure leaves the set `pending` and is retried
-  (implemented); R-17 -> leave as is (subfolders / zero-byte files stay unscanned; documented in PRODUCT section 8, pinned xfail);
+  (implemented); R-17 -> subfolders are read, zero-byte files skipped (implemented, PRODUCT section 8);
   licences (pymupdf AGPL) -> later; the real-corpus retest runs LAST, on a NEW DB, once all development and testing are done and
   the assistant is confident; scratch cleanup approved and done (T9: files archived to `Desktop/aam_merger_scratch_backup_20261024.zip`
   then deleted; the four local data folders and `scratch_*` are now in `.gitignore`).

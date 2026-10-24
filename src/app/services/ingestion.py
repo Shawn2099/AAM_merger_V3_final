@@ -275,8 +275,16 @@ def ingest_file(src: Path, cfg: AppConfig) -> Document:
         return doc
 
 
-def find_input_pdfs(input_folder: Path | str) -> list[Path]:
-    """Every PDF in the input folder, once each, on any platform.
+def find_input_pdfs(
+    input_folder: Path | str, exclude: tuple[Path | str, ...] | list[Path | str] = ()
+) -> list[Path]:
+    """Every PDF in the input folder AND its subfolders, once each, on any platform.
+
+    Subfolders are read (R-17): a vendor or an operator may drop files in a
+    folder per supplier or per day. Hidden folders (a leading dot) and any
+    folder in `exclude` (the other configured data folders, when they happen to
+    sit inside input) are skipped. Zero-byte files are listed here but never
+    pass the stability check, so they are skipped until they have content.
 
     Do NOT write this as `glob("*.pdf") + glob("*.PDF")`. pathlib's glob is
     CASE-INSENSITIVE on Windows, so both patterns match the same files and the
@@ -285,10 +293,66 @@ def find_input_pdfs(input_folder: Path | str) -> list[Path]:
     every sync — double the API cost, on the one platform this is deployed to.
     It reproduces only on Windows, so Linux development hides it.
     """
+    import os
+
     folder = Path(input_folder)
     if not folder.exists():
         return []
-    return sorted(f for f in folder.iterdir() if f.is_file() and f.suffix.lower() == ".pdf")
+    skip = []
+    for raw in exclude:
+        try:
+            skip.append(Path(raw).resolve())
+        except OSError:
+            continue
+    found: list[Path] = []
+    for root, dirs, files in os.walk(folder):
+        root_path = Path(root)
+        dirs[:] = sorted(
+            d for d in dirs if not d.startswith(".") and (root_path / d).resolve() not in skip
+        )
+        found.extend(root_path / f for f in files if (root_path / f).suffix.lower() == ".pdf")
+    return sorted(found)
+
+
+def input_pdfs(cfg: AppConfig) -> list[Path]:
+    """`find_input_pdfs` for the configured input folder, minus the other data folders."""
+    paths = cfg.paths
+    others = [
+        getattr(paths, name, None)
+        for name in (
+            "output_folder",
+            "quarantine_folder",
+            "stored_documents_folder",
+            "combined_folder",
+            "archive_folder",
+            "log_folder",
+        )
+    ]
+    return find_input_pdfs(paths.input_folder, exclude=[o for o in others if o])
+
+
+def locate_input_copy(
+    cfg: AppConfig, filename: str | None, sha256: str | None = None
+) -> Path | None:
+    """The input-folder file (top level first, then subfolders) for a document, or None.
+
+    Matches on the file NAME; when `sha256` is given the bytes must hash to it, so
+    a same-named unrelated file is never taken for the document.
+    """
+    if not filename:
+        return None
+    name = Path(filename).name
+    candidates = [Path(cfg.paths.input_folder) / name]
+    candidates += [p for p in input_pdfs(cfg) if p.name == name and p not in candidates]
+    for cand in candidates:
+        try:
+            if not cand.is_file():
+                continue
+            if sha256 is None or hashlib.sha256(cand.read_bytes()).hexdigest() == sha256:
+                return cand
+        except OSError:
+            continue
+    return None
 
 
 def delete_input_files(po_set: POSet, input_folder: Path | str) -> list[str]:

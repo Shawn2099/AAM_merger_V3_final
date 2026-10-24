@@ -463,6 +463,23 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
                     "identification",
                     "quantity",
                 ):
+                    if f["type"] == "identification":
+                        # Not painted as a failure (the set is only waiting), but the
+                        # quantity must stay visible: the matrix totals leave it out,
+                        # and a page that hides a delivered or invoiced line is wrong.
+                        vendor_qty = (f.get("vendor_quantity") or 0) / 1000
+                        flags.append(
+                            {
+                                "priority": 3,
+                                "badge": "badge-gray",
+                                "type": "Not on the PO",
+                                "message": (
+                                    f"{f['pool']} line {f.get('line_item_no') or '?'} "
+                                    f"(qty {vendor_qty:g}) matches no PO line yet; it is not "
+                                    "counted in the matrix below"
+                                ),
+                            }
+                        )
                     continue
                 if f["type"] == "identification":
                     vendor_qty = (f.get("vendor_quantity") or 0) / 1000

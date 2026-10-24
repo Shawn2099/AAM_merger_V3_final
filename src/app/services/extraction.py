@@ -558,7 +558,11 @@ def _handle_combined(doc, s, result: dict, cfg) -> Document:
     try:
         import shutil
 
-        input_copy = Path(cfg.paths.input_folder) / (doc.original_filename or "")
+        from app.services.ingestion import input_pdfs, locate_input_copy
+
+        input_copy = locate_input_copy(cfg, doc.original_filename) or Path(
+            cfg.paths.input_folder
+        ) / (doc.original_filename or "")
         combined_dir = Path(cfg.paths.combined_folder)
         combined_dir.mkdir(parents=True, exist_ok=True)
         if input_copy.exists():
@@ -573,10 +577,8 @@ def _handle_combined(doc, s, result: dict, cfg) -> Document:
         # every input copy whose content is the parent's (stored/ is untouched).
         import hashlib
 
-        for other in Path(cfg.paths.input_folder).iterdir():
-            if not other.is_file() or other.suffix.lower() != ".pdf":
-                continue
-            if other.name == (doc.original_filename or ""):
+        for other in input_pdfs(cfg):
+            if other == input_copy:
                 continue
             try:
                 if hashlib.sha256(other.read_bytes()).hexdigest() == doc.sha256_hash:

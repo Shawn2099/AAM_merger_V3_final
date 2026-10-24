@@ -454,7 +454,9 @@ def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
     out_name = _safe_filename(original, name)
     if out_name.lower() in ("quarantine.txt", ".po_set_id"):
         out_name = f"document_{out_name}"
-    input_copy = Path(cfg.paths.input_folder) / original if original else None
+    from app.services.ingestion import locate_input_copy
+
+    input_copy = locate_input_copy(cfg, original, sha)
     try:
         if stored.exists():
             shutil.copy(str(stored), str(folder / out_name))
@@ -949,9 +951,9 @@ def archive_quarantined(
         if input_root.exists():
             import hashlib
 
-            for source_file in list(input_root.iterdir()):
-                if not source_file.is_file() or source_file.suffix.lower() != ".pdf":
-                    continue
+            from app.services.ingestion import input_pdfs
+
+            for source_file in input_pdfs(cfg):
                 try:
                     digest = hashlib.sha256(source_file.read_bytes()).hexdigest()
                 except Exception:

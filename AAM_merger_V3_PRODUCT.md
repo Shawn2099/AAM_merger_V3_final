@@ -633,15 +633,27 @@ Pinned by `test_the_400_breaker_refunds_attempts_and_reports_the_halt`,
 `test_a_document_the_breaker_already_refunded_is_judged_on_its_own` and
 `test_a_good_read_between_400s_does_not_trip_the_breaker`.
 
-### L — zero-byte files and files in input subfolders are skipped without a trace (R-17, decided: leave)
+### L — subfolders of the input folder are read; zero-byte files are skipped (R-17)
 
-A zero-byte `.pdf` never passes the stability check, and a PDF inside a subfolder of
-the input folder is never listed (`find_input_pdfs` reads the top level only). Neither
-gets a Document row, an error count or a log line, so neither appears on the
-Unclassified page. Nothing is deleted or lost: the file stays where it is. The
-operator must drop files directly in the input folder. Decided on 2026-10-24 not to
-scan subfolders or add a warning for now. Pinned (as a strict xfail) by
-`test_skipped_input_is_visible_to_the_operator` in `tests/test_robustness_batch_sync.py`.
+The scan reads the input folder AND its subfolders (a folder per supplier or per
+day works), skipping hidden folders (a leading dot) and the other configured data
+folders if they sit inside input. A merged set's input copies are cleared wherever
+they sit, and a quarantined document's input copy is found in a subfolder too.
+A zero-byte `.pdf` never passes the stability check, so it is skipped every
+night with no row, no error count and no log line; nothing is lost (decided
+2026-10-24 to leave it for now). Pinned by
+`test_a_full_set_dropped_in_subfolders_merges_and_clears_its_inputs`,
+`test_a_hidden_or_data_folder_inside_input_is_not_scanned`,
+`test_files_in_subfolders_are_read` and `test_limitation_zero_byte_file_is_skipped_every_night`.
+
+### L — a waiting set shows vendor lines that match no PO line as a neutral note
+
+A set that is only waiting (no DN yet, or several PO documents) does not paint
+unmatched vendor lines red, but the set page lists them as "Not on the PO" with
+their quantity, so no delivered or invoiced quantity is hidden. They are still not
+counted in the matrix totals until they match a PO line. Numberless PO rows
+(overflow text, qty 0) show as `0 0 0 Match`. Pinned by
+`test_a_waiting_set_still_shows_a_vendor_line_that_matches_no_po_line`.
 
 ### L — files rejected at ingest are listed, re-sent merged files are cleared (R-03, R-16)
 
