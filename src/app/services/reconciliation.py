@@ -8,15 +8,24 @@ so the verdict a reviewer reads is the verdict the engine reached. See
 
 from __future__ import annotations
 
+import json
 import logging
 
 from sqlalchemy.orm import Session
 
-from app.core.config import AppConfig
+from app.core.config import AppConfig, LineNumberFallbackConfig
 from app.core.database import get_engine
-from app.models import DocType, POSet, POSetStatus
+from app.models import AuditAction, AuditLog, DocType, POSet, POSetStatus
 from app.models.base import Base
-from app.services.matching import compare_aggregates, display_line_key, group_by_line_no
+from app.services.matching import (
+    LINE_MAPPING_RULES,
+    RULE_TEXT,
+    compare_aggregates,
+    display_line_key,
+    group_by_line_no,
+    normalize_line_no,
+    resolve_line_mapping,
+)
 from app.services.quarantine import quarantine_copy
 
 logger = logging.getLogger(__name__)
@@ -27,6 +36,8 @@ def compare_po_set_lines(
     dn_lines: list[dict],
     si_lines: list[dict],
     desc_threshold: int = 85,
+    *,
+    line_fallback: LineNumberFallbackConfig | None = None,
 ) -> dict:
     """Compare PO lines against the DN pool and the SI pool, independently.
 
@@ -36,12 +47,34 @@ def compare_po_set_lines(
         po_fail    non-None when a PO line carries no usable line number
         flags      one entry per discrepancy, priority 1 (identity) before
                    2 (quantity), plus `description_match` entries for links
-                   made by the description fallback (advisory, not a failure)
+                   made by the description fallback (advisory, not a failure),
+                   `line_mapping` entries for a pool whose vendor line numbers
+                   were mapped by a rule, and `line_mapping_rejected` entries
+                   for a mixed pool that was left as printed (both advisory)
+        line_mapping  {"label", "DN": {"rule", "map"}, "SI": {...}}
+
+    `line_fallback` is off by default (None = exact matching only). When given,
+    each vendor pool whose line numbers exact matching cannot place may be
+    re-keyed (a copy; PO keys are never rewritten) by one numbering rule, see
+    `matching.resolve_line_mapping`.
 
     A line that is short of its PO quantity is still reported here; deciding
     whether that means "awaiting delivery" or "failed" is the caller's job,
     because only the engine knows the set's history.
     """
+    rules = line_fallback.rules() if line_fallback is not None else frozenset()
+    lm = resolve_line_mapping(po_lines, dn_lines, si_lines, rules)
+    if lm.dn.rule:
+        dn_lines = [
+            {**r, "line_item_no": lm.dn.map[normalize_line_no(r.get("line_item_no"))]}
+            for r in dn_lines
+        ]
+    if lm.si.rule:
+        si_lines = [
+            {**r, "line_item_no": lm.si.map[normalize_line_no(r.get("line_item_no"))]}
+            for r in si_lines
+        ]
+
     dn_desc: list[dict] = []
     si_desc: list[dict] = []
     po_totals, dn_totals, dn_orphans, po_fail = group_by_line_no(
@@ -91,6 +124,34 @@ def compare_po_set_lines(
                     ),
                 }
             )
+    for pool, pm in (("DN", lm.dn), ("SI", lm.si)):
+        if pm.rule:
+            flags.append(
+                {
+                    "priority": 2,
+                    "type": "line_mapping",
+                    "pool": pool,
+                    "rule": pm.rule,
+                    "label": lm.label,
+                    "map": dict(pm.map),
+                    "reason": "line_number_mapped",
+                    "message": (
+                        f"{pool} line numbers mapped to the PO by rule {pm.rule} "
+                        f"({RULE_TEXT[pm.rule]}): "
+                        + ", ".join(f"{v} -> {p}" for v, p in pm.map.items())
+                    ),
+                }
+            )
+    for pool, code, msg in lm.rejections:
+        flags.append(
+            {
+                "priority": 1,
+                "type": "line_mapping_rejected",
+                "pool": pool,
+                "reason": code,
+                "message": msg,
+            }
+        )
     flags.sort(key=lambda f: f.get("priority", 99))
     return {
         "po_totals": po_totals,
@@ -98,6 +159,11 @@ def compare_po_set_lines(
         "si_totals": si_totals,
         "po_fail": po_fail,
         "flags": flags,
+        "line_mapping": {
+            "label": lm.label,
+            "DN": {"rule": lm.dn.rule, "map": dict(lm.dn.map)},
+            "SI": {"rule": lm.si.rule, "map": dict(lm.si.map)},
+        },
     }
 
 
@@ -206,6 +272,12 @@ _DETAILED_REASONS = {
 }
 
 
+def _mapping_sentence(label: str | None) -> str:
+    if label in LINE_MAPPING_RULES:
+        return f"Line numbers mapped by rule {label}."
+    return f"Line numbers mapped ({label})."
+
+
 def _persist_reason(po_set_id: int, result: dict, cfg: AppConfig) -> None:
     """Write the plain-language reason for a verdict — but only when the
     engine has one to write.
@@ -224,6 +296,10 @@ def _persist_reason(po_set_id: int, result: dict, cfg: AppConfig) -> None:
     flags = result.get("flags") or []
     naming = [f for f in flags if f.get("type") == "naming"]
     desc = [f for f in flags if f.get("type") == "description_match"]
+    mapping = [f for f in flags if f.get("type") == "line_mapping"]
+    rejected = [f for f in flags if f.get("type") == "line_mapping_rejected"]
+    sentence = _mapping_sentence(mapping[0]["label"]) if mapping else ""
+    suffix = f" {rejected[0]['message']}." if rejected else (f" {sentence}" if sentence else "")
     reason_code = result.get("reason")
     has_quantity_evidence = any(f.get("type") == "quantity" for f in flags)
 
@@ -238,6 +314,8 @@ def _persist_reason(po_set_id: int, result: dict, cfg: AppConfig) -> None:
                 f"{len(desc)} line(s) were matched by description, not by a printed "
                 f"line number (line {', '.join(lines)}); review the item descriptions"
             )
+        if sentence:
+            extras.append(sentence)
         if extras:
             note = "Fully reconciled — packet merged. " + " ".join(e for e in extras if e)
     elif reason_code:
@@ -257,9 +335,13 @@ def _persist_reason(po_set_id: int, result: dict, cfg: AppConfig) -> None:
             note = detail
         else:
             note = explain(reason_code, flags)
+        if suffix:
+            note = note.rstrip(".") + "." + suffix
     elif has_quantity_evidence:
         # A mismatch is described by its numbers, not by a code.
         note = explain(None, flags)
+        if suffix:
+            note = note.rstrip(".") + "." + suffix
     else:
         # Nothing new to say. Keep the reason already on the set.
         return
@@ -273,6 +355,7 @@ def _persist_reason(po_set_id: int, result: dict, cfg: AppConfig) -> None:
                     and ps.reconcile_reason
                     and not naming
                     and not desc
+                    and not mapping
                     and status == "merged"
                 ):
                     return
@@ -598,6 +681,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 "line_item_no": li.line_item_no,
                 "description": li.description,
                 "quantity": li.quantity,
+                "document_id": d.id,
             }
             for d in po_docs
             for li in d.line_items
@@ -610,6 +694,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 "line_item_no": li.line_item_no,
                 "description": li.description,
                 "quantity": li.quantity,
+                "document_id": d.id,
             }
             for d in dn_source
             for li in d.line_items
@@ -619,6 +704,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 "line_item_no": li.line_item_no,
                 "description": li.description,
                 "quantity": li.quantity,
+                "document_id": d.id,
             }
             for d in si_source
             for li in d.line_items
@@ -699,9 +785,17 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
 
         thr = getattr(cfg.matching, "fuzzy_description_threshold", 85)
 
-        comparison = compare_po_set_lines(po_lines, dn_lines, si_lines, thr)
+        lf = getattr(cfg.matching, "line_number_fallback", None)
+        if not isinstance(lf, LineNumberFallbackConfig):
+            lf = None
+        comparison = compare_po_set_lines(po_lines, dn_lines, si_lines, thr, line_fallback=lf)
         po_fail = comparison["po_fail"]
         flags: list[dict] = comparison["flags"]
+        # Advisory: which numbering rule (if any) this pass used. Every branch
+        # below commits, so the label is stored whatever the verdict.
+        label = comparison["line_mapping"]["label"]
+        if ps.line_mapping_rule != label:
+            ps.line_mapping_rule = label
 
         if po_fail:
             ps.status = POSetStatus.quarantined
@@ -862,6 +956,23 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
         desc_flags = [f for f in flags if f.get("type") == "description_match"]
         if ps.description_match_count != len(desc_flags):
             ps.description_match_count = len(desc_flags)
+            s.commit()
+        if merged_path is not None and label:
+            s.add(
+                AuditLog(
+                    po_set_id=ps.id,
+                    action=AuditAction.line_mapping_applied,
+                    detail=json.dumps(
+                        {
+                            "po_no": ps.po_no_normalized,
+                            "DN": comparison["line_mapping"]["DN"],
+                            "SI": comparison["line_mapping"]["SI"],
+                        },
+                        sort_keys=True,
+                    ),
+                    source="system",
+                )
+            )
             s.commit()
         if merged_path is None:
             if ps.status != prior_status:

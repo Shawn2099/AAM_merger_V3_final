@@ -202,12 +202,10 @@ REAL_SETS: dict[str, dict] = {
     },
     # SET-15 — Valaris. Sub-numbering "1-1" and part_no with a space.
     # SET — Bridon. PO numbers the line "1-1"; the DN and SI number it "1".
-    # Previously reconciled by the retired SKU rescue (BRILUBE70 vs "Brilube
-    # 70"). Line numbers are now compared as printed, so "1" has no PO
-    # counterpart and the set quarantines. Wrong direction for a human, right
-    # direction for correctness: no merge rather than a guessed one.
+    # Merged by the line-number fallback (rule add_rel: the PO carries a -1
+    # release suffix the vendor documents do not). Quantities still match exactly.
     "100060000080880": {
-        "expect": "quarantined",
+        "expect": "merged",
         P: [("1-1", "LUBRICANT, BRIDON, BRILUBE 70,GREASE F/WIRE ROPES", "BRILUBE70", "2.00")],
         D: [
             (

@@ -96,9 +96,32 @@ class ExtractionConfig(_StrictConfigModel):
 
 
 class MatchingConfig(_StrictConfigModel):
-    # The only matching knob that is read. `group_by_line_no` takes this as
-    # its description-similarity threshold, used solely for rows that carry
-    # no usable line number.
+    # `fuzzy_description_threshold` is read by `group_by_line_no` as its
+class LineNumberFallbackConfig(_StrictConfigModel):
+    """Vendor line-number rules tried ONLY when exact matching leaves DN/SI keys unmatched.
+
+    Each switch enables one rule (see `services.matching.resolve_line_mapping`).
+    All four off means behaviour identical to exact-only matching.
+    """
+
+    step10: bool = True  # PO 10,20,30 vs DN/SI 1,2,3        (rule x10)
+    step10_reverse: bool = True  # PO 1,2,3 vs DN/SI 10,20,30        (rule div10)
+    release_suffix: bool = True  # PO 1-1,2-1 vs DN/SI 1,2           (rule add_rel)
+    release_suffix_reverse: bool = True  # PO 1,2 vs DN/SI 1-1,2-1           (rule strip_rel)
+
+    def rules(self) -> frozenset[str]:
+        pairs = (
+            (self.step10, "x10"),
+            (self.step10_reverse, "div10"),
+            (self.release_suffix, "add_rel"),
+            (self.release_suffix_reverse, "strip_rel"),
+        )
+        return frozenset(rule for on, rule in pairs if on)
+
+
+    # description-similarity threshold, used solely for rows that carry no
+    # usable line number. `line_number_fallback` holds the per-rule switches
+    # for the vendor line-number mapping (x10 / -1 suffix).
     #
     # Removed 2026-09-29 as dead config: `sanity_description_threshold`,
     # `fuzzy_margin` and `enable_sku_rescue` all belonged to the retired v20.5
@@ -132,6 +155,7 @@ class MergeConfig(_StrictConfigModel):
             "PO",
             "DN",
             "SI",
+    line_number_fallback: LineNumberFallbackConfig = Field(default_factory=LineNumberFallbackConfig)
             "CUSTOMS",
             "SHIPPING",
             "UNKNOWN",

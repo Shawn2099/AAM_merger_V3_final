@@ -47,6 +47,8 @@ numbered vendor row that the PO does not carry may match such a line by
 description too. A printed number that the PO **does** carry is always
 authoritative — description never overrides it.
 
+**Line-number fallback (2026-10-24).** Exact matching runs first and is untouched. Only when a vendor pool (DN or SI, each on its own) has numbered rows that exact matching cannot place on the PO, one of four rules may re-key a COPY of that pool's rows: `x10` (PO 10,20,30 vs vendor 1,2,3), `div10` (PO 1,2,3 vs vendor 10,20,30), `add_rel` (PO 1-1,2-1 vs vendor 1,2) and `strip_rel` (PO 1,2 vs vendor 1-1,2-1). Each rule has a switch under `matching.line_number_fallback` (all on by default). Invariants: PO keys are never rewritten; DN and SI resolve independently and may use different rules; one rule per pool, all-or-nothing (every numbered key must land on a PO key); a pool where any single document already fits the PO as printed is never mapped (`line_mapping_rejected`); a numberless row anywhere disables it; the function default is exact-only (`line_fallback=None`). The comparison is unchanged: PO == sum(DN) == sum(SI) per line, exact integers. The rule used is stored in `po_sets.line_mapping_rule`, shown as *lines mapped (rule)*, appended to the reason, and a merged set gets one `line_mapping_applied` audit row. Pinned by `tests/test_line_mapping*.py`.
+
 **A PO line with neither a number nor a description quarantines**
 (`po_line_missing_line_item_no`). Nothing can address it. A PO line with a
 description is addressable and is compared like any other line.
@@ -147,8 +149,8 @@ with `po_reference=null`; the document is held unattached for a person.
   the accepted high-consequence limitation; human review of the packet is
   load-bearing. See PRODUCT §8-H.
 - It does not compare units. `1 BOX` and `1 EA` are both 1.
-- ERP step-10 numbering (PO 10/20/30 vs DN 1/2/3) is not mapped; those lines
-  quarantine.
+- Step-10 and `-1` numbering are mapped by the line-number fallback (section 3). These
+  stay quarantined, each pinned by a test: test_limitation_two_rules_never_compose; test_limitation_slash_schedule_is_not_mapped; test_limitation_unicode_dash_is_not_normalised; test_limitation_other_separators_are_not_mapped; test_limitation_labelled_keys_are_not_mapped; test_limitation_steps_other_than_10_are_not_mapped; test_limitation_shifted_numbering_is_not_mapped; test_limitation_real_dts22843_shifted_numbering_is_not_mapped; test_limitation_mixed_pool_is_not_mapped. See PRODUCT section 8 for the three `test_known_limitation_*` entries.
 - A missing invoice number does not block the merge; the packet is named from
   the PO number and the gap is flagged.
 
@@ -167,6 +169,10 @@ with `po_reference=null`; the document is held unattached for a person.
 | PO key is the digits; letters on one side only attach | `test_letters_on_one_side_only_attach_in_both_directions` |
 | Different letters on both sides are held, with the reason on the page | `test_different_letters_same_digits_are_held_not_grouped`, `test_the_holding_area_says_why_a_lettered_document_was_held` |
 | `J255-300115876` does not join `300115876`; a digit-less PO never groups | `test_j_prefixed_number_does_not_join_the_plain_one`, `test_a_po_with_no_digits_is_held_and_never_groups` |
+| Step-10 / `-1` numbering maps by fallback; the pages say so | `test_step10_po_merges_by_line_mapping_and_pages_say_so`, `test_dn_exact_si_step10_merges_with_label`, `test_release_suffix_po_merges_by_line_mapping` |
+| Partial or disagreeing mapped delivery | `test_partial_step10_delivery_is_pending_with_mapping`, `test_step10_quantity_mismatch_is_mismatched_on_the_po_line` |
+| A mixed-numbering pool is not mapped | `test_mixed_numbering_in_one_pool_quarantines_and_both_pages_say_why` |
+| Fallback switched off = exact only | `test_line_number_fallback_switched_off_quarantines_as_before` |
 | Partial delivery is a wait, not a pass | `test_partial_delivery_is_pending_not_quarantined` |
 | Customs off (default) → the merge is the end | `test_one_po_two_dn_two_si_sum_and_merge` |
 | Customs on before merge → blocked then merged | `test_customs_on_before_merge_blocks_then_merges_after_both_docs` |

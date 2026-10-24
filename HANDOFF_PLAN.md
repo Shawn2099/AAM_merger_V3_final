@@ -34,11 +34,14 @@ Last updated: 2026-10-24. Branch `fix/mvp-high-priority`, remote `origin` (push 
   line number are quarantined (a re-scan would double-count); pages of one document with distinct lines still sum;
   an empty same-number totals page is covered.
 - Robustness fixes done: R-01, R-14, R-12, R-10 (never delete the input unless a copy exists; missing stored copy is an
-  infrastructure fault), R-04 (stat failure skips one file), R-02 (absurd unit price → 0, DB error ends as counted failure),
+  infrastructure fault), R-04 (stat failure skips one file), R-02 (absurd unit price: resolved by removing unit_price entirely; DB error ends as counted failure),
   R-05 (transient read error leaves the file for next sync), R-11.
 
 ## 3. Status (2026-10-24)
 
+- **Line-number fallback implemented, Opus-reviewed 2026-10-24** (LINE_NUMBER_FALLBACK_PLAN.md rev 2): rules x10/div10/add_rel/strip_rel per pool,
+  `matching.line_number_fallback` switches, `po_sets.line_mapping_rule` + migration `e8f9a0b1c2d3`, audit `line_mapping_applied`,
+  `scripts/requeue_line_mapping.py` (dry run by default; `--apply` re-runs exactly the sets whose verdict changes). Replay of the real run on a DB copy: merged 39,40,42,48,50.
 - Real end-to-end run on a fresh DB (200 files; old DB archived in `data/prev_run_20261024/`; input backup in
   `data/input_corpus_backup/`): **12 merged (11 verified correct, 1 incomplete packet), 3 mismatched, 18 quarantined**,
   no wrong merge. Reports: `REAL_RUN_ISSUES_2026-10-24.md` (index), `REAL_RUN_MERGED_VERIFY_2026-10-24.md`,
@@ -122,3 +125,9 @@ non-server mode or stop the server at session end (e.g. `PREFECT_SERVER_ALLOW_EP
 - 2026-10-24 task cards T1-T11 written; OC/DeepSeek assignment proposed (CLAUDE keeps reconcile/grouping/quarantine/sync logic and all reviews).
 - 2026-10-24 real run, verification, R-01/R-14/R-12 + dup-guard refinement, R-02/04/05/10 fixes (uncommitted until step 1).
 - 2026-10-24 T1 done: commits 395a7a0, 254bba3, 339f821 pushed to origin/fix/mvp-high-priority. T12 (manual merger) added.
+
+## 7. Deferred topic: extraction validation / hallucination defence (decided 2026-10-24: NOT now, discuss in a later session)
+
+- Today only the pydantic shape (all value fields are `str | None`), the strict quantity parser, and cross-document agreement protect against a bad extraction. Nothing checks a value against the document itself.
+- **The user does not trust embedded PDF text, at least for DN documents.** Do NOT use the text layer as ground truth or as a hard check. Evidence: of 200 docs, 111 have a text layer and 89 are scans; doc 1 (DN2182.pdf) text layer says `LPO2612360`, the image says `LPO26/2360` (model was right); doc 199 text layer `GDN'RH0'26-796` vs printed `GDN-RHO-26-796` (model right). No hallucination was found on the text-layer half of the corpus.
+- Candidates to discuss later: format invariants in one validator; replay audit script over stored extractions (read-only); second independent read for scans/held docs (adds an API call, needs the user's decision, would catch I-1); image-based verification only. Nothing here is approved.

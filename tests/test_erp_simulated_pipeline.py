@@ -694,8 +694,9 @@ def test_engine_reaches_quarantined_for_an_orphan(sim_cfg, monkeypatch):
     calls = _fake_merge(monkeypatch, sim_cfg)
     reasons = _fake_quarantine(monkeypatch)
     documents = copy.deepcopy(_base_documents())
-    documents[1]["lines"][0]["line_item_no"] = "1"
-    documents[2]["lines"][0]["line_item_no"] = "1"
+    # "1" against PO "00010" is the step-10 fallback case and merges now; 7 fits no rule
+    documents[1]["lines"][0]["line_item_no"] = "7"
+    documents[2]["lines"][0]["line_item_no"] = "7"
     po_set_id = _persist_documents(sim_cfg, documents)
 
     result = reconcile_po_set(po_set_id, sim_cfg)

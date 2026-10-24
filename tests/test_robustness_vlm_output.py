@@ -204,7 +204,7 @@ def test_line_number_and_table_quirks_through_one_sync(rcfg, monkeypatch):
     B  a repeated table header returned as a row on the DN -> qty 'Qty'
        unparseable -> 0 -> quarantined non_positive_quantity.
     C  a DN row numbered '3' that the PO does not carry -> orphan -> quarantined.
-    D  ERP step-numbering PO 10/20 vs DN 1/2 -> quarantined (documented, §7).
+    D  ERP step-numbering PO 10/20 vs DN 1/2 -> merged by rule x10 (line-number fallback).
     """
 
     def po(n, lines):
@@ -242,4 +242,4 @@ def test_line_number_and_table_quirks_through_one_sync(rcfg, monkeypatch):
     assert "zero, negative, or unreadable" in by_po["8100002"].reconcile_reason
     assert by_po["8100003"].status == POSetStatus.quarantined
     assert "could not be matched" in by_po["8100003"].reconcile_reason
-    assert by_po["8100004"].status == POSetStatus.quarantined
+    assert by_po["8100004"].status == POSetStatus.merged  # rule x10

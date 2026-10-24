@@ -766,17 +766,14 @@ def test_reconcile_over_qty_fails_set(tmp_path):
         assert ps_after.status == POSetStatus.mismatched
 
 
-def test_step_10_numbering_no_longer_maps_and_quarantines(tmp_path):
-    """PINS A KNOWN LIMITATION â€” do not "fix" this without a product decision.
+def test_step_10_numbering_maps_by_fallback_and_merges(tmp_path):
+    """A PO numbering its lines 10, 20 against DNs/SIs numbering them 1, 2 merges.
 
-    A PO numbering its lines 10, 20 against DNs/SIs numbering theirs 1, 2 used
-    to be reconciled by an ERP step-10 heuristic. That heuristic is not part of
-    this product: line numbers are compared as printed, so 10 never matches 1
-    and the set quarantines instead of merging.
-
-    The failure is in the safe direction (quarantine, not a wrong merge), at the
-    cost of a human reviewing sets whose vendors number the two documents
-    differently. See AAM_merger_V3_PRODUCT.md, Accepted limitations.
+    Exact matching runs first and leaves DN 1/2 and SI 1/2 unmatched, so the
+    line-number fallback (rule x10, `matching.resolve_line_mapping`) re-keys a
+    copy of the vendor rows to 10/20. The quantities are still compared exactly
+    and the set records the rule it used. With the fallback switched off the
+    set quarantines as before (see test_business_scenarios_ui).
     """
     from pathlib import Path
 
@@ -842,12 +839,12 @@ def test_step_10_numbering_no_longer_maps_and_quarantines(tmp_path):
         s.commit()
 
     res = reconcile_po_set(ps_id, cfg)
-    assert res["status"] == "quarantined"
-    assert res["reason"] == "unmatched_vendor_line"
+    assert res["status"] == "merged"
 
     with Session(eng) as s:
         ps_after = s.get(POSet, ps_id)
-        assert ps_after.merged_output_path is None
+        assert ps_after.merged_output_path is not None
+        assert ps_after.line_mapping_rule == "x10"
 
 
 def test_sync_flow_sweep_reconciles_stale_mismatched_set(tmp_path):

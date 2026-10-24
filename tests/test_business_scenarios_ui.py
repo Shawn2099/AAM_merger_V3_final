@@ -1492,3 +1492,181 @@ def test_missing_stored_file_refuses_to_merge_instead_of_crashing(cfg):
     assert result["reason"] == "packet_source_unreadable"
     assert "lost-" in (result.get("detail") or "")
     assert _status(cfg, pid).merged_output_path is None
+
+
+# ---------------------------------------------------------------------------
+# Line-number fallback (x10 / -1 suffix): engine verdict and what the pages say
+# ---------------------------------------------------------------------------
+
+
+def _vendor_pair(cfg, pid, po_no, lines, tag, dn_lines=None):
+    _doc(cfg, pid, DocType.DN, f"{tag}-dn.pdf", dn_lines or lines, po_no=po_no)
+    _doc(cfg, pid, DocType.SI, f"{tag}-si.pdf", lines, si_no=f"INV-{tag}", po_no=po_no)
+
+
+def _map10_set(cfg):
+    pid = _set(cfg, "PO-MAP10")
+    _doc(
+        cfg,
+        pid,
+        DocType.PO,
+        "map10-po.pdf",
+        [("10", "BOLT", 5), ("20", "NUT", 3)],
+        po_no="PO-MAP10",
+    )
+    _vendor_pair(cfg, pid, "PO-MAP10", [("1", "BOLT", 5), ("2", "NUT", 3)], "MAP10")
+    return pid
+
+
+def _mapping_audits(cfg, pid):
+    with Session(get_engine(cfg)) as s:
+        return (
+            s.query(AuditLog)
+            .filter(
+                AuditLog.po_set_id == pid,
+                AuditLog.action == AuditAction.line_mapping_applied,
+            )
+            .all()
+        )
+
+
+def test_step10_po_merges_by_line_mapping_and_pages_say_so(cfg, client):
+    import json
+
+    pid = _map10_set(cfg)
+
+    result = reconcile_po_set(pid, cfg)
+
+    assert result["status"] == "merged", _status(cfg, pid).reconcile_reason
+    ps = _status(cfg, pid)
+    assert ps.line_mapping_rule == "x10"
+    assert "Line numbers mapped by rule x10." in (ps.reconcile_reason or "")
+    audits = _mapping_audits(cfg, pid)
+    assert len(audits) == 1
+    assert json.loads(audits[0].detail) == {
+        "DN": {"map": {"1": "10", "2": "20"}, "rule": "x10"},
+        "SI": {"map": {"1": "10", "2": "20"}, "rule": "x10"},
+        "po_no": "PO-MAP10",
+    }
+    page = client.get(f"/po_sets/{pid}/view").text
+    assert "Line Numbers Mapped" in page
+    assert "rule x10 (PO lines in steps of 10" in page
+    assert "DN 1 · SI 1" in page
+    assert "lines mapped (x10)" in client.get("/dashboard/table").text
+
+
+def test_dn_exact_si_step10_merges_with_label(cfg):
+    pid = _set(cfg, "PO-DNEXACT")
+    _doc(
+        cfg,
+        pid,
+        DocType.PO,
+        "dne-po.pdf",
+        [("10", "BOLT", 1), ("20", "NUT", 1)],
+        po_no="PO-DNEXACT",
+    )
+    _doc(
+        cfg,
+        pid,
+        DocType.DN,
+        "dne-dn.pdf",
+        [("10", "BOLT", 1), ("20", "NUT", 1)],
+        po_no="PO-DNEXACT",
+    )
+    _doc(
+        cfg,
+        pid,
+        DocType.SI,
+        "dne-si.pdf",
+        [("1", "BOLT", 1), ("2", "NUT", 1)],
+        si_no="INV-DNE",
+        po_no="PO-DNEXACT",
+    )
+
+    assert reconcile_po_set(pid, cfg)["status"] == "merged"
+    ps = _status(cfg, pid)
+    assert ps.line_mapping_rule == "DN as printed, SI x10"
+    assert "Line numbers mapped (DN as printed, SI x10)." in (ps.reconcile_reason or "")
+
+
+def test_release_suffix_po_merges_by_line_mapping(cfg):
+    pid = _set(cfg, "PO-REL")
+    _doc(cfg, pid, DocType.PO, "rel-po.pdf", [("1-1", "GREASE", 2)], po_no="PO-REL")
+    _vendor_pair(cfg, pid, "PO-REL", [("1", "GREASE", 2)], "REL")
+
+    assert reconcile_po_set(pid, cfg)["status"] == "merged"
+    assert _status(cfg, pid).line_mapping_rule == "add_rel"
+
+
+def test_partial_step10_delivery_is_pending_with_mapping(cfg, client):
+    pid = _set(cfg, "PO-PART10")
+    _doc(
+        cfg,
+        pid,
+        DocType.PO,
+        "p10-po.pdf",
+        [("10", "A", 3), ("20", "B", 3), ("30", "C", 3)],
+        po_no="PO-PART10",
+    )
+    _vendor_pair(cfg, pid, "PO-PART10", [("2", "B", 3), ("3", "C", 3)], "P10")
+
+    result = reconcile_po_set(pid, cfg)
+
+    assert result["status"] == "pending"
+    assert result["reason"] == "partial_fulfillment"
+    ps = _status(cfg, pid)
+    assert "Line numbers mapped by rule x10." in (ps.reconcile_reason or "")
+    assert "PO-PART10" not in client.get("/quarantine").text
+
+
+def test_step10_quantity_mismatch_is_mismatched_on_the_po_line(cfg, client):
+    pid = _set(cfg, "PO-MIS10")
+    _doc(cfg, pid, DocType.PO, "m10-po.pdf", [("10", "BOLT", 32)], po_no="PO-MIS10")
+    _vendor_pair(cfg, pid, "PO-MIS10", [("1", "BOLT", 19)], "M10")
+
+    assert reconcile_po_set(pid, cfg)["status"] == "mismatched"
+    assert "Line #10: delivered 19 of 32" in client.get(f"/po_sets/{pid}/view").text
+
+
+def test_mixed_numbering_in_one_pool_quarantines_and_both_pages_say_why(cfg, client):
+    pid = _set(cfg, "PO-MIXED")
+    _doc(
+        cfg,
+        pid,
+        DocType.PO,
+        "mx-po.pdf",
+        [("10", "A", 1), ("20", "B", 1), ("30", "C", 1), ("100", "D", 1)],
+        po_no="PO-MIXED",
+    )
+    _doc(cfg, pid, DocType.DN, "mx-dn-a.pdf", [("10", "A", 1)], po_no="PO-MIXED")
+    _doc(cfg, pid, DocType.DN, "mx-dn-b.pdf", [("2", "B", 1), ("3", "C", 1)], po_no="PO-MIXED")
+    _doc(
+        cfg,
+        pid,
+        DocType.SI,
+        "mx-si.pdf",
+        [("1", "A", 1), ("2", "B", 1), ("3", "C", 1), ("10", "D", 1)],
+        si_no="INV-MX",
+        po_no="PO-MIXED",
+    )
+
+    result = reconcile_po_set(pid, cfg)
+
+    assert result["status"] == "quarantined"
+    assert result["reason"] == "unmatched_vendor_line"
+    ps = _status(cfg, pid)
+    assert "already matches the PO line numbers as printed" in (ps.reconcile_reason or "")
+    assert "already matches the PO line numbers as printed" in client.get("/quarantine").text
+    assert "Line Numbers Not Mapped" in client.get(f"/po_sets/{pid}/view").text
+
+
+def test_line_number_fallback_switched_off_quarantines_as_before(cfg):
+    lf = cfg.matching.line_number_fallback
+    lf.step10 = lf.step10_reverse = lf.release_suffix = lf.release_suffix_reverse = False
+    pid = _map10_set(cfg)
+
+    result = reconcile_po_set(pid, cfg)
+
+    assert result["status"] == "quarantined"
+    assert _status(cfg, pid).line_mapping_rule is None
+    assert _mapping_audits(cfg, pid) == []

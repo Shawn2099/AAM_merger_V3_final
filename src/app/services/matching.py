@@ -16,14 +16,16 @@ The rule:
      set, because a delivered line that resolves nowhere cannot be ignored.
   5. Anything that fails quarantines the whole set. There is no partial pass.
 
-Quantities are the only signal. Price (not extracted), SKU/part number, UOM, positional order
-and ERP step-numbering are deliberately not matching inputs — see
-`AAM_merger_V3_PRODUCT.md` for why each was removed and what that costs.
+Quantities are the only signal. Price (not extracted), SKU/part number, UOM and positional
+order are deliberately not matching inputs — see `AAM_merger_V3_PRODUCT.md` for why each was
+removed and what that costs. Step-10 and `-1` numbering are mapped per pool, only when exact
+matching leaves vendor keys unmatched (`resolve_line_mapping`).
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 
 from rapidfuzz import fuzz
 
@@ -214,3 +216,144 @@ def compare_aggregates(
                 }
             )
     return diffs
+
+
+# --- Line-number fallback -------------------------------------------------
+# Some customer ERPs number PO lines differently from the vendor's DN/SI
+# (PO 10,20,30 vs DN 1,2,3; PO 1-1 vs DN 1, and the reverses). Exact matching
+# always runs first. These rules only re-key a COPY of the vendor rows when
+# exact matching would leave vendor keys unmatched. PO keys are never rewritten.
+
+LINE_MAPPING_RULES: tuple[str, ...] = ("x10", "div10", "add_rel", "strip_rel")
+
+RULE_TEXT: dict[str, str] = {
+    "x10": "PO lines in steps of 10, DN/SI lines in steps of 1",
+    "div10": "DN/SI lines in steps of 10, PO lines in steps of 1",
+    "add_rel": "PO lines carry a -1 suffix, DN/SI lines do not",
+    "strip_rel": "DN/SI lines carry a -1 suffix, PO lines do not",
+}
+
+_PLAIN = re.compile(r"^[1-9]\d*$")  # 1, 2, 10 ... (never "0")
+_REL1 = re.compile(r"^([1-9]\d*)-1$")  # 1-1, 12-1 ... (suffix -1 only, ASCII hyphen)
+
+
+@dataclass(frozen=True)
+class PoolMapping:
+    rule: str | None = None  # one of LINE_MAPPING_RULES, None = as printed
+    map: dict[str, str] = field(default_factory=dict)  # normalised vendor key -> PO key
+
+
+@dataclass(frozen=True)
+class LineMapping:
+    dn: PoolMapping = field(default_factory=PoolMapping)
+    si: PoolMapping = field(default_factory=PoolMapping)
+    rejections: tuple[tuple[str, str, str], ...] = ()  # (pool, reason_code, operator message)
+
+    @property
+    def label(self) -> str | None:
+        """Short tag for the set: None, a rule id, or 'DN <rule|as printed>, SI <...>'."""
+        if self.dn.rule is None and self.si.rule is None:
+            return None
+        if self.dn.rule == self.si.rule:
+            return self.dn.rule
+        return f"DN {self.dn.rule or 'as printed'}, SI {self.si.rule or 'as printed'}"
+
+
+def _eligible_rules(po_keys: set[str], vendor_keys: set[str]) -> list[str]:
+    """Structural preconditions. For non-empty key sets at most one rule is eligible (pinned)."""
+    po_plain = all(_PLAIN.match(k) for k in po_keys)
+    v_plain = all(_PLAIN.match(k) for k in vendor_keys)
+    out: list[str] = []
+    if po_plain and v_plain and all(int(k) % 10 == 0 for k in po_keys):
+        out.append("x10")
+    if (
+        po_plain
+        and v_plain
+        and all(int(k) % 10 == 0 for k in vendor_keys)
+        and not all(int(k) % 10 == 0 for k in po_keys)
+    ):
+        out.append("div10")
+    if v_plain and all(_REL1.match(k) for k in po_keys):
+        out.append("add_rel")
+    if po_plain and all(_REL1.match(k) for k in vendor_keys):
+        out.append("strip_rel")
+    return out
+
+
+def _apply_rule(rule: str, key: str) -> str:
+    if rule == "x10":
+        return str(int(key) * 10)
+    if rule == "div10":
+        return str(int(key) // 10)
+    if rule == "add_rel":
+        return f"{key}-1"
+    m = _REL1.match(key)  # strip_rel; eligibility guarantees a match
+    assert m is not None
+    return m.group(1)
+
+
+def _natural(key: str) -> tuple[int, str]:
+    return (len(key), key)
+
+
+def _resolve_pool(
+    po_keys: set[str], rows: list[dict], rules: frozenset[str]
+) -> tuple[str, str | None, dict[str, str]]:
+    """(kind, rule, map); kind in {"empty", "identity", "mapped", "none", "rejected"}."""
+    vendor_keys = {normalize_line_no(r.get("line_item_no")) for r in rows}
+    if not vendor_keys:
+        return ("empty", None, {})
+    if vendor_keys <= po_keys:
+        return ("identity", None, {})  # exact matching already covers the pool
+    fits = [
+        r
+        for r in _eligible_rules(po_keys, vendor_keys)
+        if r in rules and all(_apply_rule(r, k) in po_keys for k in vendor_keys)
+    ]
+    assert len(fits) <= 1
+    if not fits:
+        return ("none", None, {})
+    rule = fits[0]
+    by_doc: dict[int | None, set[str]] = {}
+    for r in rows:
+        by_doc.setdefault(r.get("document_id"), set()).add(normalize_line_no(r.get("line_item_no")))
+    if any(keys <= po_keys for keys in by_doc.values()):  # a mixed pool is never mapped
+        return ("rejected", rule, {})
+    return ("mapped", rule, {k: _apply_rule(rule, k) for k in sorted(vendor_keys, key=_natural)})
+
+
+def resolve_line_mapping(
+    po_lines: list[dict],
+    dn_lines: list[dict],
+    si_lines: list[dict],
+    rules: frozenset[str],
+) -> LineMapping:
+    """Per pool, decide whether the vendor keys need a line-number rule. Never touches PO keys."""
+    if not rules:
+        return LineMapping()
+    if any(
+        normalize_line_no(r.get("line_item_no")) == "" for r in (*po_lines, *dn_lines, *si_lines)
+    ):
+        return LineMapping()  # numberless row anywhere: exact only
+    po_keys = {normalize_line_no(r.get("line_item_no")) for r in po_lines}
+    if not po_keys:
+        return LineMapping()  # nothing to anchor on (dashboard preview)
+    pools: dict[str, PoolMapping] = {}
+    rejections: list[tuple[str, str, str]] = []
+    for pool, rows in (("DN", dn_lines), ("SI", si_lines)):
+        kind, rule, mapping = _resolve_pool(po_keys, rows, rules)
+        pools[pool] = PoolMapping(rule, mapping) if kind == "mapped" else PoolMapping()
+        if kind == "rejected":
+            assert rule is not None
+            rejections.append(
+                (
+                    pool,
+                    "document_fits_exact",
+                    (
+                        f"{pool} line numbers fit rule {rule} ({RULE_TEXT[rule]}), but a {pool} "
+                        "document already matches the PO line numbers as printed; "
+                        "line numbers were not mapped"
+                    ),
+                )
+            )
+    return LineMapping(dn=pools["DN"], si=pools["SI"], rejections=tuple(rejections))

@@ -26,6 +26,7 @@ The stamp is derived from structural markers, never guessed from a date:
     po_sets.customs_append_pending    -> e7f8a9b0c1d2
     po_sets.po_no_letters             -> a9b0c1d2e3f4
     line_items.unit_price absent      -> d5e6f7a8b9c0
+    po_sets.line_mapping_rule         -> e8f9a0b1c2d3
 
 Usage:
     python scripts/migrate_db.py [--no-backup]
@@ -70,6 +71,7 @@ _MARKERS: list[tuple[str, str]] = [
     ("po_sets.po_no_letters", "a9b0c1d2e3f4"),
     # d5e6 dropped line_items.unit_price: an ABSENCE, so a synthetic key.
     ("unit_price_dropped", "d5e6f7a8b9c0"),
+    ("po_sets.line_mapping_rule", "e8f9a0b1c2d3"),
 ]
 
 
@@ -199,7 +201,7 @@ def _alembic_config():
     return cfg
 
 
-HEAD_REVISION = "d5e6f7a8b9c0"
+HEAD_REVISION = "e8f9a0b1c2d3"
 
 
 def _current_revision(db_path: Path) -> str | None:
@@ -287,6 +289,7 @@ def verify(report: dict) -> None:
     required_ps = {
         "description_match_count",
         "customs_append_pending",
+        "line_mapping_rule",
         "archived_at",
         "archived_by",
         "archive_reason",

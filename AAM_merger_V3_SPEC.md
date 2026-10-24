@@ -176,7 +176,7 @@ Numbering mirrors business doc sections for traceability.
 ### 7.3 Extraction (business doc §6)
 
 - **[FR-6.1]** The system shall extract each unique (post-dedup) document via a VLM using native PDF input (no rasterization) with a Pydantic schema enforced via `instructor`. Confirmed model: **GPT-5.6 Luna via OpenRouter**. The model identifier string shall be read from `config.yaml` (§16), never hardcoded, so a future model swap (e.g. to Sol as fallback, per prior VLM research) requires only a config change.
-- **[FR-6.2]** The system shall extract document-level fields (doc type, `po_no`, `dn_no`, `si_no`, invoice number) and line-item-level fields (`line_item_no`, description, quantity, unit price) only. `part_no` and UOM shall not be extracted or stored.
+- **[FR-6.2]** The system shall extract document-level fields (doc type, `po_no`, `dn_no`, `si_no`, invoice number) and line-item-level fields (`line_item_no`, description, quantity) only; unit price is no longer extracted. `part_no` and UOM shall not be extracted or stored.
 - **[FR-6.3]** When extracting a PO, the system shall validate the extracted PO number against the corresponding number appearing on the matched DN/SI's own PO field, to guard against decoy PO codes on the source document.
 - **[FR-6.4]** The system shall treat a split-across-lines description (header line + detail block) as a single line item, not two.
 - **[FR-6.5]** If extraction fails (hard failure — API/network error, or soft failure — schema validation failure), the system shall retry up to 3 times with backoff. After 3 failures, the system shall mark that document `failed` without blocking matching/reconciliation for the rest of that PO Set.
@@ -192,7 +192,7 @@ Numbering mirrors business doc sections for traceability.
 ### 7.5 Line-item matching (business doc §8)
 
 - **[FR-8.1]** The system shall treat `line_item_no` as the sole primary matching key when present.
-- **[FR-8.1a]** ERP step-10 alignment (confirmed real vendor pattern, 2026-09-05): when PO lines use step-10 numbering (10, 20, 30, …) and DN/SI lines use unit numbering (1, 2, 3, …), PO line `N` shall map to DN/SI line `N/10`. This is a `line_item_no`-derived mapping, not a positional signal, and it never overrides an exact `line_item_no` match.
+- **[FR-8.1a]** Line-number fallback (2026-10-24, supersedes the 2026-09-05 step-10 alignment): when exact `line_item_no` matching leaves a vendor pool's numbered rows unplaced, one structural rule per pool (`x10`, `div10`, `add_rel`, `strip_rel`; each switchable under `matching.line_number_fallback`) may re-key a copy of that pool's rows to the PO's keys. All-or-nothing per pool, DN and SI independent, PO keys never rewritten, never when a document in the pool already fits the PO as printed, never with a numberless row. It never overrides an exact `line_item_no` match. See `docs/CORE_LOGIC.md` section 3.
 - **[FR-8.2]** When `line_item_no` is absent, the system shall fall back to fuzzy description matching using `rapidfuzz` token-sort similarity, with a threshold of 85% stored as a configurable constant (not hardcoded inline). Description matching shall never override or double-check a present `line_item_no` match.
 - **[FR-8.3]** The system shall not use `slno`, positional order, or `part_no` as matching signals under any circumstance.
 - **[FR-8.4]** When two documents of the same type reference the same `line_item_no` with consistent descriptions, the system shall sum their quantities (§7.6). When descriptions conflict for the same `line_item_no`, the system shall route the entire PO Set to `quarantined`.
@@ -204,8 +204,8 @@ Numbering mirrors business doc sections for traceability.
 - **[FR-10.1]** For every PO line item, the system shall check `PO Quantity == Aggregate DN Quantity` AND, independently, `PO Quantity == Aggregate SI Quantity`, both as exact integer comparisons (no tolerance band). Both checks must independently pass.
 - **[FR-10.2]** Reconciliation shall be evaluated line-by-line. A line whose aggregate deliveries are both nonzero but unequal to the PO quantity (including over-delivery) shall fail the entire PO Set (`mismatched`) — there is no partial-pass state. A line with zero aggregate DN or SI deliveries is *awaiting delivery*, not a failure: the set waits in `pending` with reason `partial_fulfillment` (with per-line quantity flags) until every line is delivered, and only merges once all lines match (decision 2026-09-05).
 - **[FR-10.3]** If any quantity encountered is negative or zero, the system shall route that PO Set to `quarantined` rather than evaluating it as a normal reconciliation case.
-- **[FR-11.1]** The system shall perform an exact-match price check as a secondary condition. A price-only mismatch shall not block a merge that quantity has already cleared, but shall still be flagged for reviewer visibility.
-- **[FR-11.2]** When multiple flags exist on one line item, the system shall surface them to the reviewer in this priority order: (1) line-item identification, (2) quantity, (3) price.
+- **[FR-11.1] (retired: price is not extracted or stored)** The system shall perform an exact-match price check as a secondary condition. A price-only mismatch shall not block a merge that quantity has already cleared, but shall still be flagged for reviewer visibility.
+- **[FR-11.2] (retired with FR-11.1)** When multiple flags exist on one line item, the system shall surface them to the reviewer in this priority order: (1) line-item identification, (2) quantity, (3) price.
 
 ### 7.7 Customs gate (business doc §12)
 

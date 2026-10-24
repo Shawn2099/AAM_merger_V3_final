@@ -86,11 +86,15 @@ most worth being precise about:
 - **Reconciling** — whether the numbers agree, i.e. the pass/fail test —
   uses **quantity only**.
 
-So "quantities are the only signal" means *no price, no part number, no UOM, no
-positional order and no ERP step-numbering participate in the decision*. It
+So "quantities are the only signal" means *no price, no part number, no UOM and no
+positional order participate in the decision*. Step-10 and `-1` line-number
+schemes are mapped only by the per-pool fallback below, which changes how a
+vendor row is *keyed*, never what is compared. It
 does **not** mean matching is number-only: the description fallback in step 2
 above is a real matching signal, and it is the only one besides the number.
 §7 explains why each removed input was removed; §8 states what that costs.
+
+**Line-number fallback (2026-10-24).** Exact matching runs first and is untouched. Only when a vendor pool (DN or SI, each on its own) has numbered rows that exact matching cannot place on the PO, one of four rules may re-key a COPY of that pool's rows: `x10` (PO 10,20,30 vs vendor 1,2,3), `div10` (PO 1,2,3 vs vendor 10,20,30), `add_rel` (PO 1-1,2-1 vs vendor 1,2) and `strip_rel` (PO 1,2 vs vendor 1-1,2-1). Each rule has a switch under `matching.line_number_fallback` (all on by default). Invariants: PO keys are never rewritten; DN and SI resolve independently and may use different rules; one rule per pool, all-or-nothing (every numbered key must land on a PO key); a pool where any single document already fits the PO as printed is never mapped (`line_mapping_rejected`); a numberless row anywhere disables it; the function default is exact-only (`line_fallback=None`). The comparison is unchanged: PO == sum(DN) == sum(SI) per line, exact integers. The rule used is stored in `po_sets.line_mapping_rule`, shown as *lines mapped (rule)*, appended to the reason, and a merged set gets one `line_mapping_applied` audit row. Pinned by `tests/test_line_mapping*.py`.
 
 ### Where it lives
 
@@ -208,8 +212,8 @@ Turn it off only if your vendors genuinely issue split POs under one number.
 
 ### 3.2 Every flag the comparison can produce
 
-Per-line flags, sorted priority 1 before 2. **There are three types and four
-reasons** — verified by driving `compare_po_set_lines` over every case.
+Per-line flags, sorted priority 1 before 2. **There are five types and six
+reasons** (`line_mapping` and `line_mapping_rejected` came with the line-number fallback) — verified by driving `compare_po_set_lines` over every case.
 
 | Priority | `type` | `reason` | Pool | Means |
 |---|---|---|---|---|
@@ -217,6 +221,8 @@ reasons** — verified by driving `compare_po_set_lines` over every case.
 | 1 | `identification` | `no_line_number_and_no_description_match` | DN or SI | vendor row has no number and no description clears the threshold |
 | 2 | `quantity` | `quantity_mismatch` | DN or SI | both sides reported the line, quantities differ |
 | 2 | `description_match` | `matched_by_description` | DN or SI | the row was attached by the description fallback, not by a printed line number — **advisory, not a failure** |
+| 2 | `line_mapping` | `line_number_mapped` | DN or SI | a pool's vendor line numbers were mapped to the PO by a rule (x10, div10, add_rel, strip_rel) — **advisory, not a failure** |
+| 1 | `line_mapping_rejected` | `document_fits_exact` | DN or SI | the pool fits a rule but one document already matches the PO as printed, so nothing was mapped — **advisory**; the orphans quarantine the set |
 | 3 | `naming` | *(no `reason` key)* | — | packet had to be named from the PO number because no invoice number was extracted (§6) |
 
 Priority 3 `naming` and priority 2 `description_match` describe a successful
@@ -267,7 +273,7 @@ hardcoded.
 The schema in `services/extraction.py` is the whole contract with the model.
 Extracted, per document: `document_type`, `po_reference`,
 `po_reference_ambiguous`, `document_number`, `vendor_name`, and per line
-`line_item_no`, `description`, `quantity`, `unit_price`, `dn_no`.
+`line_item_no`, `description`, `quantity`, `dn_no`.
 
 **`quantity` is the number and nothing else.** No unit, no UOM, no currency
 symbol, no surrounding text. A cell printed as `12.5 EA` must come back as
@@ -276,11 +282,11 @@ and the schema field repeats it, because the strict parser in §5 will reject a
 unit-bearing string and quarantine the set for no legible reason.
 
 **UOM is not extracted, not stored, and not reconciled.** There is no UOM
-column, by decision — see §8 for what that costs. `unit_price` is extracted
-because the merged packet carries it, but it takes no part in matching or
-reconciliation (§2, quantities are the only signal).
+column, by decision — see §8 for what that costs. `unit_price` is not extracted
+or stored; the printed price stays visible on the vendor pages of the merged
+packet. Quantities are the only signal (§2).
 
-**Not extracted:** confidence score, part number, UOM, line type. If a value
+**Not extracted:** confidence score, part number, UOM, line type, unit price. If a value
 is not in the schema it is not stored and not used.
 
 Two extraction behaviours are load-bearing and easy to break:
@@ -436,11 +442,12 @@ disabled.
 |---|---|---|
 | **SKU / part-number rescue** | `part_no` was blank on **every DN sample across all three real vendor sets** reviewed. It cannot be relied on, and the column was permanently NULL because the VLM was never asked for it. | L |
 | **Reindex detection** (`LINE_REINDEXED`) | Needed a description-vs-number sanity gate to be useful, and that gate is the next row. | L |
-| **ERP step-10 alignment** (PO line 10 ↔ DN line 1) | A real vendor pattern, but it is a second numbering convention to maintain, and it can be defeated by a coincidental collision. | M |
+| **ERP step-10 alignment as a pairing heuristic** (PO line 10 ↔ DN line 1) | Replaced 2026-10-24 by the per-pool line-number fallback (section 2): structural rules only, exact matching first, PO keys never rewritten. | M |
 | **Description sanity guard** on exact-number hits | This is the gate that catches "right line number, wrong item". Removing it is the single most consequential decision in this document. | **H** |
 | **Conflicting-description quarantine** (old FR-8.4) | Quantities are the only signal. The engine sums; it does not judge. | **H** |
 | **Fuzzy margin / ambiguity resolution** | With no second candidate to choose between, the margin has nothing to measure. | — |
-| **Price check** (FR-11.1) | Secondary, and a price-only mismatch does not block a merge. Prices still ride along in the packet. | L |
+| **Price check** (FR-11.1) | Secondary, and a price-only mismatch does not block a merge. Price is no longer extracted at all. | L |
+| **`line_items.unit_price` column** | Dropped (migration `d5e6f7a8b9c0`); price is not extracted or stored. | L |
 | **`line_items.part_no` column + index** | Never populated. | L |
 | **`line_items.line_type` column** | Never populated. Tax rows are excluded by the prompt instead. | M |
 | **`line_items.uom`** | Never existed. Deliberately. | M |
@@ -492,17 +499,62 @@ There is no `line_type` column. Tax, freight, fee and discount rows are removed
 by the extraction prompt. If the VLM fails to exclude one it is summed like any
 other line and the set mismatches. Safe direction, false quarantine.
 
-### M — step-10 numbering quarantines instead of merging
+### M — numbering schemes outside the four rules quarantine
 
-A PO numbering 10, 20, 30 against DNs numbering 1, 2, 3 does not map. The DN
-lines become orphans and the set quarantines. Safe direction, but a human has to
-resolve every such set by hand.
+Step-10 (PO 10,20,30 against 1,2,3 and the reverse) and `-1` release suffixes
+(Bridon `100060000080880`: PO `1-1`, DN/SI `1`) now map by the line-number
+fallback (section 2). Anything else still quarantines: safe direction, a human
+resolves it. The limits below are each pinned by a test.
 
-### M — differing line-number conventions quarantine
+### L — test_limitation_two_rules_never_compose
 
-Real case: Bridon `100060000080880`. PO prints line `1-1`; the DN and SI print
-line `1`. The SKU rescue used to bridge this. Now `1` has no PO counterpart and
-the set quarantines. Safe direction, recurring cost.
+PO `1` against vendor `10-1` (SAP schedule against a serial PO) needs two rules; each rule is tried alone, so it quarantines. Pinned by `test_limitation_two_rules_never_compose`.
+
+### L — test_limitation_slash_schedule_is_not_mapped
+
+`00010/1` is not a release suffix (only an ASCII-hyphen `-1` is), so it quarantines. Pinned by `test_limitation_slash_schedule_is_not_mapped`.
+
+### L — test_limitation_unicode_dash_is_not_normalised
+
+`1–1` and `1−1` do not equal `1-1`; the key stays foreign and the set quarantines. Pinned by `test_limitation_unicode_dash_is_not_normalised`.
+
+### L — test_limitation_other_separators_are_not_mapped
+
+Dotted (`1.1`, `1.0`, `1.1.1`), underscored (`1_1`) and slashed (`1/1`) keys are not mapped. Pinned by `test_limitation_other_separators_are_not_mapped`.
+
+### L — test_limitation_labelled_keys_are_not_mapped
+
+`Line 10`, `#10`, `Item 10`, `10.` and `10.0` are not mapped (the prompt asks for the bare number). Pinned by `test_limitation_labelled_keys_are_not_mapped`.
+
+### L — test_limitation_steps_other_than_10_are_not_mapped
+
+Step-5, step-20 and step-100 numbering is not mapped. Pinned by `test_limitation_steps_other_than_10_are_not_mapped`.
+
+### L — test_limitation_shifted_numbering_is_not_mapped
+
+A shifted or renumbered series (PO 1,3,4 against DN 1,2,3; offset +1) is not mapped. Pinned by `test_limitation_shifted_numbering_is_not_mapped`.
+
+### L — test_limitation_real_dts22843_shifted_numbering_is_not_mapped
+
+The real shifted-numbering set (DTS 22843) stays quarantined. Pinned by `test_limitation_real_dts22843_shifted_numbering_is_not_mapped`.
+
+### L — test_limitation_mixed_pool_is_not_mapped
+
+A pool where one document already matches the PO as printed and another needs a rule is never mapped; the set quarantines with `Line Numbers Not Mapped`. Pinned by `test_limitation_mixed_pool_is_not_mapped`.
+
+### L — test_known_limitation_vendor_serial_renumbering_pairs_wrongly_but_never_merges
+
+A vendor that renumbers a partial delivery 1..m is paired by position under x10 (the exact path pairs it wrongly too); the quantities then disagree, so it normally mismatches. It could merge only when the quantities coincide across the documents, the same exposure exact numbering already has. Pinned by `test_known_limitation_vendor_serial_renumbering_pairs_wrongly_but_never_merges`.
+
+A vendor document split by page into several files (for example `pages-1.pdf` with lines 1-9, 11, 12 and `pages-2.pdf` with line 10 only) is a mixed pool when one file's keys already match the PO as printed: the pool is never mapped and the set quarantines (the safe direction). Pinned by `test_known_limitation_step10_pool_split_across_files_quarantines`.
+
+### L — test_known_limitation_single_line_step10_maps_on_quantity_alone
+
+With one PO line, x10 maps on structure and quantity alone (same exposure a plain-numbered single-line PO already has, see 8-H). Pinned by `test_known_limitation_single_line_step10_maps_on_quantity_alone`.
+
+### L — test_known_limitation_reverse_rules_map_on_structure_alone
+
+div10 and strip_rel on a single line map on structure alone; harmless by the cross-set replay (0 merges beyond the same-numbering baseline). Pinned by `test_known_limitation_reverse_rules_map_on_structure_alone`.
 
 ### L — inner-space quantities quarantine
 
@@ -615,8 +667,8 @@ European `1.234` is caught by the 2-significant-decimal rule in §5.
 
 ### L — no price flag
 
-Prices are carried in the packet but never compared, so a price-only
-discrepancy is never surfaced to the reviewer.
+Price is not extracted or stored, so a price-only discrepancy is never surfaced
+to the reviewer. Pinned by `test_limitation_price_is_not_extracted`.
 
 ### M — a line the VLM could not read is kept, not dropped
 

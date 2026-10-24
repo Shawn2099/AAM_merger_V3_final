@@ -33,15 +33,18 @@
           {% if status_str == 'merged' %}
             {% if not ps.has_merged_file %}
               <span class="badge badge-quarantined" title="The database says merged, but the packet file is missing from the output folder.">Merged - packet missing</span>
-            {% elif ps.description_match_count and ps.description_match_count > 0 %}
+            {% elif (ps.description_match_count or 0) > 0 or ps.line_mapping_rule %}
               <span class="badge badge-desc"
-                    title="The packet merged, but at least one vendor line was attached by DESCRIPTION rather than a printed line number. Check those item descriptions.">
+                    title="The packet merged, but at least one vendor line was attached by DESCRIPTION or paired by a line-numbering rule rather than a printed line number. Check the item descriptions and the line mapping.">
                 Merged • review
               </span>
+              {% if (ps.description_match_count or 0) > 0 %}
               <span class="badge badge-desc" style="font-size:0.72rem; margin-left:4px;"
                     title="Number of vendor lines linked by the description fallback.">
                 description match ×{{ ps.description_match_count }}
               </span>
+              {% endif %}
+              {% if ps.line_mapping_rule %}<span class="badge badge-desc" style="font-size:0.72rem; margin-left:4px;" title="Line numbers were paired by a numbering rule, not as printed.">lines mapped ({{ ps.line_mapping_rule }})</span>{% endif %}
             {% else %}
               <span class="badge badge-merged">Merged &amp; Ready</span>
             {% endif %}

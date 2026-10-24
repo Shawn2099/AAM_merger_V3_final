@@ -122,7 +122,11 @@ def _write_quarantine_report(
     # rows that failed. Flags then overlay the vendor-side numbers.
     rows: dict[str, dict] = {
         str(k): {"po": v, "dn": None, "si": None} for k, v in (po_line_qty or {}).items()
+    notes: list[str] = []
     }
+        if f.get("type") in ("line_mapping", "line_mapping_rejected"):
+            notes.append(str(f.get("message") or ""))
+            continue
     for f in flags or []:
         key = str(f.get("line_item_no") or "?")
         row = rows.setdefault(key, {"po": None, "dn": None, "si": None})
@@ -153,6 +157,8 @@ def _write_quarantine_report(
             "requires PO == sum(DN) and PO == sum(SI) for every line.",
         ]
     else:
+    if notes:
+        lines += ["", "Line numbers", "-" * 60, *notes]
         lines += ["", "(no line-item numbers were recorded for this set)"]
 
     lines += [
@@ -495,6 +501,7 @@ def _write_archive_manifest(
             "customs_doc_count": ps.customs_doc_count,
             "merged_output_path": ps.merged_output_path,
             "reconcile_reason": ps.reconcile_reason,
+            "line_mapping_rule": ps.line_mapping_rule,
             "description_match_count": ps.description_match_count,
             "merged_at": ps.merged_at,
             "locked_by_action": ps.locked_by_action,

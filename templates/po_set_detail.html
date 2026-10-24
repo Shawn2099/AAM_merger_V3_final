@@ -41,15 +41,18 @@
                 title="The database says merged, but the packet file is missing from the output folder.">
             Merged - packet missing
           </span>
-        {% elif po_set.description_match_count and po_set.description_match_count > 0 %}
+        {% elif (po_set.description_match_count or 0) > 0 or po_set.line_mapping_rule %}
           <span class="badge badge-desc" style="font-size:0.9rem; padding:6px 14px;"
-                title="The quantities reconcile, but at least one line was attached by description. Review the item descriptions below.">
+                title="The quantities reconcile, but at least one line was attached by description or paired by a line-numbering rule rather than a printed line number. Review the item descriptions and the line mapping below.">
             Merged • review
           </span>
+          {% if (po_set.description_match_count or 0) > 0 %}
           <span class="badge badge-desc" style="font-size:0.8rem;"
                 title="Vendor lines linked by the description fallback, not a printed line number.">
             description match ×{{ po_set.description_match_count }}
           </span>
+          {% endif %}
+          {% if po_set.line_mapping_rule %}<span class="badge badge-desc" style="font-size:0.8rem;" title="Line numbers were paired by a numbering rule, not as printed.">lines mapped ({{ po_set.line_mapping_rule }})</span>{% endif %}
         {% else %}
           <span class="badge badge-merged" style="font-size:0.9rem; padding:6px 14px;">Merged &amp; Ready</span>
         {% endif %}
@@ -255,7 +258,8 @@
       <tbody>
         {% for r in matrix_rows %}
         <tr class="{{ r.row_class }}">
-          <td style="font-family:ui-monospace, monospace; font-weight:700;">#{{ r.line_item_no }}</td>
+          <td style="font-family:ui-monospace, monospace; font-weight:700;">#{{ r.line_item_no }}
+            {% if r.mapped_from %}<span class="badge badge-desc" style="display:block; margin-top:4px; font-size:0.7rem;" title="Paired by a line-number rule, not as printed.">&larr; {{ r.mapped_from }}</span>{% endif %}</td>
           <td style="font-weight:500;">{{ r.description }}</td>
           
           <td style="text-align:right;">

@@ -53,6 +53,9 @@ class AuditAction(enum.StrEnum):
     # and the packet was rebuilt to include them. The set stays `merged`; the
     # audit row records the append and the documents involved.
     customs_append = "customs_append"
+    # A set merged after its vendor line numbers were mapped by the line-number
+    # fallback (x10 / -1 suffix). The detail records the per-pool rule and map.
+    line_mapping_applied = "line_mapping_applied"
 
 
 class Document(Base):
@@ -187,6 +190,10 @@ class POSet(Base):
     description_match_count: Mapped[int] = mapped_column(
         Integer, default=0, server_default="0", nullable=False
     )
+    # The `LineMapping.label` the last reconcile used (x10, div10, add_rel,
+    # strip_rel, or "DN <rule|as printed>, SI <rule|as printed>"); NULL when lines
+    # were compared as printed. Advisory; never decides a verdict.
+    line_mapping_rule: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Archive, not delete. The row, its documents and its line items remain
     # queryable for audit/analysis; worklists and grouping ignore archived
     # sets. Keeping the row is why the open-set unique index and the document

@@ -324,3 +324,96 @@ def test_verify_refuses_a_database_that_still_has_unit_price(rig):
     conn.close()
     with pytest.raises(RuntimeError, match="unit_price"):
         migrate_db.verify(report)
+
+
+def _drop_line_mapping_column(db: Path) -> None:
+    conn = sqlite3.connect(str(db))
+    conn.execute("ALTER TABLE po_sets DROP COLUMN line_mapping_rule")
+    conn.execute("DROP TABLE IF EXISTS alembic_version")
+    conn.commit()
+    conn.close()
+
+
+def test_a_database_at_the_previous_head_gains_line_mapping_rule_and_keeps_rows(rig):
+    cfg = rig[1]
+    db = Path(cfg.paths.database_path)
+    Base.metadata.create_all(get_engine(cfg))
+    from sqlalchemy.orm import Session
+
+    with Session(get_engine(cfg)) as s:
+        s.add(POSet(po_no_normalized="PO-KEEP", status=POSetStatus.pending))
+        s.commit()
+    _drop_line_mapping_column(db)
+
+    # The schema proves everything up to the previous head, not the new column.
+    assert migrate_db.detect_stamp(db) == "d5e6f7a8b9c0"
+    report = migrate_db.migrate(backup=False)
+    migrate_db.verify(report)
+
+    assert report["revision"] == migrate_db.HEAD_REVISION == "e8f9a0b1c2d3"
+    conn = sqlite3.connect(str(db))
+    try:
+        assert "line_mapping_rule" in {r[1] for r in conn.execute("pragma table_info(po_sets)")}
+        rows = conn.execute("select po_no_normalized, line_mapping_rule from po_sets").fetchall()
+        assert rows == [("PO-KEEP", None)]
+    finally:
+        conn.close()
+    # a second run is a no-op
+    again = migrate_db.migrate(backup=False)
+    assert again["revision"] == migrate_db.HEAD_REVISION
+    assert again["stamped_from"] is None
+
+
+def test_verify_refuses_a_database_without_line_mapping_rule(rig):
+    cfg = rig[1]
+    report = migrate_db.migrate(backup=False)
+    conn = sqlite3.connect(str(cfg.paths.database_path))
+    conn.execute("ALTER TABLE po_sets DROP COLUMN line_mapping_rule")
+    conn.commit()
+    conn.close()
+    with pytest.raises(RuntimeError, match="line_mapping_rule"):
+        migrate_db.verify(report)
+
+
+def test_downgrade_of_line_mapping_rule_keeps_every_row_with_foreign_keys_on(rig):
+    """A batch rebuild of po_sets would fail on documents.po_set_id or null audit_log.po_set_id."""
+    from alembic import command
+
+    cfg = rig[1]
+    db = Path(cfg.paths.database_path)
+    migrate_db.migrate(backup=False)
+    conn = sqlite3.connect(str(db))
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute(
+        "INSERT INTO po_sets (id, po_no_normalized, status, has_customs_toggle, customs_doc_count,"
+        " created_at, updated_at, description_match_count, customs_append_pending)"
+        " VALUES (1, 'PO-DOWN', 'merged', 0, 0, '2026-01-01', '2026-01-01', 0, 0)"
+    )
+    conn.execute(
+        "INSERT INTO documents (id, sha256_hash, original_filename, stored_path, doc_type,"
+        " extraction_status, extraction_attempt_count, po_set_id, created_at, updated_at,"
+        " po_reference_ambiguous, is_split_parent)"
+        " VALUES (1, 'h1', 'a.pdf', 'a.pdf', 'PO', 'valid', 1, 1, '2026-01-01', '2026-01-01', 0, 0)"
+    )
+    conn.execute(
+        "INSERT INTO audit_log (id, po_set_id, action, detail, timestamp, source)"
+        " VALUES (1, 1, 'merge', 'x', '2026-01-01', 'system')"
+    )
+    conn.commit()
+    conn.close()
+
+    command.downgrade(migrate_db._alembic_config(), "d5e6f7a8b9c0")
+
+    conn = sqlite3.connect(str(db))
+    try:
+        assert "line_mapping_rule" not in {r[1] for r in conn.execute("pragma table_info(po_sets)")}
+        assert conn.execute("select count(*) from po_sets").fetchone()[0] == 1
+        assert conn.execute("select count(*) from documents").fetchone()[0] == 1
+        assert conn.execute("select po_set_id from audit_log").fetchone()[0] == 1
+        leftovers = [
+            r[0]
+            for r in conn.execute("select name from sqlite_master where name like '_alembic_tmp%'")
+        ]
+        assert leftovers == []
+    finally:
+        conn.close()

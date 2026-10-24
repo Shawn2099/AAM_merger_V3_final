@@ -316,7 +316,14 @@ def test_prop_reason_vocabulary_is_closed(data):
     dn = [rand_vendor() for _ in range(data.draw(st.integers(0, 5)))]
     si = [rand_vendor() for _ in range(data.draw(st.integers(0, 5)))]
     res = compare_po_set_lines(po, dn, si)
-    assert set(res.keys()) == {"po_totals", "dn_totals", "si_totals", "po_fail", "flags"}
+    assert set(res.keys()) == {
+        "po_totals",
+        "dn_totals",
+        "si_totals",
+        "po_fail",
+        "flags",
+        "line_mapping",
+    }
     for f in res["flags"]:
         assert f["reason"] in KNOWN_REASONS, f["reason"]
         if f["type"] == "identification":

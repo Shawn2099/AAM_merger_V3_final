@@ -3,7 +3,9 @@
 These are the only matching tests in the project. The v20.5 3-step matcher
 (SKU rescue, reindex detection, ERP step-10 alignment, description sanity
 guard) was retired — see AAM_merger_V3_PRODUCT.md — and the tests that covered
-it were removed with it rather than left failing.
+it were removed with it rather than left failing. Step-10 and -1 numbering are
+handled by the separate, per-pool line-number fallback (tests/test_line_mapping*.py);
+exact matching here is unchanged.
 """
 
 from __future__ import annotations

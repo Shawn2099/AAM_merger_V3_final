@@ -143,6 +143,7 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
                 "customs_doc_count": ps.customs_doc_count or 0,
                 "customs_append_pending": bool(ps.customs_append_pending),
                 "description_match_count": ps.description_match_count or 0,
+                "line_mapping_rule": ps.line_mapping_rule,
             }
         )
 
@@ -208,6 +209,13 @@ def build_matrix_rows(
         if f.get("type") == "description_match"
     }
 
+    # Vendor numbers a line-number rule paired with each PO line, for the matrix.
+    mapped_from: dict[str, list[str]] = {}
+    for pool in ("DN", "SI"):
+        pool_map = (comparison.get("line_mapping") or {}).get(pool, {}).get("map", {})
+        for vkey, pkey in pool_map.items():
+            mapped_from.setdefault(pkey, []).append(f"{pool} {vkey}")
+
     rows: list[dict] = []
     for key, po_scaled in comparison["po_totals"].items():
         p = po_first.get(key, {})
@@ -242,6 +250,7 @@ def build_matrix_rows(
                 "badge": badge,
                 "verdict": verdict,
                 "desc_matched": (display_line_key(key) or "—") in desc_keys,
+                "mapped_from": " · ".join(mapped_from.get(key, [])),
             }
         )
     return rows
@@ -408,6 +417,7 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
                     "description": li.description,
                     "quantity": li.quantity,
                     "doc_type": doc_type_map.get(li.document_id, ""),
+                    "document_id": li.document_id,
                 }
                 for li in items
             ]
@@ -424,7 +434,13 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
             has_po_lines = bool(po_lines)
             thr = getattr(cfg.matching, "fuzzy_description_threshold", 85)
 
-            comparison = compare_po_set_lines(po_lines, dn_lines, si_lines, thr)
+            comparison = compare_po_set_lines(
+                po_lines,
+                dn_lines,
+                si_lines,
+                thr,
+                line_fallback=cfg.matching.line_number_fallback,
+            )
             set_status_value = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
 
             # A pending set is waiting, not failing. Comparing a set whose DN
@@ -472,6 +488,24 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
                             "badge": "badge-mismatched",
                             "type": "Quantity Mismatch",
                             "message": f"Line #{f['line_item_no']}: {verb} {v_q:g} of {po_q:g}",
+                        }
+                    )
+                elif f["type"] == "line_mapping":
+                    flags.append(
+                        {
+                            "priority": 2,
+                            "badge": "badge-desc",
+                            "type": "Line Numbers Mapped",
+                            "message": f["message"],
+                        }
+                    )
+                elif f["type"] == "line_mapping_rejected":
+                    flags.append(
+                        {
+                            "priority": 1,
+                            "badge": "badge-quarantined",
+                            "type": "Line Numbers Not Mapped",
+                            "message": f["message"],
                         }
                     )
                 elif f["type"] == "description_match":

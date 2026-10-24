@@ -57,6 +57,14 @@ merge:
   legal_order: ["SI", "DN", "PO", "SHIPPING", "CUSTOMS"]
 
 ingestion:
+  # Line-number fallback, used ONLY when exact matching leaves DN or SI line
+  # numbers unmatched. Per pool (DN and SI independently), all-or-nothing, one
+  # rule per pool; PO numbers are never rewritten.
+  line_number_fallback:
+    step10: true                  # PO 10,20,30 vs DN/SI 1,2,3       (rule x10)
+    step10_reverse: true          # PO 1,2,3 vs DN/SI 10,20,30       (rule div10)
+    release_suffix: true          # PO 1-1,2-1 vs DN/SI 1,2          (rule add_rel)
+    release_suffix_reverse: true  # PO 1,2 vs DN/SI 1-1,2-1          (rule strip_rel)
   stability_poll_interval_seconds: 2
   stability_poll_count: 2
 
