@@ -10,7 +10,13 @@ Audience: a test-writing agent (DeepSeek through OpenCode, or a person). Read
 | `scripts/ui_test_env.py` | Builds a throwaway environment with the REAL pipeline code and a canned VLM reply (no network, no cost) and serves it. Writes `manifest.json`. |
 | `tests/ui/conftest.py` | Starts the environment once per run, gives you `page`, `manifest`, `db` (read-only SQLite) and `base_url` (so `page.goto("/dashboard")` works). Fails any test that raises a JavaScript error. |
 | `data-testid` hooks | Added to the templates. Use `page.get_by_test_id(...)`. Never select by CSS class or text position. |
-| Reference tests | `tests/ui/test_ui_dashboard.py`, `test_ui_set_detail.py`, `test_ui_unclassified.py` (20 passing tests). Copy their style. |
+| Reference tests | `tests/ui/test_ui_dashboard.py`, `test_ui_set_detail.py`, `test_ui_global.py`, `test_ui_unclassified.py` (30 passing tests). Copy their style. |
+
+Known `data-testid` gaps: the preview buttons on the unclassified and set pages have no id
+(select them by test id on the row first), the toast stack has no id (use `.toast-<type>`,
+e.g. `.toast-warning`). The quarantine table's archive button is `btn-archive-row`.
+A toast survives a reload only when the action that showed it reloads the page (the message
+is parked in `sessionStorage`); do not assert a toast for an action that stays on the page.
 
 Run (PowerShell):
 
@@ -44,6 +50,7 @@ then open the printed URL (`data/ui_test` is gitignored and wiped on every build
 | `awaiting_customs` | blocked_customs | customs ON, no customs documents |
 | `quarantined_po_no_lines` | quarantined | PO read with no line items |
 | `quarantined_unmatched_vendor_line` | quarantined | DN line 9 matches nothing |
+| `reextract_target` (mutable) | quarantined | Re-Extract's own target (S-16); re-extracting resets its verdict |
 | `archive_target` (mutable) | quarantined | one test may archive it |
 | `force_merge_validation_target` (mutable) | mismatched | for the justification-validation test |
 | `archive_modal_target` (mutable) | quarantined | for the quarantine-table delete modal test |
@@ -52,7 +59,8 @@ then open the printed URL (`data/ui_test` is gitignored and wiped on every build
 
 Held documents: `held_dn_no_po`, `held_ambiguous_po`, `held_not_read`, `held_failed`,
 `held_hostile_name` (filename is HTML, must be escaped), `held_reclassify_target` (mutable),
-`rejected_on_arrival` (file ingest refused).
+`held_reclassify_no_po` (mutable: the no-PO reclassify path, whose message arrives with
+`HX-Refresh`), `rejected_on_arrival` (file ingest refused).
 
 **Independence rule:** a test that changes data owns exactly ONE `mutable` entry and never touches
 another. If you need another mutable entry, add it to `SCENARIOS`/`HELD` in `scripts/ui_test_env.py`
@@ -72,7 +80,7 @@ named `test_ui_<area>_<nn>_<what_it_checks>` in the file shown.
 | D-04 | DONE | a PO link opens its set page |
 | D-05 | DONE | a merged row offers a working PDF download |
 | D-06 | TODO | the status dropdown (`#status-filter`) filters like the tabs and keeps the selection |
-| D-07 | TODO | `?status=nonsense` does not crash (page renders, no JS error) |
+| D-07 | DONE | `?status=nonsense` renders the app shell with a 422 and a way back (not raw JSON) |
 | D-08 | TODO | the table refreshes itself: a request to `/dashboard/table` happens within 7 s (HTMX poll) |
 | D-09 | TODO | nav links go to the right pages; the Unclassified badge equals `len(manifest["held"])` |
 | D-10 | TODO | `merged_mapped_x10` row shows "lines mapped (x10)" |
@@ -89,9 +97,9 @@ named `test_ui_<area>_<nn>_<what_it_checks>` in the file shown.
 | S-12 | TODO | `upload_customs_target`: uploading a non-PDF shows an error and attaches nothing; uploading a valid PDF as CUSTOMS and one as SHIPPING (generate with pypdf) increases the document count by 2 |
 | S-13 | TODO | Re-Match on a pending set reloads and keeps the same reason (use `pending_no_dn`, not mutable: it changes nothing) |
 | S-14 | TODO | Merge Now on `needs_review_quantity` does not merge and explains why (the status stays mismatched in the DB) |
-| S-15 | TODO | Force merge with a justification shorter than the minimum is refused with a visible message and nothing merges (use `force_merge_validation_target`) |
-| S-16 | TODO | Re-Extract with AI has no provider key here: the page shows a clear error, the set is unchanged, no JS error |
-| S-17 | TODO | an unknown set id (`/po_sets/999999/view`) shows a friendly 404, not a stack trace |
+| S-15 | DONE | Force merge with a justification shorter than the minimum is refused with a visible message (one icon, not two) and nothing merges (`force_merge_validation_target`) |
+| S-16 | DONE | Re-Extract with AI has no provider key here: the operator is told every read failed, and the message survives the reload the action triggers. The set's verdict afterwards is the engine's decision — a failed re-read leaves it `pending` with `document_not_yet_read` (pinned by `tests/test_mvp_blockers.py`), so "the set is unchanged" is NOT the requirement. Own scenario: `reextract_target` |
+| S-17 | DONE | an unknown set id (`/po_sets/999999/view`) shows a friendly 404 page, not JSON or a stack trace |
 | S-18 | TODO | the preview drawer closes with its close button and with Escape |
 | S-19 | TODO | a merged set page has a working "download merged PDF" link |
 | S-20 | TODO | an archived set (after S-07) is read-only: no action buttons |
@@ -101,11 +109,12 @@ named `test_ui_<area>_<nn>_<what_it_checks>` in the file shown.
 |---|---|---|
 | U-01..U-04 | DONE | all held docs listed; failed/rejected marked; route disabled until type chosen; reclassify places a DN |
 | U-05 | TODO | typing `PO-7000003` in the PO box shows "Server key: 7000003" (debounced) |
-| U-06 | TODO | `held_ambiguous_po` shows the ambiguous/multiple-PO marker |
-| U-07 | TODO | previewing `held_failed` shows a clear error and not a blank drawer |
+| U-06 | DONE | `held_ambiguous_po` shows the ambiguous/multiple-PO marker on its own row |
+| U-07 | DONE | previewing `rejected_on_arrival` answers with an HTML page in the drawer ("cannot be previewed" + the reason), never chrome's JSON viewer |
 | U-08 | TODO | `rejected_on_arrival`: Save & Route returns an error mentioning "rejected on arrival" and the row stays |
-| U-09 | TODO | reclassify with no PO number for a DN leaves it held and says why (use a mutable entry) |
+| U-09 | DONE | reclassify with no PO number for a DN leaves it held and says why (the message survives the `HX-Refresh` reload; `held_reclassify_no_po`) |
 | U-10 | TODO | the page count badge equals the number of rows after a reclassify removes one |
+| U-11 | DONE | a held document's stored type is shown read-only below the select; the select is never pre-selected (guards U-03) |
 | X-01 | DONE | a hostile HTML filename is escaped |
 | X-02 | TODO | the same hostile filename is escaped on the set page after it is attached (add it to a set) |
 
@@ -114,7 +123,8 @@ named `test_ui_<area>_<nn>_<what_it_checks>` in the file shown.
 |---|---|---|
 | Q-01 | DONE | quarantine page lists exactly the quarantined sets |
 | Q-02 | TODO | each row shows its reason; "Inspect & Resolve" opens the right set |
-| Q-03 | TODO | the Delete (archive) modal from the table: Cancel does nothing, Confirm archives (use `archive_modal_target`) |
+| Q-03 | TODO | the Archive modal from the table: Cancel does nothing, Confirm archives (use `archive_modal_target`) |
+| Q-04 | DONE | the quarantine table's destructive control is labelled "Archive" (`btn-archive-row`), not "Delete" |
 | A-01 | DONE | audit page shows the seeded row |
 | A-02 | TODO | after S-06 force merge, the audit page shows a `force_merge` row with the justification text |
 | A-03 | TODO | after S-07 archive, a "Quarantine Delete" row exists for that set |
@@ -128,7 +138,7 @@ Covered by `tests/test_manual_merger_e2e.py` (opt-in, already passing). Do not d
 | G-01 | TODO | visit every page in the nav and 3 set pages: no console errors, no failed requests (4xx/5xx), no missing static files |
 | G-02 | TODO | **offline LAN**: every network request on every page goes to the app's own host (no CDN, no fonts, no analytics) |
 | G-03 | TODO | at widths 1024, 1366 and 768 there is no horizontal scroll on the dashboard and a set page |
-| G-04 | TODO | keyboard: Tab reaches the action buttons in a sensible order; opening the Force Merge modal moves focus into it and Escape or Cancel closes it |
+| G-04 | DONE | keyboard: opening the Force Merge modal moves focus into it, Tab stays inside, Escape closes it and returns focus to the trigger |
 | G-05 | TODO | a POST from a foreign Origin (use `page.request.post(..., headers={"Origin": "http://evil.example"})`) to `/po_sets/{id}/merge` is rejected with 403 |
 | G-06 | TODO | each page has a non-empty, distinct `<title>` |
 | G-07 | TODO | `aria_snapshot()` of the dashboard header/nav is stable (store the expected text inline) |

@@ -109,3 +109,14 @@ def test_ui_d_05_a_merged_row_offers_a_working_pdf_download(page: Page, manifest
         row.get_by_text("PDF").click()
     path = info.value.path()
     assert Path(path).read_bytes()[:4] == b"%PDF"
+
+
+def test_ui_d_07_an_unknown_status_filter_shows_a_page_not_json(page: Page):
+    """D-07: a bad `?status=` link is a navigation, not an API call."""
+    response = page.goto("/dashboard?status=nonsense")
+    assert response is not None and response.status == 422
+    assert "text/html" in response.headers["content-type"]
+    expect(page.locator("nav.app-navbar")).to_be_visible()
+    expect(page.get_by_text("not recognised", exact=False)).to_be_visible()
+    page.get_by_role("link", name="Back to dashboard").click()
+    page.wait_for_url(re.compile(r"/dashboard$"))

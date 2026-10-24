@@ -79,6 +79,22 @@ def test_preview_says_why_instead_of_a_404(env):
     client, _cfg, doc_id, _ = env
     r = client.get(f"/documents/{doc_id}/preview")
     assert r.status_code == 422 and "Rejected on arrival" in r.text
+    # The drawer is an iframe, i.e. a browser: it gets a readable page, not
+    # raw JSON (F-02). API clients keep the JSON contract above.
+    assert r.headers["content-type"].startswith("application/json")
+
+
+def test_preview_renders_a_page_for_a_browser_accept_header(env):
+    client, _cfg, doc_id, _ = env
+    r = client.get(
+        f"/documents/{doc_id}/preview",
+        headers={"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
+    )
+    assert r.status_code == 422
+    assert r.headers["content-type"].startswith("text/html")
+    assert "cannot be previewed" in r.text
+    assert "Rejected on arrival" in r.text
+    assert "Traceback" not in r.text
 
 
 def test_uploading_the_rejected_bytes_as_customs_is_refused(env):

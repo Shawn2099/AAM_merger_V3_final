@@ -35,7 +35,7 @@
         <td style="text-align:right;">
           <div style="display:inline-flex; gap:6px;">
             <a href="/po_sets/{{ ps.id }}/view" class="btn btn-secondary btn-sm">Inspect &amp; Resolve</a>
-            <button class="btn btn-danger btn-sm" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.add('open')">Delete</button>
+            <button class="btn btn-danger btn-sm" data-testid="btn-archive-row" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.add('open')">Archive</button>
           </div>
 
           <!-- Quarantine Delete Modal -->

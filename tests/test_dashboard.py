@@ -3,6 +3,7 @@ Redo vs Redo matching split, Force Merge modal, HTMX partial refresh, audit read
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -1139,3 +1140,87 @@ def test_customs_rebuild_runs_while_the_per_po_lock_is_held(client, tmp_cfg, mon
     )
     assert response.status_code in (200, 302)
     assert observed.get("locked_by_action") == "manual_upload"
+
+
+# ---------------------------------------------------------------------------
+# 4. A page route never dead-ends in raw JSON (F-04)
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_status_filter_renders_the_app_shell(tmp_cfg, client):
+    r = client.get("/dashboard?status=nonsense")
+    assert r.status_code == 422
+    assert r.headers["content-type"].startswith("text/html")
+    assert "not recognised" in r.text.lower()
+    assert 'href="/dashboard"' in r.text, "no way back to the dashboard"
+
+
+def test_a_missing_set_renders_the_app_shell_not_json(tmp_cfg, client):
+    r = client.get("/po_sets/999999/view")
+    assert r.status_code == 404
+    assert r.headers["content-type"].startswith("text/html")
+    assert "does not exist" in r.text.lower()
+    assert "Traceback" not in r.text
+
+
+def test_audit_page_summarises_event_detail_and_keeps_the_raw_json(tmp_cfg, client):
+    """F-03: a multi-KB quarantine report must not be the visible cell text."""
+    report = "QUARANTINED PO SET\n====\n" + ("line evidence\n" * 200)
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        s.add(
+            AuditLog(
+                po_set_id=None,
+                action=AuditAction.quarantined,
+                detail=json.dumps(
+                    {
+                        "reason": "unmatched_vendor_line",
+                        "report": report,
+                        "folder": "/data/quarantine/7000011_20260101T000000Z_3",
+                    }
+                ),
+                source="system",
+            )
+        )
+        s.add(
+            AuditLog(
+                po_set_id=None,
+                action=AuditAction.force_merge,
+                detail=json.dumps({"output_name": "SI-7000001.pdf", "customs_doc_count": 0}),
+                justification="UI test: operator accepted the short delivery.",
+                source="operator",
+            )
+        )
+        s.commit()
+
+    r = client.get("/audit")
+    assert r.status_code == 200
+    html = r.text
+    # A human label for the action, not the raw enum.
+    assert "Force Merge" in html
+    # A short summary in the open, the report collapsed behind <details>.
+    assert "unmatched vendor line" in html
+    assert "<details" in html
+    assert "Raw JSON" in html
+    assert "<pre" in html
+    assert "QUARANTINED PO SET" in html  # still on the page, just collapsed
+
+
+def test_audit_page_survives_a_detail_nested_past_the_json_recursion_limit(tmp_cfg, client):
+    """A detail json.loads cannot parse (RecursionError) must never break the page."""
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        s.add(
+            AuditLog(
+                po_set_id=None,
+                action=AuditAction.manual_status_change,
+                detail="[" * 100000 + "]" * 100000,
+                source="operator",
+            )
+        )
+        s.commit()
+
+    r = client.get("/audit")
+
+    assert r.status_code == 200
+    assert "Manual Status Change" in r.text

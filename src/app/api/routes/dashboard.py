@@ -4,6 +4,7 @@ Cross-platform via pathlib. No hardcoded paths. Sync def handlers."""
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 from html import escape
@@ -314,7 +315,22 @@ def dashboard(request: Request, status: str | None = None):
     # The select's "All statuses" option submits `?status=`; an empty value
     # means no filter, not an unknown status.
     if status and status not in _ALLOWED_STATUSES:
-        raise HTTPException(status_code=422, detail=f"Unknown status filter: {status}")
+        # A browser navigation, not an API call: render the app with a way
+        # back instead of `{"detail": ...}` on a blank page (F-04).
+        return _templates.TemplateResponse(
+            request,
+            "error.html",
+            {
+                "request": request,
+                "code": 422,
+                "heading": "Unknown status filter",
+                "message": (
+                    f"That status filter is not recognised: {status!r}. "
+                    "Use the tabs or the status list on the dashboard."
+                ),
+            },
+            status_code=422,
+        )
     cfg = load_config()
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
@@ -394,7 +410,20 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
     with Session(eng) as s:
         ps = s.get(POSet, po_set_id)
         if ps is None:
-            raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
+            return _templates.TemplateResponse(
+                request,
+                "error.html",
+                {
+                    "request": request,
+                    "code": 404,
+                    "heading": "PO Set not found",
+                    "message": (
+                        f"That PO Set does not exist (#{po_set_id}). "
+                        "It may have been archived — the dashboard lists every active set."
+                    ),
+                },
+                status_code=404,
+            )
         if ps.locked_by_action is not None:
             release_if_stale(ps, s, cfg)
             s.refresh(ps)
@@ -630,8 +659,24 @@ def _served_file(path: str | None, root: str | Path, error: str) -> Path:
     return p
 
 
+def _preview_error(request: Request, status_code: int, detail: str):
+    """A drawer iframe is a browser: render a page, not `{"detail": ...}`.
+
+    API clients (curl, TestClient, HTMX) do not send `Accept: text/html`, so
+    their JSON contract is unchanged (D4/F-02).
+    """
+    if not _wants_html(request):
+        raise HTTPException(status_code=status_code, detail=detail)
+    return _templates.TemplateResponse(
+        request,
+        "preview_error.html",
+        {"request": request, "code": status_code, "message": detail},
+        status_code=status_code,
+    )
+
+
 @router.get("/documents/{doc_id}/preview")
-def preview_document(doc_id: int):
+def preview_document(doc_id: int, request: Request):
     """Stream stored document PDF for inline preview drawer."""
     from fastapi.responses import FileResponse
 
@@ -640,25 +685,30 @@ def preview_document(doc_id: int):
     with Session(eng) as s:
         doc = s.get(Document, doc_id)
         if not doc:
-            raise HTTPException(status_code=404, detail="Document not found")
+            return _preview_error(request, 404, "Document not found")
         if doc.ingest_reject_reason:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Rejected on arrival, no preview: {doc.ingest_reject_reason}",
+            return _preview_error(
+                request,
+                422,
+                f"Rejected on arrival, no preview: {doc.ingest_reject_reason}",
             )
-        p = _served_file(
-            doc.stored_path,
-            cfg.paths.stored_documents_folder,
-            "Stored PDF file missing from disk",
-        )
+        try:
+            p = _served_file(
+                doc.stored_path,
+                cfg.paths.stored_documents_folder,
+                "Stored PDF file missing from disk",
+            )
+        except HTTPException as exc:
+            return _preview_error(request, exc.status_code, str(exc.detail))
         # Two real rows (164/165) are all-NUL files that were read as failed.
         # Serving them as application/pdf gave the drawer an empty document
         # with no explanation; say the file is not a PDF instead.
         with p.open("rb") as fh:
             if fh.read(4) != b"%PDF":
-                raise HTTPException(
-                    status_code=422,
-                    detail="Stored file is not a readable PDF; re-extract this document.",
+                return _preview_error(
+                    request,
+                    422,
+                    "Stored file is not a readable PDF; re-extract this document.",
                 )
         return FileResponse(p, media_type="application/pdf")
 
@@ -996,6 +1046,106 @@ def _upload_manual_doc_impl(
 # ---------------------------------------------------------------------------
 
 
+_AUDIT_ACTION_LABELS = {
+    "force_merge": "Force Merge",
+    "quarantine_delete": "Quarantine Archive",
+    "manual_status_change": "Manual Status Change",
+    "customs_append": "Customs Appended",
+    "line_mapping_applied": "Line Mapping Applied",
+    "quarantined": "Quarantined",
+}
+
+
+def _audit_detail(entry: AuditLog) -> dict:
+    """The event's JSON detail as a dict; a malformed row must not break the page."""
+    try:
+        parsed = json.loads(entry.detail or "{}")
+    except (TypeError, ValueError, RecursionError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _last_path_segment(raw: object) -> str:
+    """The final segment of a stored path, whichever separator wrote it."""
+    return str(raw).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+
+
+def _audit_summary(action: str, detail: dict) -> str:
+    """One readable sentence. The raw JSON stays available behind `<details>`.
+
+    A quarantine report is several KB of escaped newlines; showing it as the
+    cell text made the audit page unreadable and hid the fact that the row is
+    about one reason and one folder.
+    """
+    if action == "quarantined":
+        reason = str(detail.get("reason") or "quarantined").replace("_", " ")
+        folder = detail.get("folder")
+        document_id = detail.get("document_id")
+        if folder:
+            return f"{reason} · {_last_path_segment(folder)}"
+        if document_id:
+            return f"{reason} · document #{document_id}"
+        return reason
+    if action == "force_merge":
+        name = detail.get("output_name")
+        return f"Packet {name}" if name else ""
+    if action == "quarantine_delete":
+        archive = detail.get("archive_path")
+        return f"Archived to {_last_path_segment(archive)}" if archive else "Archived"
+    if action == "customs_append":
+        name = detail.get("output_name")
+        appended = detail.get("appended")
+        count = f"{len(appended)} document(s)" if isinstance(appended, list) and appended else ""
+        return " · ".join(part for part in (f"Packet {name}" if name else "", count) if part)
+    if action == "line_mapping_applied":
+        rules = [
+            f"{pool} {detail[pool].get('rule')}"
+            for pool in ("DN", "SI")
+            if isinstance(detail.get(pool), dict) and detail[pool].get("rule")
+        ]
+        return "Line numbers mapped: " + ", ".join(rules) if rules else "Line numbers mapped"
+    if action == "manual_status_change":
+        note = detail.get("note")
+        if note:
+            return str(note)
+        if detail.get("filename"):
+            return f"Placement of {detail['filename']} confirmed"
+        return ""
+    return ""
+
+
+def _audit_entries(rows: list[AuditLog]) -> list[dict]:
+    """View models for the template: label + short summary + the raw detail.
+
+    A detail this code does not understand (or cannot parse) still renders:
+    the action label is the summary. The audit page exists to show rows, so a
+    future event shape must never break it.
+    """
+    views: list[dict] = []
+    for entry in rows:
+        action = entry.action.value if hasattr(entry.action, "value") else str(entry.action)
+        label = _AUDIT_ACTION_LABELS.get(action, action.replace("_", " ").title())
+        detail = _audit_detail(entry)
+        try:
+            summary = _audit_summary(action, detail)
+        except Exception:  # pragma: no cover - defence against a future shape
+            logger.warning("Could not summarise audit row %s", entry.id, exc_info=True)
+            summary = ""
+        views.append(
+            {
+                "action": action,
+                "label": label,
+                "summary": summary or label,
+                "detail": entry.detail or "",
+                "timestamp": entry.timestamp,
+                "po_set_id": entry.po_set_id,
+                "justification": entry.justification,
+                "source": entry.source,
+            }
+        )
+    return views
+
+
 @router.get("/audit", response_class=HTMLResponse)
 def audit_log(request: Request):
     cfg = load_config()
@@ -1009,7 +1159,7 @@ def audit_log(request: Request):
             "audit.html",
             {
                 "request": request,
-                "entries": entries,
+                "entries": _audit_entries(entries),
                 "unclassified_count": unclassified_count,
             },
         )

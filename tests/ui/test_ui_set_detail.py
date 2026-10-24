@@ -104,7 +104,53 @@ def test_ui_s_08_customs_toggle_turns_the_requirement_on_and_off(page: Page, man
     assert resp.value.status == 200, resp.value.text()
     # The page reloads itself after the toggle; expect() retries until it has.
     expect(page.get_by_test_id("btn-toggle-customs")).to_contain_text("ON")
+    # ...and the confirmation must survive that reload (F-07): a toast that is
+    # destroyed by the reload it triggered is not feedback.
+    expect(page.locator(".toast-info")).to_contain_text("Customs requirement setting updated")
     assert (
         db.execute("select has_customs_toggle from po_sets where id=?", (sc["id"],)).fetchone()[0]
         == 1
     )
+
+
+def test_ui_s_17_an_unknown_set_shows_a_friendly_page(page: Page):
+    """S-17: opening a set that no longer exists must not dead-end in JSON."""
+    response = page.goto("/po_sets/999999/view")
+    assert response is not None and response.status == 404
+    expect(page.locator("nav.app-navbar")).to_be_visible()
+    expect(page.get_by_text("does not exist", exact=False)).to_be_visible()
+    assert "Traceback" not in page.content()
+
+
+def test_ui_s_15_a_refused_force_merge_says_why_once(page: Page, manifest):
+    """F-10: the toast must not repeat the icon the template already renders."""
+    sc = _open(page, manifest, "force_merge_validation_target")
+    page.get_by_test_id("btn-force-merge").click()
+    page.locator("#force-merge-justification").fill("too short")
+    with page.expect_response(re.compile(rf"/po_sets/{sc['id']}/force_merge")) as resp:
+        page.get_by_test_id("btn-confirm-force-merge").click()
+    assert resp.value.status == 422
+    toast = page.locator(".toast-error")
+    expect(toast).to_contain_text("Justification must be at least 20 characters")
+    text = toast.inner_text()
+    assert text.count("❌") == 1, f"the type icon is rendered twice: {text!r}"
+
+
+def test_ui_s_16_reextract_without_a_provider_key_reports_failure(page: Page, manifest):
+    """F-01/S-16: the outcome is reported, not "queued".
+
+    The set's status afterwards is the engine's decision (a failed re-read
+    leaves it `pending`; pinned by tests/test_mvp_blockers.py). What this test
+    requires is that the operator is told nothing was read, and that the
+    message survives the reload the action triggers.
+    """
+    sc = _open(page, manifest, "reextract_target")
+    assert sc["mutable"] and sc["status"] == "quarantined"
+    with page.expect_response(
+        re.compile(rf"/po_sets/{sc['id']}/redo_extract"), timeout=60000
+    ) as resp:
+        page.get_by_test_id("btn-reextract").click()
+    assert resp.value.status == 200, resp.value.text()
+    # The page reloads itself on success; the toast must survive that reload
+    # and must not claim the documents were read (they were not).
+    expect(page.locator(".toast-error")).to_contain_text("Extraction failed", timeout=20000)

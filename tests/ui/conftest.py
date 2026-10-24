@@ -49,7 +49,10 @@ def _load_env_module():
 @pytest.fixture(scope="session")
 def ui_env(tmp_path_factory):
     root = tmp_path_factory.mktemp("ui_test_env")
-    env = {k: v for k, v in os.environ.items() if k != "OPENROUTER_API_KEY"}
+    # Blank, not popped: the config loader reads `.env` files itself and
+    # `override=False` honours a variable that is present. An empty string is
+    # present, so the developer's real key cannot come back (H-01).
+    env = {**os.environ, "OPENROUTER_API_KEY": ""}
     subprocess.run(
         [sys.executable, str(REPO / "scripts" / "ui_test_env.py"), "--root", str(root)],
         cwd=str(REPO),

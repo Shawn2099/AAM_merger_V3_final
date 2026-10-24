@@ -29,6 +29,33 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
+#: The one secret a harness run must never be able to reach.
+PROVIDER_KEY_ENV_VAR = "OPENROUTER_API_KEY"
+
+
+def prepare_provider_free_environment() -> None:
+    """Make this process fail closed on the provider key (H-01).
+
+    Popping the variable is not enough: `load_config()` reads `.env` files
+    itself, after import, so a `.env` beside the config (or the developer's own
+    at the repository root) put a live key back and a "no network" harness made
+    real, paid VLM calls.
+
+    `dotenv.load_dotenv(override=False)` leaves a variable that is already
+    present alone, and an empty string is present. Setting `""` therefore wins
+    over every `.env` the loader tries, and `_call_vlm` raises instead of
+    calling the provider.
+    """
+    os.environ[PROVIDER_KEY_ENV_VAR] = ""
+
+
+def provider_free_env() -> dict[str, str]:
+    """The environment for a harness child process: same, with the key blanked."""
+    env = os.environ.copy()
+    env[PROVIDER_KEY_ENV_VAR] = ""
+    return env
+
+
 # Scenario table. `mutable` scenarios are meant to be changed by a test (force merge,
 # archive, reclassify, ...): each such test owns ONE scenario so tests stay independent.
 # Lines are (line_no, qty, description). A scenario's `docs` list is processed in order
@@ -150,6 +177,18 @@ SCENARIOS: dict[str, dict] = {
             ("SI", "INV-7000011.pdf", "7000011", [L("1", "5", "Filter")]),
         ],
     },
+    # S-16's own target. It must not reuse another test's set: a re-extract
+    # resets the set's verdict, and a session-scoped harness shares the data
+    # (S-04 inspects quarantined_unmatched_vendor_line).
+    "reextract_target": {
+        "po": "7000017",
+        "mutable": True,
+        "docs": [
+            ("PO", "PO-7000017.pdf", None, [L("1", "5", "Bracket")]),
+            ("DN", "DN-7000017.pdf", "7000017", [L("9", "5", "Bracket")]),
+            ("SI", "INV-7000017.pdf", "7000017", [L("1", "5", "Bracket")]),
+        ],
+    },
     "archive_target": {
         "po": "7000012",
         "mutable": True,
@@ -226,6 +265,16 @@ HELD: dict[str, dict] = {
         "mutable": True,
         "lines": [L("1", "5", "Fan")],
     },
+    # Same situation, but no PO number is ever typed: the route answers with a
+    # message row AND HX-Refresh, so the message must survive the reload.
+    "held_reclassify_no_po": {
+        "kind": "DN",
+        "file": "DN-HOLD.pdf",
+        "po_ref": None,
+        "state": "read",
+        "mutable": True,
+        "lines": [L("1", "2", "Held item")],
+    },
 }
 
 
@@ -257,6 +306,10 @@ def _config(root: Path) -> Path:
     data["manual_merge"]["temp_folder"] = str(root / "manual_merge_tmp")
     data["schedule"]["poll_enabled"] = False  # UI tests must be deterministic
     data["server"]["allowed_hosts"] = ["*"]
+    # The fail-closed path (no provider key) retries a document before giving
+    # up. Real seconds of sleeping buy a UI test nothing: the code path and the
+    # attempt count are identical, only the wall clock is shorter (S-16).
+    data["extraction"]["retry_backoff_seconds"] = [0, 0, 0]
     path = root / "config.yaml"
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     return path
@@ -269,8 +322,11 @@ def build(root: Path) -> dict:
     if root.exists():
         shutil.rmtree(root)
     root.mkdir(parents=True)
-    # Fail closed on anything that could reach a provider.
-    os.environ.pop("OPENROUTER_API_KEY", None)
+    # Fail closed on anything that could reach a provider. The empty `.env`
+    # beside the config is defence in depth: even a child that forgets to
+    # blank the environment cannot pick a key up from this folder.
+    prepare_provider_free_environment()
+    (root / ".env").write_text(f"{PROVIDER_KEY_ENV_VAR}=\n", encoding="utf-8")
     config_path = _config(root)
     os.environ["AAM_CONFIG_PATH"] = str(config_path)
 
@@ -464,10 +520,9 @@ def serve(root: Path, port: int | None = None) -> tuple[subprocess.Popen, str]:
     import httpx
 
     port = port or free_port()
-    env = os.environ.copy()
+    env = provider_free_env()
     env["AAM_CONFIG_PATH"] = str(root / "config.yaml")
     env["PYTHONPATH"] = str(REPO / "src")
-    env.pop("OPENROUTER_API_KEY", None)
     proc = subprocess.Popen(
         [
             sys.executable,

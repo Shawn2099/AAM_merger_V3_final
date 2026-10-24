@@ -53,6 +53,16 @@
               {% if hold_notes and hold_notes.get(doc.id) %}
               <div style="font-size:0.75rem; margin-top:4px; color:var(--danger, #b91c1c);">{{ hold_notes[doc.id] }}</div>
               {% endif %}
+              {% if doc.po_reference_ambiguous %}
+              {# One aggregate badge is not enough: with several held rows the
+                 operator cannot tell which file shows two PO numbers. #}
+              <div style="font-size:0.75rem; margin-top:4px; color:var(--danger, #b91c1c); font-weight:600;">
+                ⚠️ multiple PO numbers — cannot be placed automatically
+              </div>
+              <div class="muted" style="font-size:0.72rem; margin-top:2px;">
+                Nothing will attach this file. Type the PO number to place it.
+              </div>
+              {% endif %}
             </td>
 
             <td class="muted" style="font-size:0.85rem;">
@@ -90,6 +100,12 @@
                 <option value="CUSTOMS">🛃 Customs Declaration</option>
                 <option value="SHIPPING">🚚 Shipping Document</option>
               </select>
+              {# Read-only, never the control's value: the operator must still
+                 choose deliberately before Route enables (U-03). #}
+              {% set stored_type = doc.doc_type.value if doc.doc_type else 'UNKNOWN' %}
+              {% if stored_type != 'UNKNOWN' %}
+              <div class="muted" style="font-size:0.72rem; margin-top:3px;">Stored type: {{ stored_type }}</div>
+              {% endif %}
             </td>
 
             <td>
