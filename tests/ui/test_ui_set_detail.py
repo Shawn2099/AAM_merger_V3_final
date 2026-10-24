@@ -154,3 +154,36 @@ def test_ui_s_16_reextract_without_a_provider_key_reports_failure(page: Page, ma
     # The page reloads itself on success; the toast must survive that reload
     # and must not claim the documents were read (they were not).
     expect(page.locator(".toast-error")).to_contain_text("Extraction failed", timeout=20000)
+
+
+def test_ui_s_21_a_wrong_customs_file_can_be_removed_before_the_merge(page: Page, manifest, db):
+    """S-21: Remove takes the CUSTOMS file out, says so, and the gate shows it missing."""
+    sc = _open(page, manifest, "customs_remove_target")
+    assert sc["mutable"] and sc["status"] == "pending"
+    customs = next(d for d in sc["docs"] if d["type"] == "CUSTOMS")
+    shipping = next(d for d in sc["docs"] if d["type"] == "SHIPPING")
+    customs_row = page.locator(f'[data-testid="doc-row"][data-doc-id="{customs["id"]}"]')
+    expect(page.get_by_test_id(f"btn-remove-supporting-{customs['id']}")).to_be_visible()
+    expect(page.get_by_test_id(f"btn-remove-supporting-{shipping['id']}")).to_be_visible()
+    clearance = page.locator("div", has=page.locator("strong", has_text="Customs Clearance:")).last
+    expect(clearance).to_contain_text("Attached")
+
+    page.once("dialog", lambda dialog: dialog.accept())
+    with page.expect_response(re.compile(r"/remove_supporting")) as resp:
+        page.get_by_test_id(f"btn-remove-supporting-{customs['id']}").click()
+    assert resp.value.status == 200, resp.value.text()
+
+    # The page reloads itself; the confirmation must survive that reload.
+    expect(customs_row).to_have_count(0)
+    expect(page.locator(".toast-success")).to_contain_text(f"Removed {customs['file']}")
+    expect(clearance).to_contain_text("Missing")
+    expect(page.get_by_test_id(f"btn-remove-supporting-{shipping['id']}")).to_be_visible()
+    row = db.execute(
+        "select po_set_id, archived_at from documents where id=?", (customs["id"],)
+    ).fetchone()
+    assert row["po_set_id"] is None and row["archived_at"]
+
+
+def test_ui_s_21b_a_merged_set_offers_no_remove_button(page: Page, manifest):
+    _open(page, manifest, "merged_basic")
+    expect(page.locator('[data-testid^="btn-remove-supporting-"]')).to_have_count(0)

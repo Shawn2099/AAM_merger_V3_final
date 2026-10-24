@@ -56,6 +56,7 @@ then open the printed URL (`data/ui_test` is gitignored and wiped on every build
 | `archive_modal_target` (mutable) | quarantined | for the quarantine-table delete modal test |
 | `customs_toggle_target` (mutable) | pending | one test may toggle customs |
 | `upload_customs_target` (mutable) | pending | one test may upload customs/shipping PDFs |
+| `customs_remove_target` (mutable) | pending | customs ON, a CUSTOMS and a SHIPPING file attached, no DN; S-21 removes the CUSTOMS file |
 
 Held documents: `held_dn_no_po`, `held_ambiguous_po`, `held_not_read`, `held_failed`,
 `held_hostile_name` (filename is HTML, must be escaped), `held_reclassify_target` (mutable),
@@ -103,6 +104,7 @@ named `test_ui_<area>_<nn>_<what_it_checks>` in the file shown.
 | S-18 | TODO | the preview drawer closes with its close button and with Escape |
 | S-19 | TODO | a merged set page has a working "download merged PDF" link |
 | S-20 | TODO | an archived set (after S-07) is read-only: no action buttons |
+| S-21 | DONE | `customs_remove_target`: Remove on the CUSTOMS row (confirm accepted) detaches and archives it in the DB, the row disappears after the reload, a success toast naming the file survives it, and the header shows Customs Clearance missing. S-21b: a merged set page has no remove buttons |
 
 ### Unclassified (`tests/ui/test_ui_unclassified.py`)
 | ID | Status | Check |

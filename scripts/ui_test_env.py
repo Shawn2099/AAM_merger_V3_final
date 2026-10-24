@@ -214,6 +214,18 @@ SCENARIOS: dict[str, dict] = {
             ("SI", "INV-7000014.pdf", "7000014", [L("1", "5", "Lamp")]),
         ],
     },
+    # S-21's own target: customs ON, a CUSTOMS and a SHIPPING file attached, no DN
+    # yet, so the set stays `pending` and the Remove buttons are offered.
+    "customs_remove_target": {
+        "po": "7000018",
+        "mutable": True,
+        "customs_toggle": True,
+        "supporting": [("CUSTOMS", "CUSTOMS-7000018.pdf"), ("SHIPPING", "AWB-7000018.pdf")],
+        "docs": [
+            ("PO", "PO-7000018.pdf", None, [L("1", "5", "Rivet")]),
+            ("SI", "INV-7000018.pdf", "7000018", [L("1", "5", "Rivet")]),
+        ],
+    },
 }
 
 # Documents that stay in the holding area (the Unclassified page). `po_ref` None means the
@@ -338,6 +350,7 @@ def build(root: Path) -> dict:
     from app.models import (
         AuditAction,
         AuditLog,
+        DocType,
         Document,
         ExtractionStatus,
         POSet,
@@ -438,6 +451,24 @@ def build(root: Path) -> dict:
                 ps = s.query(POSet).filter(POSet.po_no_normalized == sc["po"]).one()
                 ps.has_customs_toggle = True
         s.commit()
+
+    # Supporting (CUSTOMS / SHIPPING) files attached the way the upload form does:
+    # stored as-is, never read by the model.
+    for sc in SCENARIOS.values():
+        for dtype, filename in sc.get("supporting", []):
+            width[0] += 3
+            path = _pdf(Path(cfg.paths.input_folder) / filename, width[0])
+            doc = ingest_file(path, cfg)
+            with Session(eng) as s:
+                d = s.get(Document, doc.id)
+                ps = s.query(POSet).filter(POSet.po_no_normalized == sc["po"]).one()
+                d.doc_type = DocType(dtype)
+                d.extraction_status = ExtractionStatus.valid
+                d.po_set_id = ps.id
+                ps.customs_doc_count = (ps.customs_doc_count or 0) + 1
+                s.commit()
+
+    with Session(eng) as s:
         ids = [r[0] for r in s.query(POSet.id).order_by(POSet.id)]
     for ps_id in ids:
         reconcile_po_set(ps_id, cfg)

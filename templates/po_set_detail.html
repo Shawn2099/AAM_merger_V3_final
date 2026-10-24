@@ -410,6 +410,24 @@
               <span>✔ Confirm it belongs here</span>
             </button>
             {% endif %}
+            {# A wrong customs / shipping file can be taken out until the set is
+               merged. Errors (409 merged / busy, 422) are shown by the global
+               htmx:responseError handler with the server's own detail. #}
+            {% if dt in ['CUSTOMS', 'SHIPPING'] and status_str != 'merged' and not is_archived %}
+            <button
+              data-testid="btn-remove-supporting-{{ d.id }}"
+              class="btn btn-secondary btn-sm"
+              data-filename="{{ d.original_filename }}"
+              hx-post="/po_sets/{{ po_set.id }}/documents/{{ d.id }}/remove_supporting"
+              hx-confirm="Remove {{ d.original_filename }}? You can upload the right one afterwards."
+              hx-swap="none"
+              hx-on::after-request="if (event.detail.successful) { Alpine.store('toasts').success('Removed ' + this.dataset.filename + '.', true); location.reload() }"
+              title="Take this file out of the packet. Upload the right one afterwards, then press Merge Now."
+              {% if is_locked or sync_running %}disabled{% endif %}
+            >
+              <span>🗑 Remove</span>
+            </button>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -428,6 +446,7 @@
     </h3>
     <p class="muted" style="font-size:0.82rem; margin-bottom:12px;">
       Attached as-is without AI extraction. To clear the <strong>Awaiting Customs</strong> gate, upload both a <strong>CUSTOMS</strong> and a <strong>SHIPPING</strong> document.
+      Upload both, check the file names, then press Merge Now. A wrong file can be removed here until the set is merged; keep Customs Check ON while you replace a file.
       {% if status_str == 'merged' %}
         With the customs requirement <strong>ON</strong>, uploading both documents rebuilds the packet so they are included (the set stays merged). With it <strong>OFF</strong>, the documents are attached but the packet is not rebuilt.
       {% endif %}
