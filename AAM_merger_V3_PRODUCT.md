@@ -671,11 +671,18 @@ read PO is repaired with the manual merger. Revisit only if real use shows it ha
   extraction (742 s with the defaults); the app refuses to start with a shorter value.
 - **Data folders may not sit inside the input folder** (config is refused), and a
   merged set's cleanup never deletes a stored copy.
-- **Unused config keys:** `server.host`, `server.port` and
-  `prefect.max_concurrent_extraction_tasks` are validated but not read (the service is
-  started by NSSM with its own host and port).
-- **The upload route has no request-size middleware**; the 50 MB check runs after the
-  body is spooled to a temporary file.
+- **Unused config keys:** `server.host` and `prefect.max_concurrent_extraction_tasks` are
+  validated but read by nothing (the service is started by NSSM with the installer's own host
+  and port; extraction is sequential). `server.port` is read ONLY by `scripts/reset_data.ps1`
+  to check that the port is free, so it must equal the installer's `-Port` or the reset checks
+  the wrong port. The keys are kept because the config model rejects unknown keys: removing
+  one would stop an existing `config.yaml` from loading.
+- **The set page's upload (`POST /po_sets/<id>/upload`) is size-limited before the body is
+  parsed** (H1-4): 100 MB per file plus 2 MiB of form overhead, by `Content-Length` and by
+  counting a chunked body. Over the cap is a 413 (a themed page for a browser). FastAPI turns
+  an error raised while it parses `File`/`Form` fields into a 400, so the middleware replaces
+  any non-413 response produced after the cap tripped. The in-route 100 MB read cap stays as
+  the second line.
 - **Re-Extract** shows "extraction queued" on any success; per-document errors are in
   the JSON response, not in the toast.
 
@@ -1135,11 +1142,13 @@ DELIVERY.md). Not yet pinned by a test.
 name. This is deliberate for a LAN server behind a changing IP. The cost is that
 DNS rebinding is not blocked until real names are listed, and it exposes WRITES too:
 a page on an attacker's name that resolves to the server's LAN address sends both
-`Host` and `Origin` as that name, so the Origin check (which compares only the
-host name) lets Force Merge, archive and upload through. Listing the PC's real name or
+`Host` and `Origin` as that name, so the Origin check (which compares the host
+name and port) lets Force Merge, archive and upload through. Listing the PC's real name or
 address in `server.allowed_hosts` is therefore a required install step, not hardening
-(DELIVERY step 6). The Origin check compares host names only, so another web app on the
-same machine (different port) can also forge requests. Pinned by
+(DELIVERY step 6). The Origin check compares the host name and the port (H1-1; the scheme is not compared
+because the service has no TLS and may sit behind a TLS-terminating proxy), so another web
+app on the same machine on a different port can no longer forge requests. A proxy that
+strips the port from `Host` on a non-default port is not supported. Pinned by
 `test_known_limitation_allowed_hosts_defaults_to_any_host`.
 
 ### L — the quantity parser accepts exponent and underscore forms

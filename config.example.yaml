@@ -16,7 +16,10 @@ paths:
   log_folder: "./data/logs"
 
 server:
+  # Not read by the service: NSSM starts it with the installer's -HostAddress and -Port.
   host: "0.0.0.0"
+  # Read only by scripts/reset_data.ps1 (to check the port is free). Keep it equal to the
+  # installer's -Port, or the reset checks the wrong port.
   port: 8000
   # Hosts accepted in the HTTP Host header. ["*"] accepts any host (right for a
   # LAN deployment reached by a changing IP). A DNS name that never changes is
@@ -77,6 +80,7 @@ ingestion:
 
 prefect:
   work_pool_name: "aam-merger-process-pool"
+  # Not enforced: extraction is sequential. Do not treat it as a concurrency control.
   max_concurrent_extraction_tasks: 3
   # The midnight sync runs at 00:00 in this zone. IST is the client default and
   # is also what `scripts/deploy_prefect.py` falls back to when the key is

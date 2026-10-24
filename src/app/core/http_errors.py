@@ -36,7 +36,13 @@ def error_payload(code: str, message: str, filename: str | None = None) -> dict:
     return payload
 
 
-def _html_page(status: int, message: str, filename: str | None) -> str:
+def _html_page(
+    status: int,
+    message: str,
+    filename: str | None,
+    heading: str = "We couldn't merge those files",
+    back_href: str = "/manual/merger",
+) -> str:
     detail = f"<p class='muted'><strong>{html.escape(filename)}</strong></p>" if filename else ""
     return (
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
@@ -46,10 +52,11 @@ def _html_page(status: int, message: str, filename: str | None) -> str:
         "<body><main class='container' style='max-width:720px;'>"
         "<div class='card'>"
         f"<span class='badge badge-quarantined'>HTTP {status}</span>"
-        "<h1 class='card-title' style='margin:12px 0 8px;'>We couldn't merge those files</h1>"
+        f"<h1 class='card-title' style='margin:12px 0 8px;'>{html.escape(heading)}</h1>"
         f"<p style='color:var(--text-main);'>{html.escape(message)}</p>{detail}"
         "<p style='margin-top:20px;'>"
-        "<a class='btn btn-primary' href='/manual/merger'>Back and try again</a>"
+        f"<a class='btn btn-primary' href='{html.escape(back_href, quote=True)}'>"
+        "Back and try again</a>"
         "</p></div></main></body></html>"
     )
 
@@ -60,11 +67,13 @@ def error_response(
     code: str,
     message: str,
     filename: str | None = None,
+    heading: str = "We couldn't merge those files",
+    back_href: str = "/manual/merger",
 ):
     """A JSON error for API/XHR callers, a small themed page for browsers."""
     if wants_html(request):
         return HTMLResponse(
-            content=_html_page(status, message, filename),
+            content=_html_page(status, message, filename, heading, back_href),
             status_code=status,
             headers=_NO_STORE,
         )

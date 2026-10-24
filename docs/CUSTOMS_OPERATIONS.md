@@ -7,7 +7,7 @@ Code: `services/customs.py`, `services/merge.py`, `services/reconciliation.py`, 
 - The requirement is a **per-set** switch (`Customs Check` button on the set page), default OFF. There is no global setting.
 - Needs BOTH a `CUSTOMS` and a `SHIPPING` document. Extra documents are allowed.
 - The files are attached as-is: no AI reading, no content check, no check that they belong to that PO. The app only checks that
-  the upload is a readable PDF within the size cap, and that the same bytes are not already attached to another set.
+  the upload is a readable PDF within the 100 MB size cap (refused with a 413 before the body is read), and that the same bytes are not already attached to another set.
 - Uploaded files are stored in `stored_documents_folder/<sha256>.pdf` and are never deleted. They are not written to the input
   folder. Only the merged packet goes to `output_folder`.
 - Packet name: first SI invoice number, else the PO number. Page order: `merge.legal_order` from the config, default

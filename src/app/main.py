@@ -19,6 +19,8 @@ Two hardened middlewares sit in front of every route (audit P1-10):
 from __future__ import annotations
 
 import logging
+import re
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -37,7 +39,7 @@ from app.api.routes.po_sets import router as po_sets_router
 from app.api.routes.sync import router as sync_router
 from app.core.config import load_config
 from app.core.http_errors import BodyTooLarge, error_response
-from app.core.limits import MAX_MANUAL_MERGE_REQUEST_BYTES
+from app.core.limits import MAX_MANUAL_MERGE_REQUEST_BYTES, MAX_UPLOAD_BYTES
 
 logger = logging.getLogger(__name__)
 
@@ -144,26 +146,47 @@ class BodySizeLimitMiddleware:
     (the 100 MB body is already on disk).  This guard wraps `receive` and
     counts bytes as they arrive, which covers chunked requests too.
 
-    It is only mounted on the manual-merger upload path today; the pipeline's
-    upload route keeps its existing per-file cap.
+    A path is matched by prefix (`paths`) or, for a route with an id in it, by an
+    exact `path_pattern` (and `methods`).
+
+    FastAPI parses `File(...)`/`Form(...)` parameters before the handler runs and turns
+    ANY exception raised while it does so into HTTP 400. When the cap trips, whatever
+    response the app then produces (other than its own 413) is dropped and the 413 below
+    is sent instead, so a chunked body over the cap is a 413, not a 400.
     """
 
     def __init__(
         self,
         app: ASGIApp,
-        paths: tuple[str, ...],
-        max_bytes: int,
+        paths: tuple[str, ...] = (),
+        max_bytes: int = 0,
         display_mb: int | None = None,
+        path_pattern: re.Pattern[str] | None = None,
+        methods: tuple[str, ...] | None = None,
+        heading: str = "We couldn't merge those files",
+        back_href: str | Callable[[Scope], str] = "/manual/merger",
     ) -> None:
         self.app = app
         self.paths = paths
         self.max_bytes = max_bytes
         self.display_mb = display_mb
+        self.path_pattern = path_pattern
+        self.methods = methods
+        self.heading = heading
+        self.back_href = back_href
+
+    def _applies(self, scope: Scope) -> bool:
+        if scope.get("type") != "http":
+            return False
+        if self.methods is not None and scope.get("method", "") not in self.methods:
+            return False
+        path = scope.get("path", "")
+        if self.path_pattern is not None and self.path_pattern.match(path):
+            return True
+        return any(path.startswith(prefix) for prefix in self.paths)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope.get("type") != "http" or not any(
-            scope.get("path", "").startswith(path) for path in self.paths
-        ):
+        if not self._applies(scope):
             await self.app(scope, receive, send)
             return
 
@@ -175,19 +198,27 @@ class BodySizeLimitMiddleware:
 
         received = 0
         started = False
+        tripped = False
+        swallowing = False
 
         async def send_wrapper(message) -> None:
-            nonlocal started
+            nonlocal started, swallowing
             if message["type"] == "http.response.start":
+                if tripped and message.get("status") != 413:
+                    swallowing = True
+                    return
                 started = True
+            elif swallowing:
+                return
             await send(message)
 
         async def limited_receive():
-            nonlocal received
+            nonlocal received, tripped
             message = await receive()
             if message.get("type") == "http.request":
                 received += len(message.get("body", b""))
                 if received > self.max_bytes:
+                    tripped = True
                     raise BodyTooLarge()
             return message
 
@@ -199,16 +230,22 @@ class BodySizeLimitMiddleware:
             if started:
                 raise
             await self._reject(scope, send)
+            return
+        if swallowing:
+            await self._reject(scope, send)
 
     async def _reject(self, scope: Scope, send: Send) -> None:
         limit_mb = self.display_mb or self.max_bytes // (1024 * 1024)
         request = Request(scope)
+        back = self.back_href if isinstance(self.back_href, str) else self.back_href(scope)
         response = error_response(
             request,
             413,
             "too_large",
             f"That upload is larger than the {limit_mb} MB limit. "
             "Please remove a file or use smaller ones.",
+            heading=self.heading,
+            back_href=back,
         )
         await response(scope, request.receive, send)
 
@@ -270,6 +307,9 @@ async def lifespan(app: FastAPI):
             poller.stop()
 
 
+_SET_UPLOAD_PATH = re.compile(r"^/po_sets/\d+/upload$")
+
+
 def _manual_merge_request_bytes() -> int:
     """Configured whole-request cap for /manual/merge, or the built-in default."""
     try:
@@ -328,6 +368,17 @@ def create_app(allowed_hosts: list[str] | None = None) -> FastAPI:
         paths=("/manual/merge",),
         max_bytes=_manual_merge_request_bytes(),
         display_mb=_manual_merge_display_mb(),
+    )
+    # The set page's customs/shipping upload. The cap is the per-file cap plus form overhead (the
+    # same allowance the manual merger uses); the in-route read cap stays as the second line.
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        path_pattern=_SET_UPLOAD_PATH,
+        methods=("POST",),
+        max_bytes=MAX_UPLOAD_BYTES + 2 * 1024 * 1024,
+        display_mb=MAX_UPLOAD_BYTES // (1024 * 1024),
+        heading="That upload didn't work",
+        back_href=lambda scope: scope["path"].removesuffix("/upload") + "/view",
     )
     if hosts != ["*"]:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
