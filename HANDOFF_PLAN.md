@@ -58,7 +58,7 @@ Last updated: 2026-10-24. Branch `fix/mvp-high-priority`, remote `origin` (push 
   visual layout; do a 10-minute click-through on the target PC. Known display quirks: qty-0 numberless PO rows read `0 0 0 Match`; sets whose
   stored status predates the line-number fallback (e.g. 48) show a stale status next to a live matrix that now matches (clears on a re-run).
 - **R-17 decided (2026-10-24, second answer):** subfolders ARE read now; zero-byte files stay skipped (a future module may use them).
-- **Still open (T13 added: build D1, near-duplicate PO warning):** T7 retest corpus + fresh-DB run (uses the paid provider; needs the user's go-ahead), T8 operator UI
+- **Still open (T13 build D1, T14 build D5):** T7 retest corpus + fresh-DB run (uses the paid provider; needs the user's go-ahead), T8 operator UI
   walk-through, T9 cleanup (list below, user decides), T10 final branch review + gitnexus refresh (`node .gitnexus/run.cjs analyze`).
 - **Decisions made by the user (2026-10-24 night):** R-07 -> a packet-write I/O failure leaves the set `pending` and is retried
   (implemented); R-17 -> subfolders are read, zero-byte files skipped (implemented, PRODUCT section 8);
@@ -197,22 +197,27 @@ Next step: hand the brief to DeepSeek, then review its report and triage the "su
 
 | # | Topic | Decision | Status |
 |---|---|---|---|
-| D1 | I-1: one-digit PO misread (phantom set, packet missing a page) | **Free near-duplicate warning**, no extra API calls: flag a set whose PO number differs from another set's by ONE digit (same letters) as "possible misread of set X" on the dashboard and set page. No second read. | Decided; NOT built yet (task T13) |
-| D2 | POs printed "1 of 6" with only page 1 supplied | If the supplied PDF holds everything the program needs (PO number, line items, quantities), **match and merge it**. The packet uses the **original PDF pages** (the stored upload), never the rasterised PNGs sent to the model. The pipeline already does this (`merge.py` reads `stored_path` with pypdf; images are only sent to the VLM). | Decided; no code change needed (confirm in T10) |
-| D3 | R-13 (split-gate reason overwritten, only with `split_combined: true`) | Defer to the future module for combined files / fragments. | Decided (assistant recommendation, user did not object) |
-| D4 | Extraction validation (hallucination defence) | User asked for an explanation and a proposed plan, and invited questions before deciding. See the discussion below. | **OPEN** |
-| D5 | Production run schedule / folder polling | User wants: **check the input folder every 5 minutes and send the oldest unread file into the program.** Questions to settle before building (below). | **OPEN: needs 4 answers** |
+| D1 | I-1: one-digit PO misread (phantom set, packet missing a page) | **Do not merge a suspected misread. Hold it and let the operator choose**: assign the page to the correct PO (type the right PO number), mark "not a misread", or Force Merge. No second read, no extra API calls. Design and risks below. | Decided; NOT built (T13) |
+| D2 | POs printed "1 of 6" with only page 1 supplied | If the supplied PDF holds everything the program needs (PO number, line items, quantities), **match and merge it**. The packet uses the **original PDF pages** (the stored upload), never the rasterised PNGs sent to the model (`merge.py` reads `stored_path` with pypdf; images only go to the VLM). | Decided; no code change (confirm in T10) |
+| D3 | R-13 (split-gate reason overwritten, only with `split_combined: true`) | Defer to the future module for combined files / fragments. | Decided |
+| D4 | Extraction validation (hallucination defence, section 7) | **Not in the initial MVP.** Revisit after real-world testing; build in the next phase once proper data exists. | Deferred by decision |
+| D5 | Production run schedule / folder polling | **Poll the input folder on a short interval; each tick processes ALL waiting files, oldest first. Nothing is skipped; an overlapping tick is queued (coalesced into one follow-up pass). The midnight sweep stays as a SWITCHABLE option. Each processed file's set is reconciled and merged immediately (optional settle time).** Details and waiting-time options below. | Decided; NOT built (T14) |
 | D6 | pymupdf licence | Later. | Deferred |
 
-### D5 open questions (answer before any build)
-1. Per 5-minute tick, process **exactly one** file (the oldest) or **all** waiting files, oldest first? Exactly one per tick caps throughput at 12 files/hour (200 files = ~17 h); the real corpus took far longer than 5 minutes for a full run.
-2. Keep the **midnight cron** as well (a full sweep including reconcile of all open sets), or replace it with the 5-minute poll?
-3. A tick that finds the previous one still running: skip it (the sync lock already does this) or queue it?
-4. After each file, should its set be re-reconciled and merged immediately (packet ready within minutes), or only once per day?
-Technical notes: ingestion already has a stability check (file still copying) and the sync lock serialises runs; "oldest" = oldest modification time; Prefect schedule is registered by `scripts/deploy_prefect.py` (must be re-run after any change); more frequent runs mean more provider calls only for NEW files (existing documents are never re-read).
+### D1 design notes (T13) - read before building
+- Trigger: a set A that holds only PO document(s) (no DN/SI) whose PO number differs by EXACTLY ONE digit (same letters) from another set B.
+- **False-positive danger:** PO numbers are often sequential (4500051195 / 4500051196 are two real POs). A bare one-digit rule would hold legitimate sets. Proposed extra evidence: A's PO line numbers are a CONTINUATION of B's (no overlap, start after B's last line), as a continuation page would be. Confirm on the real corpus before enabling.
+- Effect: B (and A) show a clear hold reason ("possible misread: PO 4500057195 looks like 4500051195"); B does not merge until the operator acts.
+- Operator actions needed (new): (1) "this page belongs to PO X" = move the document to the right set (today there is NO UI path that moves an attached document; reclassify refuses it), (2) "not a misread" = dismiss the hold (a flag on the set), (3) Force Merge (exists).
+- Pin with tests named `test_known_limitation_*` for any case left unguarded (PRODUCT section 8).
 
-### D4 discussion notes (extraction validation)
-Today a wrong value is caught only if another document disagrees. The risk is a value the model misreads the same way everywhere, or on a document nothing else cross-checks. Candidate controls, cheapest first: (a) format validator for PO/DN/SI numbers (no API); (b) read-only replay audit script over stored extractions that lists suspicious ones (near-duplicate PO numbers, quantity outliers, number of digits that differs from sibling documents) (no API); (c) second independent read of scanned documents or of sets about to merge (extra API cost); (d) the user's rule: never trust the embedded PDF text layer as truth. Recommendation: do (a)+(b) now, together with D1, and decide (c) after the real-corpus run on a new DB shows how often it would matter.
+### D5 design notes (T14) - read before building
+Measured on the real run (data/logs/real_sync_20261024.out): 200 documents in 33 min sequentially; median 8.9 s, p90 16 s per document. A typical set (PO+DN+SI) is about 30 s of work.
+- Switches (config, later editable in the UI): `schedule.poll_enabled`, `schedule.poll_interval_minutes`, `schedule.nightly_enabled` (+ existing time/timezone), `schedule.merge_settle_minutes` (0 = merge as soon as a set reconciles).
+- "Never skip": today a second sync returns `sync_already_running`. Change to: a request while a sync runs records "run again" and the running sync starts one more pass when it ends. One follow-up pass covers every file that arrived meanwhile (a pass takes all waiting files), so N queued ticks collapse into one without skipping a file. Applies to manual Scan too.
+- Immediate merge: correctness is unchanged (same rule PO == DN == SI), but timing matters when a PO's documents arrive minutes apart: a set can merge as soon as what has arrived agrees (e.g. PO page 1 + matching DN/SI before PO page 2). `merge_settle_minutes` (suggest 5-10) merges a set only after its newest file is that old. Decide the default with the user.
+- Waiting-time levers (cheap to expensive): shorter poll (a folder listing costs nothing and makes no API calls; 1 min instead of 5 cuts the average wait from 2.5 min to 30 s); 3-4 parallel extractions (same API cost, about 3x throughput: 200 documents in ~11 min instead of 33); call extraction in-process instead of one Prefect task launch per file; folder watcher (event-driven) instead of polling; lower DPI or reasoning effort (NOT recommended: accuracy is the priority).
+- Prefect schedule is registered by `scripts/deploy_prefect.py`; re-run after any change.
 
 ## 6b. NEXT PHASE (user request 2026-10-24, to be DISCUSSED later; nothing here is approved or started)
 
