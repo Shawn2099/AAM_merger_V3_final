@@ -50,13 +50,6 @@ matching:
   # Description similarity, used only for vendor rows carrying no line number.
   fuzzy_description_threshold: 85
   locale: "en_IN"  # quantity parsing locale (babel), caller-passed
-
-merge:
-  # Final packet order, editable without code change. Current default:
-  # SI→DN→PO→SHIPPING→CUSTOMS. Unknown types fail fast at startup.
-  legal_order: ["SI", "DN", "PO", "SHIPPING", "CUSTOMS"]
-
-ingestion:
   # Line-number fallback, used ONLY when exact matching leaves DN or SI line
   # numbers unmatched. Per pool (DN and SI independently), all-or-nothing, one
   # rule per pool; PO numbers are never rewritten.
@@ -65,6 +58,13 @@ ingestion:
     step10_reverse: true          # PO 1,2,3 vs DN/SI 10,20,30       (rule div10)
     release_suffix: true          # PO 1-1,2-1 vs DN/SI 1,2          (rule add_rel)
     release_suffix_reverse: true  # PO 1,2 vs DN/SI 1-1,2-1          (rule strip_rel)
+
+merge:
+  # Final packet order, editable without code change. Current default:
+  # SI→DN→PO→SHIPPING→CUSTOMS. Unknown types fail fast at startup.
+  legal_order: ["SI", "DN", "PO", "SHIPPING", "CUSTOMS"]
+
+ingestion:
   stability_poll_interval_seconds: 2
   stability_poll_count: 2
 

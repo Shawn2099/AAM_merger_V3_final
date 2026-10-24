@@ -95,8 +95,6 @@ class ExtractionConfig(_StrictConfigModel):
     split_combined: bool = False
 
 
-class MatchingConfig(_StrictConfigModel):
-    # `fuzzy_description_threshold` is read by `group_by_line_no` as its
 class LineNumberFallbackConfig(_StrictConfigModel):
     """Vendor line-number rules tried ONLY when exact matching leaves DN/SI keys unmatched.
 
@@ -119,6 +117,8 @@ class LineNumberFallbackConfig(_StrictConfigModel):
         return frozenset(rule for on, rule in pairs if on)
 
 
+class MatchingConfig(_StrictConfigModel):
+    # `fuzzy_description_threshold` is read by `group_by_line_no` as its
     # description-similarity threshold, used solely for rows that carry no
     # usable line number. `line_number_fallback` holds the per-rule switches
     # for the vendor line-number mapping (x10 / -1 suffix).
@@ -130,6 +130,7 @@ class LineNumberFallbackConfig(_StrictConfigModel):
     # invites someone to "fix" a feature that no longer exists.
     fuzzy_description_threshold: int = Field(ge=0, le=100, default=85)
     locale: str = "en_IN"
+    line_number_fallback: LineNumberFallbackConfig = Field(default_factory=LineNumberFallbackConfig)
 
     @field_validator("locale", mode="after")
     @classmethod
@@ -155,7 +156,6 @@ class MergeConfig(_StrictConfigModel):
             "PO",
             "DN",
             "SI",
-    line_number_fallback: LineNumberFallbackConfig = Field(default_factory=LineNumberFallbackConfig)
             "CUSTOMS",
             "SHIPPING",
             "UNKNOWN",
