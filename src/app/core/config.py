@@ -11,6 +11,8 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
+from app.core.limits import MAX_MANUAL_MERGE_FILES, MAX_MANUAL_MERGE_PAGES, MAX_UPLOAD_BYTES
+
 logger = logging.getLogger(__name__)
 
 
@@ -203,6 +205,42 @@ class ConcurrencyConfig(_StrictConfigModel):
     po_set_lock_timeout_seconds: int = 300
 
 
+class ManualMergeConfig(_StrictConfigModel):
+    """Limits and staging for the standalone Merge PDFs tool (FR-14.11-14.13).
+
+    The browser reads `max_files`/`max_total_mb` from the page, so changing
+    these values changes the UI copy and the server checks together (restart
+    required: the request-body guard is built at app startup).
+    """
+
+    max_files: int = Field(default=MAX_MANUAL_MERGE_FILES, ge=1, le=100)
+    max_total_mb: int = Field(default=MAX_UPLOAD_BYTES // (1024 * 1024), ge=1, le=1024)
+    max_pages: int = Field(default=MAX_MANUAL_MERGE_PAGES, ge=1, le=100_000)
+    #: Where uploads are staged. `None` means `<database folder>/manual_merge_tmp`.
+    #: Must not be one of the pipeline data folders; the app refuses to start
+    #: if it is (the sweep must never see a real document).
+    temp_folder: Path | None = None
+    #: Delete our own abandoned `mm-*.pdf` staging files older than this.
+    sweep_after_hours: int = Field(default=6, ge=1, le=720)
+    sweep_on_startup: bool = True
+
+    @property
+    def max_total_bytes(self) -> int:
+        return self.max_total_mb * 1024 * 1024
+
+    @property
+    def max_request_bytes(self) -> int:
+        """Whole multipart body: the files plus ~2 MB of boundaries/fields."""
+        return self.max_total_bytes + (2 * 1024 * 1024)
+
+    @field_validator("temp_folder", mode="after")
+    @classmethod
+    def _temp_folder_must_be_a_directory(cls, value: Path | None) -> Path | None:
+        if value is not None and value.exists() and not value.is_dir():
+            raise ValueError(f"manual_merge.temp_folder is not a directory: {value}")
+        return value
+
+
 class ReconciliationConfig(_StrictConfigModel):
     # When true, a PO Set carrying more than one PO document is held pending
     # for a human. It is not summed and not auto-merged: the engine cannot tell
@@ -226,6 +264,7 @@ class AppConfig(BaseSettings):
     ingestion: IngestionConfig = IngestionConfig()
     prefect: PrefectConfig = PrefectConfig()
     concurrency: ConcurrencyConfig = ConcurrencyConfig()
+    manual_merge: ManualMergeConfig = ManualMergeConfig()
     reconciliation: ReconciliationConfig = ReconciliationConfig()
     logging: LoggingConfig = LoggingConfig()
 
@@ -298,6 +337,35 @@ class AppConfig(BaseSettings):
         if v.database_path and isinstance(v.database_path, Path):
             v.database_path.parent.mkdir(parents=True, exist_ok=True)
         return v
+
+    @model_validator(mode="after")
+    def validate_manual_merge_temp_folder(self) -> AppConfig:
+        """The sweep must never be able to see a pipeline document.
+
+        The sweep only deletes `mm-*.pdf` files, but a misconfigured folder
+        that is (or contains) a real data folder is still a configuration the
+        app should refuse rather than trust.
+        """
+        folder = self.manual_merge.temp_folder
+        if folder is None:
+            return self
+        target = Path(folder).resolve()
+        for raw in (
+            self.paths.input_folder,
+            self.paths.output_folder,
+            self.paths.quarantine_folder,
+            self.paths.stored_documents_folder,
+            self.paths.combined_folder,
+            self.paths.archive_folder,
+            self.paths.log_folder,
+        ):
+            other = Path(raw).resolve()
+            if target == other or other in target.parents or target in other.parents:
+                raise ValueError(
+                    "manual_merge.temp_folder "
+                    f"({target}) must be separate from the pipeline folder {other}"
+                )
+        return self
 
 
 def load_env(cfg_path: Path | None = None) -> None:
@@ -375,13 +443,13 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     if cache_key is not None and cache_key in _CONFIG_CACHE:
         return _CONFIG_CACHE[cache_key].model_copy(deep=True)
     paths_raw = data.get("paths")
+    base_dir = cfg_path.resolve().parent
     if isinstance(paths_raw, dict):
         # Relative paths are relative to the CONFIG FILE, not the process
         # working directory. Under NSSM that cwd is C:\Windows\System32, so a
         # `./data/output` written in YAML would otherwise create output in a
         # system folder. Absolute paths (the production C:\AAM form) are left
         # exactly as written.
-        base_dir = cfg_path.resolve().parent
         for key, value in list(paths_raw.items()):
             if isinstance(value, str) and value and not Path(value).is_absolute():
                 paths_raw[key] = str((base_dir / value).resolve())
@@ -389,6 +457,16 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             paths_raw["combined_folder"] = str(base_dir / "data" / "combined")
         if "archive_folder" not in paths_raw:
             paths_raw["archive_folder"] = str(base_dir / "data" / "development" / "archived_sets")
+
+    mm_raw = data.get("manual_merge")
+    if isinstance(mm_raw, dict):
+        temp = mm_raw.get("temp_folder")
+        if isinstance(temp, str):
+            if temp.strip():
+                if not Path(temp).is_absolute():
+                    mm_raw["temp_folder"] = str((base_dir / temp).resolve())
+            else:
+                mm_raw["temp_folder"] = None
     cfg = AppConfig.model_validate(data)
     # Secrets are in .env or in the environment; load the file so the check
     # below sees the same key the VLM client will use. Without this the app

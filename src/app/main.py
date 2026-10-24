@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import URL, Headers
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.api.routes.dashboard import router as dashboard_router
@@ -35,6 +36,8 @@ from app.api.routes.manual_merger import router as manual_router
 from app.api.routes.po_sets import router as po_sets_router
 from app.api.routes.sync import router as sync_router
 from app.core.config import load_config
+from app.core.http_errors import BodyTooLarge, error_response
+from app.core.limits import MAX_MANUAL_MERGE_REQUEST_BYTES
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +114,83 @@ class OriginGuardMiddleware:
         await self.app(scope, receive, send)
 
 
+class BodySizeLimitMiddleware:
+    """Reject an oversized request body before a parser turns it into disk I/O.
+
+    Starlette's multipart parser spools file parts to temp files and has no
+    total-body limit, so the per-file caps checked inside a route run too late
+    (the 100 MB body is already on disk).  This guard wraps `receive` and
+    counts bytes as they arrive, which covers chunked requests too.
+
+    It is only mounted on the manual-merger upload path today; the pipeline's
+    upload route keeps its existing per-file cap.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        paths: tuple[str, ...],
+        max_bytes: int,
+        display_mb: int | None = None,
+    ) -> None:
+        self.app = app
+        self.paths = paths
+        self.max_bytes = max_bytes
+        self.display_mb = display_mb
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope.get("type") != "http" or not any(
+            scope.get("path", "").startswith(path) for path in self.paths
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(scope=scope)
+        declared = headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > self.max_bytes:
+            await self._reject(scope, send)
+            return
+
+        received = 0
+        started = False
+
+        async def send_wrapper(message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message.get("type") == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    raise BodyTooLarge()
+            return message
+
+        try:
+            await self.app(scope, limited_receive, send_wrapper)
+        except BodyTooLarge:
+            # If a handler already produced a response, let it stand (the route
+            # maps this exception to its own themed page).
+            if started:
+                raise
+            await self._reject(scope, send)
+
+    async def _reject(self, scope: Scope, send: Send) -> None:
+        limit_mb = self.display_mb or self.max_bytes // (1024 * 1024)
+        request = Request(scope)
+        response = error_response(
+            request,
+            413,
+            "too_large",
+            f"That upload is larger than the {limit_mb} MB limit. "
+            "Please remove a file or use smaller ones.",
+        )
+        await response(scope, request.receive, send)
+
+
 def _setup_logging() -> None:
     """Deprecated shim: the setup now lives in `app.core.logging_setup`."""
     from app.core.logging_setup import setup_logging
@@ -131,7 +211,39 @@ async def lifespan(app: FastAPI):
 
     Base.metadata.create_all(get_engine(cfg))
     _setup_logging()
+
+    # A crashed merge can leave `mm-*.pdf` staging files behind. Sweep only
+    # this tool's own prefix in its own folder; never touch a real document.
+    if cfg.manual_merge.sweep_on_startup:
+        from app.services.manual_merge import resolve_temp_folder, sweep_temp_folder
+
+        try:
+            folder = resolve_temp_folder(cfg.manual_merge.temp_folder, cfg.paths.database_path)
+            sweep_temp_folder(folder, cfg.manual_merge.sweep_after_hours)
+        except Exception:
+            logger.warning("Manual-merge staging sweep failed at startup", exc_info=True)
+
     yield
+
+
+def _manual_merge_request_bytes() -> int:
+    """Configured whole-request cap for /manual/merge, or the built-in default."""
+    try:
+        return load_config().manual_merge.max_request_bytes
+    except Exception:
+        logger.warning(
+            "Could not read manual_merge limits; using the built-in defaults",
+            exc_info=True,
+        )
+        return MAX_MANUAL_MERGE_REQUEST_BYTES
+
+
+def _manual_merge_display_mb() -> int | None:
+    """The user-facing file-size limit, not the larger multipart cap."""
+    try:
+        return load_config().manual_merge.max_total_mb
+    except Exception:
+        return None
 
 
 def _configured_allowed_hosts() -> list[str]:
@@ -165,8 +277,14 @@ def create_app(allowed_hosts: list[str] | None = None) -> FastAPI:
     app = FastAPI(title="AAM Merger V3", version="0.1.0", lifespan=lifespan)
 
     # Middleware order: the last added is the outermost. TrustedHost runs
-    # before the Origin guard so a bad Host is refused before anything else.
+    # before the body guard, which runs before the origin check.
     app.add_middleware(OriginGuardMiddleware)
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        paths=("/manual/merge",),
+        max_bytes=_manual_merge_request_bytes(),
+        display_mb=_manual_merge_display_mb(),
+    )
     if hosts != ["*"]:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 

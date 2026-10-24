@@ -248,8 +248,8 @@ Numbering mirrors business doc sections for traceability.
 ### 7.12 Manual PDF Merger (business doc §14.2)
 
 - **[FR-14.11]** The system shall provide a fully separate manual merge tool: user uploads arbitrary files, reorders via drag-and-drop, and downloads the merged result. This tool shall create no database row and have no `po_no` association.
-- **[FR-14.12]** The manual merger's output destination and filename shall be user-selectable in the UI at merge time — not auto-written to the automated pipeline's output folder or filename convention by default. The user may choose the same output folder if they wish, but the system shall not enforce it.
-- **[FR-14.13]** The manual merger shall be visually and navigationally isolated in the UI from the automated pipeline dashboard, so it cannot be confused with "the AI pipeline."
+- **[FR-14.12]** The manual merger's output **filename** shall be user-selectable in the UI at merge time. The merged file is delivered as a browser download, so the destination folder is chosen by the browser/user; the tool shall not write to the automated pipeline's `output_folder` or use its filename convention by default. *(Amended 2026-10-23: the server-side destination picker was retired in favour of the download model; see PRODUCT §6.2.)*
+- **[FR-14.13]** The manual merger shall be clearly distinguished from the automated pipeline in the UI, so it cannot be confused with "the AI pipeline": it shall carry a distinct page header and a "Standalone tool — no AI, no database" marker, and shall not expose pipeline actions. It may share the application navigation, because it is part of the same program. *(Amended 2026-10-23.)*
 
 ### 7.13 AI/logic boundary (business doc §15)
 

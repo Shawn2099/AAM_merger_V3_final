@@ -79,6 +79,23 @@ prefect:
 concurrency:
   po_set_lock_timeout_seconds: 300
 
+manual_merge:
+  # Limits and staging for the standalone Merge PDFs tool. The page reads
+  # max_files/max_total_mb and shows them; restart the app after changing them
+  # (the request-body guard is built at startup). Encrypted/password-protected
+  # PDFs are refused regardless of these limits.
+  max_files: 20
+  max_total_mb: 100
+  max_pages: 5000
+  # Leave blank to use <database folder>/manual_merge_tmp. Must be separate
+  # from every pipeline data folder; the app refuses to start if it is not.
+  temp_folder: "./data/manual_merge_tmp"
+  # Delete our own abandoned mm-*.pdf staging files older than this many hours
+  # (on startup and before each merge). Only files with the mm- prefix are
+  # touched, so this can never delete a real document.
+  sweep_after_hours: 6
+  sweep_on_startup: true
+
 reconciliation:
   # A PO Set is expected to hold one PO document. With this on, more than one
   # PO document holds the set pending for a human; it is never summed and never

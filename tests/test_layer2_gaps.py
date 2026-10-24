@@ -576,7 +576,7 @@ def test_manual_merge_validation(tmp_path):
     from app.services.quarantine import manual_merge
 
     a = _tiny_pdf(tmp_path / "a.pdf")
-    with pytest.raises(ValueError, match="No files"):
+    with pytest.raises(ValueError, match="at least one PDF"):
         manual_merge([], [])
     with pytest.raises(ValueError, match="order length"):
         manual_merge([a], [0, 1])

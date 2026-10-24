@@ -50,6 +50,18 @@ Pipeline: `Input -> SHA-256 dedup -> classify -> VLM extract -> group by PO -> r
 - Ambiguity or a case the docs don't cover means stop and ask. After two failed fixes, report instead of retrying. Verify against real vendor PDFs, synthetic edge cases, and a real concurrent Force Merge, not only mocks.
 - Commit by naming the files you changed. The tree is usually dirty, so don't use `git add -A`.
 
+## Subagents and model tiers
+
+Use a subagent only when it earns its cost. Each one starts cold and re-reads the repo, so a plan or implementation agent costs about 100-160k tokens. Use one for review, broad searches, and independent work that can run in parallel. Do small or tightly coupled edits (reconcile, merge, grouping) inline, and don't spawn an agent just to run a command.
+
+Pick the model by the size of the task, and pass `model` explicitly on every Agent call:
+
+- **Haiku:** small mechanical edits (scripts, docs and table rows, moving tests, test-factory defaults, a one-line UI tweak).
+- **Sonnet:** mid-level implementation (a new guard or route with its tests, deploy and migration work, UI plus route changes).
+- **Opus:** review of every commit that touches reconciliation, merge, grouping, migrations or the Prefect deployment, and any plan.
+
+The fix plan in `docs/MVP_FIX_PLAN.md` follows this split.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

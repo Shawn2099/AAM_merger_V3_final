@@ -280,20 +280,26 @@ def test_manual_merge_refuses_more_than_the_file_cap(manual_client):
 
     assert response.status_code == 422
     detail = response.json()["detail"]
-    assert "too many files" in detail
+    assert "Too many files" in detail
     assert str(MAX_MANUAL_MERGE_FILES) in detail
 
 
 def test_manual_merge_refuses_more_than_the_total_byte_cap(manual_client, monkeypatch):
-    from app.core import limits
+    from app.core.config import load_config
 
-    monkeypatch.setattr(limits, "MAX_UPLOAD_BYTES", 16)
-    uploads = [_pdf_upload("a.pdf", b"%PDF-1.4aa"), _pdf_upload("b.pdf", b"%PDF-1.4bb")]
+    cfg = load_config("config.example.yaml")
+    cfg.manual_merge.max_total_mb = 1
+    monkeypatch.setattr("app.api.routes.manual_merger.load_config", lambda: cfg)
+    uploads = [
+        _pdf_upload("a.pdf", b"%PDF-1.4" + b"a" * 600_000),
+        _pdf_upload("b.pdf", b"%PDF-1.4" + b"b" * 600_000),
+    ]
 
     response = manual_client.post("/manual/merge", files=uploads)
 
-    assert response.status_code == 422
-    assert "total cap" in response.json()["detail"]
+    # 413 is the correct semantic for an oversized payload (it used to be 422).
+    assert response.status_code == 413
+    assert "more than" in response.json()["detail"]
 
 
 def test_load_config_is_cached_but_returns_independent_copies(tmp_path):

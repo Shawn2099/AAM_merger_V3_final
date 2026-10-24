@@ -870,11 +870,11 @@ def test_sync_flow_sweep_reconciles_stale_mismatched_set(tmp_path):
     cfg.ingestion.stability_poll_count = 1
 
     cfg_file = tmp_path / "config.yaml"
-    cfg_data = cfg.model_dump()
+    cfg_data = cfg.model_dump(mode="json")
     for k, v in cfg_data.get("paths", {}).items():
         cfg_data["paths"][k] = str(v)
     with open(cfg_file, "w") as f:
-        yaml.dump(cfg_data, f)
+        yaml.safe_dump(cfg_data, f)
     for p in [
         cfg.paths.input_folder,
         cfg.paths.stored_documents_folder,

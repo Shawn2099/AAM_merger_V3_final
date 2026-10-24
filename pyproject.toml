@@ -38,6 +38,8 @@ dev = [
     "ty>=0.0.1a20",
     "pip-audit>=2.9.0",
     "hypothesis>=6.100.0",
+    "playwright>=1.64.1",
+    "pytest-playwright>=0.10.0",
 ]
 # keep sync with [tool.*] below
 
@@ -79,6 +81,7 @@ testpaths = ["tests"]
 addopts = "-q --tb=short --strict-markers --cov=src --cov-fail-under=0 --cov-report=term-missing"
 markers = [
     "slow: marks tests as slow",
+    "e2e: browser end-to-end tests (opt-in via RUN_E2E=1)",
 ]
 
 [tool.ty.environment]

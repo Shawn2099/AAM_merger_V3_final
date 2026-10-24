@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import shutil
-import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_engine
 from app.models import AuditAction, AuditLog, Document, LineItem, POSet, POSetStatus
 from app.models.base import Base
+from app.services.manual_merge import manual_merge  # noqa: F401  (re-export, FR-14.11)
 
 logger = logging.getLogger(__name__)
 
@@ -879,47 +878,3 @@ def delete_quarantined(
 ) -> AuditLog:
     """Backward-compatible name for the Delete route: archive, never delete."""
     return archive_quarantined(po_set_id, cfg, justification=justification, source=source)
-
-
-def manual_merge(
-    files: list[Path],
-    order: list[int],
-    output_path: Path | None = None,
-) -> Path:
-    """Isolated manual PDF merger — no DB, no po_no association (FR-14.11-14.13).
-
-    Concatenates PDFs in user-specified order via pypdf.
-    Output destination and filename are user-selectable (FR-14.12); if output_path is None,
-    a temp file is created (isolated from pipeline output_folder).
-    Returns Path to merged PDF.
-    """
-    if not files:
-        raise ValueError("No files provided for manual merge")
-    if order is None:
-        order = list(range(len(files)))
-    if len(order) != len(files):
-        raise ValueError(f"order length {len(order)} != files length {len(files)}")
-    if set(order) != set(range(len(files))):
-        raise ValueError(f"order must be permutation of 0..{len(files) - 1}, got {order}")
-
-    if output_path is None:
-        fd, tmp = tempfile.mkstemp(suffix=".pdf")
-        os.close(fd)
-        output_path = Path(tmp)
-    else:
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    from pypdf import PdfReader, PdfWriter
-
-    writer = PdfWriter()
-    ordered = [Path(files[i]) for i in order]
-    for p in ordered:
-        if not p.exists():
-            raise FileNotFoundError(f"File not found: {p}")
-        reader = PdfReader(str(p))
-        for pg in reader.pages:
-            writer.add_page(pg)
-    # handle empty writer (no pages) — still write file
-    writer.write(str(output_path))
-    return output_path

@@ -116,6 +116,12 @@ def _redirect_paths(cfg):
         current = getattr(cfg.paths, name, None)
         if current is not None and _is_placeholder(current):
             setattr(cfg.paths, name, value)
+
+    # The manual merger's staging folder is not under `paths:`; redirect it too
+    # so a test run can never sweep or write into the repository's data folder.
+    temp = getattr(cfg.manual_merge, "temp_folder", None)
+    if temp is not None and _is_placeholder(temp):
+        cfg.manual_merge.temp_folder = _SESSION_DIR / "manual_merge_tmp"
     return cfg
 
 

@@ -1,161 +1,300 @@
-"""Manual merger routes — isolated from automated pipeline (FR-14.11-14.13)."""
+"""Manual merger routes — isolated from the automated pipeline (FR-14.11-14.13).
+
+The page is standalone in *function* (no AI, no database, no PO association)
+while using the application's normal shell, because it is still part of the
+same program.  The endpoint is deliberately defensive: the request body is
+bounded before multipart parsing, every file is validated as a real PDF, and
+failures name the offending file so the UI can point at it.
+"""
 
 from __future__ import annotations
 
+import contextlib
+import logging
+import os
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
+from starlette.background import BackgroundTask
+from starlette.datastructures import UploadFile
+from starlette.formparsers import MultiPartException
+
+from app.core.config import ManualMergeConfig, load_config
+from app.core.http_errors import BodyTooLarge, error_response, wants_html
+from app.services.manual_merge import (
+    DEFAULT_PDF_NAME,
+    TEMP_FILE_PREFIX,
+    ManualMergeError,
+    manual_merge,
+    resolve_temp_folder,
+    sweep_temp_folder,
+    validate_pdf_name,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/manual", tags=["manual"])
 
-# templates isolated from pipeline dashboard
+# templates isolated from the pipeline dashboard
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[4] / "templates"))
+
+_MAX_FORM_FIELD_BYTES = 64 * 1024
+_MAX_FORM_FIELDS = 8
 
 
 @router.get("/merger", response_class=HTMLResponse)
 def manual_merger_page(request: Request):
-    """Isolated manual PDF merger UI — visually distinct from pipeline dashboard (FR-14.13)."""
-    return templates.TemplateResponse(request, "manual_merger.html", {"request": request})
+    """The Merge PDFs tool.  Functionally isolated from the pipeline."""
+    mm = load_config().manual_merge
+    return templates.TemplateResponse(
+        request,
+        "manual_merger.html",
+        {
+            "request": request,
+            "max_files": mm.max_files,
+            "max_bytes": mm.max_total_bytes,
+            "max_mb": mm.max_total_mb,
+            "max_pages": mm.max_pages,
+            "default_name": DEFAULT_PDF_NAME,
+        },
+    )
 
 
 @router.post("/merge")
-def manual_merge_endpoint(
-    request: Request,
-    files: list[UploadFile] = File(...),  # noqa: B008
-    order: str = Form(""),
-    output_filename: str = Form("manual_merged.pdf"),
-):
+async def manual_merge_endpoint(request: Request):
+    """Merge uploaded PDFs in the order they arrive.  No DB side-effects."""
+    cfg = await run_in_threadpool(load_config)  # reads/stats the YAML: not on the event loop
+    mm = cfg.manual_merge
     try:
-        return _manual_merge_impl(files, order, output_filename)
-    except HTTPException as exc:
-        if "text/html" in (request.headers.get("accept") or ""):
-            return HTMLResponse(content=_error_page(str(exc.detail)), status_code=exc.status_code)
-        raise
+        form = await request.form(
+            max_files=mm.max_files + 1,
+            max_fields=_MAX_FORM_FIELDS,
+            max_part_size=_MAX_FORM_FIELD_BYTES,
+        )
+    except BodyTooLarge:
+        return _error(
+            request,
+            413,
+            "too_large",
+            f"That upload is larger than the {mm.max_total_mb} MB limit. "
+            "Please remove a file or use smaller ones.",
+        )
+    except MultiPartException as exc:
+        if "Too many files" in str(exc):
+            return _error(
+                request,
+                422,
+                "too_many_files",
+                f"Too many files — you can merge up to {mm.max_files} at a time.",
+            )
+        return _error(
+            request,
+            400,
+            "bad_request",
+            "We couldn't read that upload. Please reload the page and try again.",
+        )
+
+    try:
+        uploads = [
+            value
+            for value in form.getlist("files")
+            if isinstance(value, UploadFile) and getattr(value, "filename", None)
+        ]
+        order_raw = str(form.get("order") or "")
+        raw_name = form.get("output_filename")
+        # A missing field keeps the friendly default; an explicitly blank
+        # field is invalid input and is rejected by validate_pdf_name.
+        output_filename = DEFAULT_PDF_NAME if raw_name is None else str(raw_name)
+        return await run_in_threadpool(
+            _manual_merge_impl,
+            uploads,
+            order_raw,
+            output_filename,
+            mm,
+            cfg.paths.database_path,
+        )
+    except ManualMergeError as exc:
+        return _error(request, exc.status, exc.code, str(exc), exc.filename)
+    except FileNotFoundError as exc:
+        logger.warning("Manual merge could not read an upload: %s", exc)
+        return _error(
+            request,
+            422,
+            "missing_file",
+            "One of the files couldn't be read. Please add it again.",
+        )
+    except Exception:
+        logger.exception("Manual merge failed unexpectedly")
+        return _error(
+            request,
+            500,
+            "merge_failed",
+            "Something went wrong and nothing was downloaded. Please try again.",
+        )
+    finally:
+        await form.close()
 
 
-def _error_page(message: str) -> str:
-    """A minimal standalone page so a browser form error keeps a way back."""
-    import html as _html
+def _error(
+    request: Request,
+    status: int,
+    code: str,
+    message: str,
+    filename: str | None = None,
+):
+    """HTML for a browser form post, JSON for the XHR client."""
+    if wants_html(request):
+        return templates.TemplateResponse(
+            request,
+            "manual_merger_error.html",
+            {
+                "request": request,
+                "message": message,
+                "filename": filename,
+                "status": status,
+            },
+            status_code=status,
+        )
+    return error_response(request, status, code, message, filename)
 
-    return (
-        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
-        "<title>Manual merge — not completed</title>"
-        "<style>body{font-family:system-ui,Segoe UI,sans-serif;background:#fffbf5;"
-        "color:#1c1917;padding:48px;}main{max-width:640px;margin:0 auto;"
-        "background:#fff;border:1px solid #fde68a;border-radius:8px;padding:24px;}"
-        "h1{font-size:1.2rem;margin-bottom:8px;}a{color:#b45309;}</style></head>"
-        "<body><main><h1>Manual merge was not completed</h1>"
-        f"<p>{_html.escape(message)}</p>"
-        "<p><a href='/manual/merger'>&larr; Back to the manual merger</a></p>"
-        "</main></body></html>"
-    )
+
+def _new_temp(folder: Path) -> Path:
+    """Create one staging file in our own folder."""
+    try:
+        fd, tmp = tempfile.mkstemp(prefix=TEMP_FILE_PREFIX, suffix=".pdf", dir=str(folder))
+        os.close(fd)
+        return Path(tmp)
+    except OSError as exc:
+        raise ManualMergeError(
+            "The server's temporary folder isn't writable. "
+            "Please check the manual_merge.temp_folder setting.",
+            "staging_failed",
+        ) from exc
 
 
 def _manual_merge_impl(
     files: list[UploadFile],
-    order: str,
+    order_raw: str,
     output_filename: str,
+    mm: ManualMergeConfig,
+    database_path: Path,
 ):
-    """Merge uploaded PDFs in user-specified order, no DB side-effects (FR-14.11).
-
-    Output filename and destination are user-selectable at merge time (FR-14.12).
-    Returns merged PDF as download.
-    """
-    import contextlib
-    import os
-
-    from starlette.background import BackgroundTask
-
-    from app.core.limits import MAX_MANUAL_MERGE_FILES, MAX_UPLOAD_BYTES
-    from app.services.quarantine import manual_merge
-
-    def _cleanup(*paths) -> None:
-        for p in paths:
-            if p is None:
-                continue
-            with contextlib.suppress(OSError):
-                Path(p).unlink(missing_ok=True)
-
-    # Bound the request before reading anything into memory (audit P2-15).
+    """Read, validate and merge uploads.  Runs in the threadpool."""
     if not files:
-        raise HTTPException(status_code=422, detail="no files uploaded")
-    if len(files) > MAX_MANUAL_MERGE_FILES:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"too many files: {len(files)} uploaded, "
-                f"max {MAX_MANUAL_MERGE_FILES} per manual merge"
-            ),
+        raise ManualMergeError(
+            "Please add at least one PDF and try again.",
+            "no_files",
+        )
+    if len(files) > mm.max_files:
+        raise ManualMergeError(
+            f"Too many files — you can merge up to {mm.max_files} at a time "
+            f"({len(files)} were added).",
+            "too_many_files",
         )
 
-    # save uploads to temp files (bounded, PDF-only)
+    # Validate the output name before touching the files: a bad name fails
+    # fast and creates no temp files.
+    safe_name = validate_pdf_name(output_filename)
+
+    try:
+        temp_folder = resolve_temp_folder(mm.temp_folder, database_path)
+    except OSError as exc:
+        raise ManualMergeError(
+            "The server's temporary folder couldn't be created. "
+            "Please check the manual_merge.temp_folder setting.",
+            "staging_failed",
+        ) from exc
+    sweep_temp_folder(temp_folder, mm.sweep_after_hours)
+
     tmp_paths: list[Path] = []
     out_path: Path | None = None
     total_bytes = 0
+    names: list[str] = []
+
     try:
-        for uf in files:
-            safe_filename = Path(uf.filename or "upload.pdf").name
-            if Path(safe_filename).suffix.lower() != ".pdf":
-                raise HTTPException(status_code=422, detail="only .pdf uploads accepted")
-            data = uf.file.read(MAX_UPLOAD_BYTES + 1)
-            if len(data) > MAX_UPLOAD_BYTES:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"file exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)}MB upload cap",
+        for upload in files:
+            name = Path(upload.filename or "upload.pdf").name
+            names.append(name)
+            if Path(name).suffix.lower() != ".pdf":
+                raise ManualMergeError(
+                    f"{name} isn't a PDF. Please add PDF files only.",
+                    "not_pdf",
+                    name,
+                )
+
+            data = upload.file.read(mm.max_total_bytes + 1)
+            if len(data) > mm.max_total_bytes:
+                raise ManualMergeError(
+                    f"{name} is larger than the {mm.max_total_mb} MB limit. "
+                    "Please use a smaller file.",
+                    "too_large",
+                    name,
+                    status=413,
                 )
             total_bytes += len(data)
-            if total_bytes > MAX_UPLOAD_BYTES:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        "uploads exceed the "
-                        f"{MAX_UPLOAD_BYTES // (1024 * 1024)}MB total cap "
-                        "for one manual merge"
-                    ),
+            if total_bytes > mm.max_total_bytes:
+                raise ManualMergeError(
+                    f"These files add up to more than {mm.max_total_mb} MB. "
+                    "Please remove one or use smaller files.",
+                    "too_large",
+                    status=413,
                 )
-            if not data.startswith(b"%PDF"):
-                raise HTTPException(status_code=422, detail="not a PDF file")
-            fd, tmp = tempfile.mkstemp(suffix=".pdf")
-            os.close(fd)
-            p = Path(tmp)
-            p.write_bytes(data)
-            tmp_paths.append(p)
+            # The header may legitimately sit anywhere in the first 1024 bytes
+            # (BOM, blank lines, scanner padding).  Ingestion uses the same rule.
+            if b"%PDF-" not in data[:1024]:
+                raise ManualMergeError(
+                    f"We couldn't read {name}. It may be damaged or not a PDF.",
+                    "not_pdf",
+                    name,
+                )
 
-        # parse order: comma-separated ints e.g. "2,0,1" or empty for natural order
-        if order.strip():
-            order_list = [int(x.strip()) for x in order.split(",") if x.strip() != ""]
-        else:
-            order_list = list(range(len(tmp_paths)))
+            path = _new_temp(temp_folder)
+            tmp_paths.append(path)  # before the write, so a failed write is still cleaned up
+            path.write_bytes(data)
 
-        # sanitize output filename
-        safe_name = "".join(c for c in output_filename if c.isalnum() or c in ("-", "_", "."))
-        if not safe_name:
-            safe_name = "manual_merged.pdf"
-        if not safe_name.lower().endswith(".pdf"):
-            safe_name += ".pdf"
+        order: list[int] | None = None
+        if order_raw.strip():
+            try:
+                order = [int(part.strip()) for part in order_raw.split(",") if part.strip()]
+            except ValueError as exc:
+                raise ManualMergeError(
+                    "We couldn't read the file order. Please reload the page and try again.",
+                    "bad_order",
+                ) from exc
 
-        fd2, out_tmp = tempfile.mkstemp(suffix=".pdf")
-        os.close(fd2)
-        # we will write to a path that reflects user's chosen name for download header,
-        # but actual file is tmp; FileResponse will set filename
-        from pathlib import Path as _Path
+        out_path = _new_temp(temp_folder)
 
-        out_path = _Path(out_tmp)
-        merged = manual_merge(tmp_paths, order=order_list, output_path=out_path)
+        merged = manual_merge(
+            tmp_paths,
+            order=order,
+            output_path=out_path,
+            display_names=names,
+            max_pages=mm.max_pages,
+        )
 
-        # output tmp is served by FileResponse: delete after send (W-11).
         return FileResponse(
             path=str(merged),
             filename=safe_name,
             media_type="application/pdf",
-            background=BackgroundTask(_cleanup, *[*tmp_paths, out_path]),
+            headers={
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+            # Inputs and the output temp are removed only after the bytes are sent.
+            background=BackgroundTask(_cleanup, *tmp_paths, out_path),
         )
-    except HTTPException:
-        _cleanup(*(tmp_paths + ([out_path] if out_path is not None else [])))
+    except Exception:
+        _cleanup(*tmp_paths, out_path)
         raise
-    except Exception as e:
-        _cleanup(*(tmp_paths + ([out_path] if out_path is not None else [])))
-        raise HTTPException(status_code=422, detail=f"manual merge failed: {e}") from e
+
+
+def _cleanup(*paths) -> None:
+    for path in paths:
+        if path is None:
+            continue
+        with contextlib.suppress(OSError):
+            Path(path).unlink(missing_ok=True)

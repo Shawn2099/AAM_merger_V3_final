@@ -15,3 +15,13 @@ MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 #: (PO + DN + SI + customs + shipping) and bounds a hostile request. The total
 #: bytes of one manual merge are capped at MAX_UPLOAD_BYTES as well.
 MAX_MANUAL_MERGE_FILES = 20
+
+#: Max size of the whole multipart request for one manual merge. Enforced
+#: before Starlette parses the body (see `BodySizeLimitMiddleware`), because
+#: the per-file cap above can only be checked after parsing. The extra 2 MB
+#: covers multipart boundaries and the two text fields.
+MAX_MANUAL_MERGE_REQUEST_BYTES = MAX_UPLOAD_BYTES + (2 * 1024 * 1024)
+
+#: Max pages in one merged packet. Bounds pypdf's CPU/memory on the 2-core
+#: production host; far above any real CA packet.
+MAX_MANUAL_MERGE_PAGES = 5000

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}That didn't work — AAM Merger V3{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width:680px;margin:48px auto;">
+  <span class="badge badge-quarantined">That didn't work</span>
+  <h1 class="card-title" style="margin:14px 0 10px;">We couldn't merge those files</h1>
+  <p style="margin-bottom:10px;color:var(--text-main);">{{ message }}</p>
+  {% if filename %}
+  <p class="muted" style="margin-bottom:10px;">File: <strong>{{ filename }}</strong></p>
+  {% endif %}
+  <p class="muted" style="margin-bottom:22px;">
+    Nothing was added to the reconciliation pipeline, and your files were not saved on the server.
+  </p>
+  <a class="btn btn-primary" href="/manual/merger">← Back and try again</a>
+</div>
+{% endblock %}

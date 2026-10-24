@@ -431,6 +431,39 @@ It is safe to press at any time: if the set is not eligible the response
 carries the status and reason and nothing is written. Force Merge is the
 separate, deliberately unconditional override.
 
+### 6.2 Merge PDFs — the standalone tool
+
+`GET /manual/merger` (navigation: **Merge PDFs**, plus a button on the
+dashboard) opens a tool that is part of the same application but **not part
+of the pipeline**: no AI call, no `documents`/`po_sets` row, no `audit_log`
+entry, and no `po_no` association (FR-14.11). The page is clearly marked
+"Standalone tool · No AI · Nothing saved to the database · Not part of the pipeline".
+
+The operator stages PDFs within the limits configured under `manual_merge:`
+in `config.yaml` (defaults: 20 files, 100 MB total, 5,000 pages), reorders them
+by drag or with the arrow buttons, names the download, and presses **Merge
+PDFs**. The merged file is returned as a browser download; the browser chooses
+the folder. That is the deliberate resolution of FR-14.12 — there is no
+server-side destination field and nothing is written to `output_folder`
+(amended 2026-10-23).
+
+The server validates every input as a real PDF (header in the first 1024
+bytes, openable by pypdf, at least one page) and **refuses every encrypted or
+password-protected PDF**, including owner-password-only files: the tool never
+decrypts and never silently drops permission flags. The uploader is asked to
+supply an unlocked copy. Page-level JavaScript and launch actions are stripped;
+the whole request is capped before multipart parsing. Failures are rendered in
+the page, name the offending file, and keep the staged list so the operator
+does not have to rebuild it.
+
+The download name is validated live and again on the server: spaces, parentheses
+and Unicode are kept; Windows-invalid characters, leading/trailing dots or
+spaces, reserved device names and names over 100 characters are refused with a
+clear message. Uploads are staged in `manual_merge.temp_folder` (default: beside
+the database) and the tool sweeps only its own `mm-*.pdf` files older than
+`sweep_after_hours` on startup and before each merge. The staging folder must be
+separate from every pipeline data folder; the app refuses to start otherwise.
+
 ---
 
 ## 7. What was removed, and why

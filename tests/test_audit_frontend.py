@@ -166,9 +166,10 @@ def test_dashboard_no_longer_promises_vendor_filtering():
 
 
 def test_manual_merger_builds_rows_without_innerHTML():
-    source = MANUAL_MERGER.read_text(encoding="utf-8")
+    script = (REPO_ROOT / "static" / "js" / "manual_merger.js").read_text(encoding="utf-8")
+    template = MANUAL_MERGER.read_text(encoding="utf-8")
 
-    assert ".innerHTML" not in source
-    assert "insertAdjacentHTML" not in source
+    assert ".innerHTML" not in script + template
+    assert "insertAdjacentHTML" not in script + template
     # The filename specifically must be assigned as text.
-    assert "name.textContent = f.name;" in source
+    assert "name.textContent = item.name;" in script

@@ -221,24 +221,9 @@ def test_manual_merge_isolated(tmp_path):
     widths = [float(p.mediabox.width) for p in reader.pages]
     assert widths == [300, 100, 200], f"manual order failed, got {widths}"
 
-    # no DB row created - verify DB is empty or no po_sets created by manual merge
-    from sqlalchemy.orm import Session
-
-    from app.core.database import get_engine
-    from app.models import POSet
-
-    cfg = _cfg_with_tmp(tmp_path)
-    eng = get_engine(cfg)
-    from app.models.base import Base
-
-    Base.metadata.create_all(eng)
-    with Session(eng) as s:
-        assert (
-            s.query(POSet).count() == 0 or True
-        )  # manual_merge should not require DB, just ensure no crash
-        # actual assertion: manual_merge does not create POSet - if DB was empty before, still empty
-        # we use isolated cfg, so count should be 0
-        assert s.query(POSet).count() == 0
+    # No DB assertion here: the service has no engine/session to call, and the
+    # route-level proof lives in
+    # tests/test_manual_merger.py::test_route_does_not_touch_the_database.
 
 
 def test_justification_boundary(tmp_path):
@@ -325,7 +310,11 @@ def test_delete_audit_carries_evidence_and_survives_its_set(tmp_path):
 
 
 def test_manual_merge_output_user_selectable(tmp_path):
-    """FR-14.12: manual_merge output can be written to user-chosen location (not forced to output_folder)."""
+    """The service writes to a caller-supplied path (the web route uses a temp).
+
+    FR-14.12 is download-only since 2026-10-23: the browser picks the folder.
+    This test only pins the service's ability to write a given path.
+    """
     from app.services.quarantine import manual_merge
 
     a = _tiny_pdf(tmp_path / "x.pdf", width=100)
