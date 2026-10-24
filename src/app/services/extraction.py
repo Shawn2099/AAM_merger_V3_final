@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
@@ -834,6 +835,85 @@ def _is_infrastructure_leaf(exc: BaseException) -> bool:
     return isinstance(exc, RuntimeError) and "not configured" in str(exc)
 
 
+# --- Provider-wide HTTP 400 breaker (R-06) ----------------------------------
+# A 400 is normally about the request, not the provider: but a request that is
+# invalid for EVERY document (wrong model id, unsupported parameter, a provider
+# schema change) would fail, quarantine and remove the whole night's input. So
+# when this many DIFFERENT documents in a row are rejected with a 400, the
+# cause is taken to be the request, not the documents: their attempts are
+# refunded, they stay pending, and the sync stops calling the provider.
+PROVIDER_400_LIMIT = 3
+_breaker_lock = threading.Lock()
+_rejected_400: set[int] = set()
+_breaker_tripped = False
+
+
+class ProviderRequestRejected(RuntimeError):
+    """The provider rejected the request itself for several documents in a row."""
+
+
+def reset_provider_breaker() -> None:
+    """Forget earlier rejections. Called at the start of every sync."""
+    global _breaker_tripped
+    with _breaker_lock:
+        _rejected_400.clear()
+        _breaker_tripped = False
+
+
+def provider_breaker_tripped() -> bool:
+    return _breaker_tripped
+
+
+def _is_http_400(exc: BaseException | None) -> bool:
+    import openai
+
+    frontier: list[tuple[BaseException, int]] = [(exc, 0)] if exc is not None else []
+    seen: set[int] = set()
+    while frontier:
+        current, depth = frontier.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, openai.APIStatusError) and current.status_code == 400:
+            return True
+        if depth + 1 < _INFRA_CHAIN_DEPTH:
+            for nxt in (current.__cause__, current.__context__):
+                if nxt is not None:
+                    frontier.append((nxt, depth + 1))
+    return False
+
+
+def _note_provider_ok() -> None:
+    """A document was read: the request shape is fine, so earlier 400s were the documents'."""
+    with _breaker_lock:
+        _rejected_400.clear()
+
+
+def _note_provider_400(doc_id: int) -> list[int] | None:
+    """Record a 400. Returns every rejected document id once the breaker trips, else None."""
+    global _breaker_tripped
+    with _breaker_lock:
+        _rejected_400.add(doc_id)
+        if len(_rejected_400) < PROVIDER_400_LIMIT and not _breaker_tripped:
+            return None
+        _breaker_tripped = True
+        return sorted(_rejected_400)
+
+
+def _refund_rejected(eng, doc_ids: list[int]) -> None:
+    """Put documents the breaker condemned back to pending with no attempts charged."""
+    from sqlalchemy import update as _sa_update
+
+    with Session(eng) as s:
+        s.execute(
+            _sa_update(Document)
+            .where(Document.id.in_(doc_ids), Document.archived_at.is_(None))
+            .values(extraction_status=ExtractionStatus.pending, extraction_attempt_count=0)
+            .execution_options(synchronize_session=False)
+        )
+        s.commit()
+
+
 def _is_infrastructure_error(exc: BaseException | None) -> bool:
     """True when the failure is the provider or network's fault, not the document's.
 
@@ -1018,6 +1098,7 @@ def extract_document(doc_id: int, cfg) -> Document:
             populate_from_raw_dict(doc, result, s, cfg)
             s.commit()
             s.refresh(doc)
+            _note_provider_ok()
             return doc
         except Exception as e:
             # The session may be in a failed-flush state (e.g. a DB error at
@@ -1044,6 +1125,23 @@ def extract_document(doc_id: int, cfg) -> Document:
                     type(e).__name__,
                 )
                 raise e
+            rejected = _note_provider_400(doc_id) if _is_http_400(e) else None
+            if rejected is not None:
+                # Provider-wide 400 (R-06): refund every document it condemned
+                # and leave them pending; the sync loops stop calling the VLM.
+                _refund_rejected(eng, rejected)
+                logger.error(
+                    "The provider rejected the request itself (HTTP 400) for %d documents in a "
+                    "row (%s). This is almost certainly a wrong vlm.model or an unsupported "
+                    "request option, not bad documents. Their attempts are refunded, they stay "
+                    "pending, and no further documents are sent this sync. Fix the config and "
+                    "run the sync again.",
+                    len(rejected),
+                    e,
+                )
+                raise ProviderRequestRejected(
+                    "provider rejected the request for several documents in a row"
+                ) from e
             doc.extraction_attempt_count = attempt_no
             doc.extraction_status = ExtractionStatus.failed
             s.commit()

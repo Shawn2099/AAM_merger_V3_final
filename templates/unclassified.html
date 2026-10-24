@@ -70,6 +70,7 @@
                 <div class="muted" style="font-size:0.7rem; margin-top:3px;">
                   {{ doc.extraction_attempt_count or 0 }}/{{ attempt_cap }} attempts.<br>
                   Quarantined — file copied to the quarantine folder.
+                  {% if doc.ingest_reject_reason %}<br><strong>Rejected on arrival:</strong> {{ doc.ingest_reject_reason }}{% endif %}
                 </div>
               {% elif es == 'valid' %}
                 <span class="badge badge-merged" style="font-size:0.75rem;">Read</span>

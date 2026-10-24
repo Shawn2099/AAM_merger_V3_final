@@ -205,7 +205,9 @@ def test_ingestion_rejects_a_non_pdf_and_leaves_a_reason(cfg):
     reason = reasons[0].read_text(encoding="utf-8")
     assert "ValueError" in reason and "%PDF-" in reason
     with _session(cfg) as s:
-        assert s.query(Document).count() == 0, "no document row for a rejected file"
+        (row,) = s.query(Document).all()  # R-03: listed on the Unclassified page as failed
+        assert row.extraction_status == ExtractionStatus.failed and row.po_set_id is None
+        assert "%PDF-" in (row.ingest_reject_reason or "")
 
 
 def test_ingestion_rejects_a_file_over_the_size_cap(cfg, monkeypatch):
@@ -223,7 +225,9 @@ def test_ingestion_rejects_a_file_over_the_size_cap(cfg, monkeypatch):
     assert len(reasons) == 1
     assert "upload cap" in reasons[0].read_text(encoding="utf-8")
     with _session(cfg) as s:
-        assert s.query(Document).count() == 0
+        (row,) = s.query(Document).all()
+        assert row.extraction_status == ExtractionStatus.failed
+        assert "upload cap" in (row.ingest_reject_reason or "")
 
 
 def test_ingestion_accepts_a_real_pdf(cfg):

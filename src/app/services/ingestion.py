@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import logging
 import shutil
 import time
@@ -81,7 +82,7 @@ def _reject_incomplete_pdf(src: Path, cfg: AppConfig, problem: str) -> None:
     _reject_input(src, cfg, f"{src.name}: {reason}")
 
 
-def _quarantine_unreadable(src: Path, cfg: AppConfig, exc: Exception) -> None:
+def _quarantine_unreadable(src: Path, cfg: AppConfig, exc: Exception) -> Path | None:
     """Move an input file that cannot even be read out of the scan loop.
 
     Without this, a PermissionError/MemoryError/OSError happened before any
@@ -102,14 +103,64 @@ def _quarantine_unreadable(src: Path, cfg: AppConfig, exc: Exception) -> None:
             f"Could not read input file before ingestion: {type(exc).__name__}: {exc}\n",
             encoding="utf-8",
         )
+        return dest
     except Exception:
         logger.warning("Could not move unreadable input file %s to quarantine", src, exc_info=True)
+        return None
+
+
+def _record_rejected_document(original_name: str, dest: Path, reason: str, cfg: AppConfig) -> None:
+    """Give a permanently rejected input file a `failed` row so the operator sees it.
+
+    Without a row the only trace of a non-PDF, a truncated or encrypted copy, or
+    an over-cap file is a reason file on disk. The row is UNKNOWN, unattached and
+    already at the attempt cap, so it lists on the Unclassified page as a failure
+    and the VLM is never called for it. `stored_path` is the quarantined copy.
+    Never raises: the caller is already refusing the file.
+    """
+    from app.services.extraction import _attempt_cap
+
+    try:
+        digest = hashlib.sha256()
+        with dest.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                digest.update(chunk)
+        sha = digest.hexdigest()
+        eng = get_engine(cfg)
+        from app.models.base import Base
+
+        Base.metadata.create_all(eng)
+        with Session(eng) as s:
+            exists = (
+                s.query(Document.id)
+                .filter(Document.sha256_hash == sha, Document.archived_at.is_(None))
+                .first()
+            )
+            if exists is not None:
+                return  # the same bytes were rejected (or ingested) before
+            s.add(
+                Document(
+                    sha256_hash=sha,
+                    original_filename=original_name,
+                    stored_path=str(dest),
+                    doc_type=DocType.UNKNOWN,
+                    extraction_status=ExtractionStatus.failed,
+                    extraction_attempt_count=_attempt_cap(cfg),
+                    raw_extraction_json=json.dumps({"ingest_rejected": reason}),
+                )
+            )
+            s.commit()
+    except Exception:
+        logger.warning("Could not record rejected input %s", original_name, exc_info=True)
 
 
 def _reject_input(src: Path, cfg: AppConfig, reason: str) -> None:
     """Quarantine a readable input file that is not an acceptable PDF."""
     exc = ValueError(reason)
-    _quarantine_unreadable(src, cfg, exc)
+    name = src.name
+    dest = _quarantine_unreadable(src, cfg, exc)
+    if dest is not None:
+        _record_rejected_document(name, dest, reason, cfg)
     raise exc
 
 

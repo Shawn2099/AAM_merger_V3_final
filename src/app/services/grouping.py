@@ -284,6 +284,11 @@ def group_document(doc, cfg) -> tuple[int | None, str | None]:
     dtype = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
     if dtype not in _ATTACHABLE:
         return None, None
+    if getattr(doc, "po_set_id", None) is not None:
+        # Already placed (a byte-identical re-send resolves to the existing row
+        # by SHA). Looking the PO up again would mint a new, empty set whenever
+        # the document's own set is merged, because merged sets are not "open".
+        return doc.po_set_id, None
     if not doc.po_no_normalized:
         if dtype in NEEDS_PO_REFERENCE:
             return None, "missing_po_number"

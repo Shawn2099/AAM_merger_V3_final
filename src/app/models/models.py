@@ -142,6 +142,18 @@ class Document(Base):
         ),
     )
 
+    @property
+    def ingest_reject_reason(self) -> str | None:
+        """Why ingest refused this file (non-PDF, truncated, encrypted, over the cap), if it did."""
+        import json
+
+        try:
+            data = json.loads(self.raw_extraction_json or "")
+        except ValueError:
+            return None
+        reason = data.get("ingest_rejected") if isinstance(data, dict) else None
+        return str(reason) if reason else None
+
 
 class LineItem(Base):
     __tablename__ = "line_items"

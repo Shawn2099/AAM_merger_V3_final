@@ -562,13 +562,6 @@ def test_rejected_file_is_moved_to_quarantine_with_a_reason(batch, name):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="DEFECT R-03: an ingest-rejected file (non-PDF, truncated, password-protected, "
-    "over the size cap, unreadable) gets NO Document row, so it never appears on the "
-    "Unclassified page; its only trace is a file in quarantine/_documents.",
-)
 @pytest.mark.parametrize("name", ["not_a_pdf.pdf", "truncated_old.pdf", "encrypted.pdf"])
 def test_rejected_file_is_visible_to_the_operator(batch, name):
     assert name not in batch["input"]  # precondition: it really was taken out

@@ -111,6 +111,43 @@ def _persisted_extraction_status(eng, doc_id) -> ExtractionStatus | None:
         return doc.extraction_status
 
 
+def _clear_resent_duplicate(eng, doc_id: int, input_file: Path) -> bool:
+    """R-16: remove an identical file re-sent after its set already merged.
+
+    Ingest resolves the file to the existing document by SHA-256, so it is a
+    duplicate of a document that is already in a merged packet. Phase 2 never
+    clears input for merged sets, so without this it is re-hashed every night.
+    Removed only when the set is merged, the stored copy exists, and the bytes
+    on disk still hash to the document's SHA.
+    """
+    import hashlib
+
+    from app.models import Document as _Doc
+    from app.models import POSet, POSetStatus
+
+    try:
+        with Session(eng) as s:
+            doc = s.get(_Doc, doc_id)
+            if doc is None or doc.po_set_id is None or not doc.stored_path:
+                return False
+            ps = s.get(POSet, doc.po_set_id)
+            if ps is None or ps.status != POSetStatus.merged:
+                return False
+            stored, sha, name = Path(doc.stored_path), doc.sha256_hash, doc.original_filename
+        if not stored.is_file() or not input_file.is_file():
+            return False
+        if hashlib.sha256(input_file.read_bytes()).hexdigest() != sha:
+            return False
+        input_file.unlink()
+        logger.info(
+            "Input %s is a re-sent copy of %s, already merged; removed from input", input_file, name
+        )
+        return True
+    except OSError:
+        logger.warning("Could not clear re-sent duplicate %s", input_file, exc_info=True)
+        return False
+
+
 def _quarantine_broken_document(
     doc_id: int,
     cfg,
@@ -295,7 +332,7 @@ def _recovery_flow_locked(
     from app.models import Document as _Doc
     from app.models import POSet as _POSet
     from app.models import POSetStatus
-    from app.services.extraction import reclaim_stale_processing
+    from app.services.extraction import provider_breaker_tripped, reclaim_stale_processing
     from app.services.grouping import (
         attach_unattached_to_open_sets,
         group_document,
@@ -379,6 +416,9 @@ def _recovery_flow_locked(
 
     for doc_id in pending_ids:
         heartbeat_sync_lock(cfg_path)
+        if provider_breaker_tripped():
+            logger.error("Provider breaker tripped: leaving the remaining pending documents unread")
+            break
         recovered_processed += 1
         try:
             _extract_task_for(cfg)(doc_id, cfg_path=cfg_path)
@@ -581,12 +621,18 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     from app.models import Document as _Doc
-    from app.services.extraction import reclaim_stale_processing
+    from app.services.extraction import (
+        provider_breaker_tripped,
+        reclaim_stale_processing,
+        reset_provider_breaker,
+    )
     from app.services.grouping import group_document
     from app.services.ingestion import (
         find_input_pdfs,
         ingest_file,
     )
+
+    reset_provider_breaker()
 
     # Release documents whose worker died mid-extraction before anything else
     # looks at them, so they are read again in this run rather than being
@@ -610,8 +656,15 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     stable_map = _poll_stability(files, cfg)
     heartbeat_sync_lock(cfg_path)
 
+    vlm_halted = False
     for f in files:
         heartbeat_sync_lock(cfg_path)
+        if provider_breaker_tripped():
+            # Several documents in a row were rejected with an HTTP 400: the
+            # request is wrong, not the documents. Leave the rest in input.
+            vlm_halted = True
+            logger.error("Provider breaker tripped: remaining input files left untouched")
+            break
         try:
             if not stable_map.get(f, False):
                 continue
@@ -687,6 +740,8 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
                 logger.warning("Grouping failed for doc %s", doc.id, exc_info=True)
                 errors += 1
 
+            _clear_resent_duplicate(eng, doc.id, f)
+
         except Exception:
             logger.warning("Ingestion loop failed for file %s", f, exc_info=True)
             errors += 1
@@ -718,4 +773,5 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
         "errors": total_errors,
         "touched_po_sets": rec_res.get("touched_po_sets", len(touched_po_set_ids)),
         "reconciled_count": rec_res.get("reconciled_count", 0),
+        "vlm_halted": vlm_halted or provider_breaker_tripped(),
     }

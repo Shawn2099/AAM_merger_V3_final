@@ -93,7 +93,8 @@ def test_old_header_only_file_is_quarantined_with_a_reason(tmp_path):
     reasons = list((tmp_path / "quarantine" / "_documents").glob("*.reason.txt"))
     assert len(reasons) == 1
     assert "incomplete or unreadable PDF" in reasons[0].read_text(encoding="utf-8")
-    assert _doc_count_for(cfg, b"%PDF-1.4") == 0
+    # R-03: an old, permanently bad file is listed as a failed row, not hidden.
+    assert _doc_count_for(cfg, b"%PDF-1.4") == 1
 
 
 def test_recent_incomplete_file_stays_in_input_for_a_retry(tmp_path):

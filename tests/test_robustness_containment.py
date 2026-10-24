@@ -215,14 +215,6 @@ def test_402_mid_sync_then_key_restored_merges_on_the_next_sync(rcfg, monkeypatc
     assert ps.status == POSetStatus.merged, ps.reconcile_reason
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="DEFECT R-06: HTTP 400 is classed as a CONTENT error. A config-wide 400 (invalid "
-    "model id, unsupported parameter, provider schema change) therefore fails every "
-    "document of the night 3 times each, quarantines them all and removes them from "
-    "input. Recoverable only by per-document operator Re-Extract. No circuit breaker.",
-)
 def test_a_provider_wide_400_does_not_condemn_the_whole_batch(rcfg, monkeypatch):
     bad = ("status", 400, {"error": {"message": "x is not a valid model ID", "code": 400}})
     HttpVLM(monkeypatch, {W_PO: bad, W_DN: bad, W_SI: bad})
@@ -231,6 +223,31 @@ def test_a_provider_wide_400_does_not_condemn_the_whole_batch(rcfg, monkeypatch)
     docs = all_docs(rcfg)
     assert len(docs) == 3
     assert all(d.extraction_status != ExtractionStatus.failed for d in docs)
+
+
+def test_the_400_breaker_refunds_attempts_and_reports_the_halt(rcfg, monkeypatch):
+    bad = ("status", 400, {"error": {"message": "x is not a valid model ID", "code": 400}})
+    HttpVLM(monkeypatch, {W_PO: bad, W_DN: bad, W_SI: bad})
+    _drop(rcfg)
+    res = run_sync()
+    assert res["vlm_halted"] is True
+    docs = all_docs(rcfg)
+    assert {d.extraction_status for d in docs} == {ExtractionStatus.pending}
+    assert {d.extraction_attempt_count for d in docs} == {0}, "no attempt may be charged"
+
+
+def test_a_good_read_between_400s_does_not_trip_the_breaker(rcfg, monkeypatch):
+    """Only an unbroken run of rejected DIFFERENT documents is taken as a bad request."""
+    bad = ("status", 400, {"error": {"message": "bad pdf", "code": 400}})
+    good = _good()
+    HttpVLM(monkeypatch, {W_PO: good[W_PO], W_DN: bad, W_SI: bad})
+    _drop(rcfg)
+    res = run_sync()
+    assert res["vlm_halted"] is False
+    by_name = {d.original_filename: d for d in all_docs(rcfg)}
+    assert by_name["PO.pdf"].extraction_status == ExtractionStatus.valid
+    assert by_name["DN.pdf"].extraction_status == ExtractionStatus.failed
+    assert by_name["SI.pdf"].extraction_status == ExtractionStatus.failed
 
 
 # ======================================================================= crash / restart / concurrency
@@ -605,30 +622,15 @@ def _merge_then_resend_identical(cfg, monkeypatch):
 
 
 def test_resent_identical_files_after_merge_observed_state(rcfg, monkeypatch):
-    """Pins R-16 as observed: no error is reported, a second EMPTY set appears
-    ('No purchase order document in this set yet'), the packet is untouched and
-    the three re-sent files stay in input, re-hashed every night."""
+    """R-16 fixed: no error, no second EMPTY set, the packet is untouched and the
+    three re-sent byte-identical files are cleared from input (they are duplicates of
+    documents already in the merged packet)."""
     res, all_sets = _merge_then_resend_identical(rcfg, monkeypatch)
     assert res["errors"] == 0
-    assert [(s.status, len(s.documents)) for s in all_sets] == [
-        (POSetStatus.merged, 3),
-        (POSetStatus.pending, 0),
-    ]
-    assert sorted(p.name for p in Path(rcfg.paths.input_folder).iterdir()) == [
-        "DN.pdf",
-        "PO.pdf",
-        "SI.pdf",
-    ]
+    assert [(s.status, len(s.documents)) for s in all_sets] == [(POSetStatus.merged, 3)]
+    assert sorted(p.name for p in Path(rcfg.paths.input_folder).iterdir()) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="DEFECT R-16: a byte-identical PO re-sent after its set merged is de-duplicated to "
-    "the merged row, but group_document still calls get_or_create_po_set(create=True); "
-    "_find_open_set skips merged sets, so an EMPTY phantom set is minted and occupies the "
-    "open-set key. The re-sent inputs are never cleared (Phase 2 skips merged sets).",
-)
 def test_resent_identical_po_after_merge_does_not_mint_a_phantom_set(rcfg, monkeypatch):
     _res, all_sets = _merge_then_resend_identical(rcfg, monkeypatch)
     assert len(all_sets) == 1, [(s.id, s.status, len(s.documents)) for s in all_sets]
@@ -658,9 +660,9 @@ def test_a_failing_attach_sweep_does_not_stop_reconciliation(rcfg, monkeypatch):
     assert ps.status == POSetStatus.merged
 
 
-def test_file_over_the_size_cap_is_rejected_before_a_row_exists(rcfg, monkeypatch):
+def test_file_over_the_size_cap_is_rejected_and_listed_as_failed(rcfg, monkeypatch):
     """'Huge file': over limits.MAX_UPLOAD_BYTES it is moved to quarantine/_documents
-    with a reason file and NO Document row (part of R-03: invisible to the operator)."""
+    with a reason file and a `failed` Document row (R-03: visible to the operator)."""
     from app.core import limits
     from app.services.ingestion import ingest_file
 
@@ -671,7 +673,9 @@ def test_file_over_the_size_cap_is_rejected_before_a_row_exists(rcfg, monkeypatc
     assert not p.exists()
     qdir = Path(rcfg.paths.quarantine_folder) / "_documents"
     assert any(f.name.endswith(".reason.txt") for f in qdir.iterdir())
-    assert all_docs(rcfg) == []
+    (row,) = all_docs(rcfg)
+    assert row.extraction_status == ExtractionStatus.failed
+    assert row.po_set_id is None and "upload cap" in (row.ingest_reject_reason or "")
 
 
 def test_unused_imports_guard():
