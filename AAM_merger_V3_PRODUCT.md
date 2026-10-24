@@ -638,6 +638,16 @@ Pinned by `test_a_persistent_400_never_condemns_documents_across_passes`, `test_
 `test_a_document_the_breaker_already_refunded_is_judged_on_its_own` and
 `test_a_good_read_between_400s_does_not_trip_the_breaker`.
 
+### L — a one-digit PO misread is not detected (D18, owner decision 2026-10-25)
+
+When the model misreads one digit of the PO number on a continuation page (real run: set 9 against set 8), that page becomes a
+phantom PO-only set next to the complete set. The complete set still reconciles and merges on its own numbers, so its packet can
+be missing that page. A hold for this case was designed (`docs/SPEC_WS2_MISREAD_HOLD.md`) and the owner chose to skip it: it would
+be a new feature plus a migration, and a plain "one digit apart" rule gave 2 false positives to 1 true positive on the real corpus.
+Cover: the first pilot week is supervised (the operator checks each merged packet's page count against the PO), and a wrongly
+read PO is repaired with the manual merger. Revisit only if real use shows it happens. Pinned by
+`test_known_limitation_one_digit_po_misread_is_not_detected`.
+
 ### L — operating limits found by the 2026-10-24 reviews (pipeline and web)
 
 - **Input files of sets that never merge** (quarantined, mismatched, pending, unattached)

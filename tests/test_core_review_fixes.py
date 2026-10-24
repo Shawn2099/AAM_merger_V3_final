@@ -180,3 +180,26 @@ def test_known_limitation_x10_rekeys_a_vendor_key_that_equals_a_po_key():
     dn = [{"line_item_no": n, "document_id": 2} for n in ("1", "2", "10")]
     mapping = resolve_line_mapping(po, dn, [], frozenset(LINE_MAPPING_RULES))
     assert mapping.dn.rule == "x10" and mapping.dn.map["10"] == "100"
+
+
+# ------------------------------------------------------------------ pinned limitation (D18)
+def test_known_limitation_one_digit_po_misread_is_not_detected(cfg):
+    """A page whose PO number was misread by one digit makes a phantom PO-only set; the
+    complete neighbour set still merges. Detecting it was designed (docs/SPEC_WS2_MISREAD_HOLD.md)
+    and skipped by the owner (D18): the manual merger and a supervised first week cover it."""
+
+    def build(s, ps_id):
+        _doc(cfg, s, DocType.PO, ps_id, [("1", 10000)], po="4500012345")
+        _doc(cfg, s, DocType.DN, ps_id, [("1", 10000)], dn_no="DN-1", po="4500012345")
+        _doc(cfg, s, DocType.SI, ps_id, [("1", 10000)], inv_no="INV-1", po="4500012345")
+
+    good = _set(cfg, build)
+    with Session(get_engine(cfg)) as s:  # the phantom: one digit away, PO document only
+        phantom = POSet(po_no_normalized="4500012845", status=POSetStatus.pending)
+        s.add(phantom)
+        s.commit()
+        _doc(cfg, s, DocType.PO, phantom.id, [], po="4500012845")
+        s.commit()
+        phantom_id = phantom.id
+    assert reconcile_po_set(phantom_id, cfg)["status"] == "pending"
+    assert reconcile_po_set(good, cfg)["status"] == "merged", "nothing holds the neighbour"

@@ -51,6 +51,7 @@ Rules for every packet:
 | D11 | Config must become fully editable from the UI; auto-run timings and folder polling to be finalised; then production deployment decisions and full testing | 2026-10-24 | **open, needs the answers in section 3 (WS3)** | HANDOFF 6b |
 | D12 | **Operating model: Opus as architect/reviewer, DeepSeek via OpenCode as worker for token-heavy work; keep this decision log; plan before deployment so other sessions/tools can implement and test** | 2026-10-25 | this file | section 0 |
 | D16 | Q7: a supervised pilot may run WITHOUT the misread hold for the first week only (operator checks every merged packet); after that WS2 must be live (no unattended running without it). Q8: after a manual Move the target set is NOT exempted from the single-PO guard; it holds as `multiple_po_documents` and the operator Force Merges (audited). No guard exemption is built | 2026-10-25 | final (owner) | WS2 spec |
+| D18 | **Q9 answered (owner, 2026-10-25): the misread hold (WS2) is SKIPPED, not deferred to a date.** D1 stays the intended behaviour but is not built in this release. Mitigation: the first pilot week is supervised (operator checks every merged packet's page count against the PO), and a wrongly read PO is repaired with the manual merger. The risk is documented in PRODUCT section 8 (`test_known_limitation_one_digit_po_misread_is_not_detected`). Revisit only if the first real weeks show it happens | 2026-10-25 | final (owner) | specs, PRODUCT 8 |
 | D17 | **Scope freeze (owner, 2026-10-25): no new features; make what exists work.** The manual merger already covers a wrongly read PO (build the right packet by hand). Therefore: PF-11 (status pill) is DROPPED; the WS2 "Move to another PO" action is DROPPED. Fixes to existing behaviour (PF-01..PF-10, bugs, tests, install, docs) continue. Whether the WS2 misread HOLD itself is built is an open owner question (Q9); until answered it is NOT built | 2026-10-25 | final (owner); Q9 open | specs |
 | D15 | Opus review of the plans (2026-10-25): WS2 spec rejected and rewritten (rev 2); PF-11 now persists run results in `last_sync.json` because the nightly run is another process; packets that share files run serially; PF brief got binding corrections | 2026-10-25 | applied | specs, brief |
 | D14 | Pre-deploy UI fixes PF-01..PF-10 approved (WS1b); archive justification optional; Re-Extract state machine unchanged; add PF-11 system-status pill | 2026-10-25 | approved, in progress | WS1b |
@@ -67,7 +68,7 @@ Rules for every packet:
 | Q5 | pymupdf AGPL: accept (internal use only, never distributed), replace the rasteriser, or buy a licence? | Accept for internal use, record the decision, revisit if the software is ever shipped to others | WS8 |
 | Q6 | Who is the on-site contact for the Windows Server click-through and the first midnight run? | needed | WS9 |
 | Q7 (ANSWERED 2026-10-25: yes for the first week only; afterwards WS2 is required) | May a SUPERVISED pilot run before WS2 exists? Until then a one-digit PO misread can still produce a wrong merge (precision rule P2). | Yes, only with the operator checking every merged packet's page count for the first week; no unattended run | G2 |
-| Q9 | With the scope freeze (D17): build the misread HOLD at all (a new guard + one migration + "Not a misread" button), or rely on the manual merger plus first-week supervision? Recommendation: do NOT build it now; the first real week shows how often a misread occurs; revisit with data. This overrides the G3 line that made WS2 mandatory | recommended: skip for now | G3 |
+| Q9 (ANSWERED 2026-10-25: skip, D18) | With the scope freeze (D17): build the misread HOLD at all (a new guard + one migration + "Not a misread" button), or rely on the manual merger plus first-week supervision? Recommendation: do NOT build it now; the first real week shows how often a misread occurs; revisit with data. This overrides the G3 line that made WS2 mandatory | recommended: skip for now | G3 |
 | Q8 (ANSWERED 2026-10-25: accept option a: a hand-placed page does not exempt the guard; the operator Force Merges) | After "Move to another PO" the target has two PO documents and the single-PO guard holds it. Accept (operator Force Merges) or exempt a hand-placed PO page with zero line items? | Exempt (spec WS2 option b) | WS2 Move action |
 
 ## 4. Work packets
@@ -93,7 +94,8 @@ Order (Opus review 2026-10-25): packets that share files run SERIALLY: **WS1b ->
 - Added by the reviewer, not yet in the plan: **PF-11 operator-visible system status** (is polling on, time of last poll, last sync result incl. "all extractions failed"). Reason: with the 1-minute poller nobody clicks Scan, so F-16 ("a scan's outcome is never shown") becomes the only way an operator learns the system is stuck. Needs a short design (Claude) before the worker builds it; candidate source is `SyncPoller` state plus the last sync result. Tracked as the first item after PF-10.
 - Acceptance: whole suite + `tests/ui` x3 green, ruff/ty clean, Claude re-runs and reads the diff before commit.
 
-### WS2. D1 misread hold (T13): Opus designs, DeepSeek builds, Opus reviews
+### WS2. D1 misread hold (T13): SKIPPED (D18); design kept on file only
+> Not built in this release. Everything below is retained for a later release.
 > Specs written 2026-10-25: docs/SPEC_WS2_MISREAD_HOLD.md (this packet) and docs/SPEC_PF11_SYSTEM_STATUS.md (PF-11). Both are ready for the worker once approved.
 
 1. **Claude writes the design spec** (HANDOFF 6c "D1 design notes"): the exact rule (a PO-only set one digit away from a set that has DN/SI), its false-positive risk, the new reason `possible_po_misread`, the three operator actions (move a document to another PO, "not a misread" flag, Force Merge), audit rows, and the tests that must exist. No code before the spec is approved.
@@ -148,7 +150,7 @@ All with the canned VLM, no network:
 |---|---|---|
 | **G1 Committed** | WS0 | Anyone can pull the branch and run the suite |
 | **G2 Pilot-ready (supervised)** | G1, WS1b done (the UI harness no longer spends real API money), WS1 triaged, WS4, Q7 answered | Install on the target PC, operator watches, `config.yaml` edited by IT |
-| **G3 Production-ready (unattended; owner: WS2 mandatory after the first pilot week)** | G2, WS2, WS5, WS6, WS7, Q5, and WS3 if Q4 says it is required | Leave it running; the nightly sweep and poller run without a watcher |
+| **G3 Production-ready (unattended; WS2 SKIPPED by owner decision D18, supervision plus the manual merger cover a misread)** | G2, WS5, WS6, WS7, Q5, and WS3 if Q4 says it is required | Leave it running; the nightly sweep and poller run without a watcher |
 | **G4 Accepted** | WS9 | Handover signed |
 
 ## 6. Delegation packet template (copy for each OpenCode session)

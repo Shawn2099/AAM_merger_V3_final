@@ -1,6 +1,6 @@
 # SPEC WS2 (T13): possible PO misread hold and the operator's actions
 
-> **SCOPE FREEZE (owner, 2026-10-25, D17): NOT TO BE BUILT for now.** The manual merger covers a wrongly read PO, so the "Move to another PO" action is dropped for good. Whether the hold itself is ever built is open question Q9 (recommended: skip until the first real week gives data). Keep this spec as the design on file only.
+> **SCOPE FREEZE (owner, 2026-10-25, D17): NOT TO BE BUILT for now.** The manual merger covers a wrongly read PO, so the "Move to another PO" action is dropped for good. The hold itself is SKIPPED too (Q9 answered, D18). Keep this spec as the design on file only.
 
 Status: **rev 2 (after Opus review 2026-10-25, which rejected rev 1). Not built. Q8 answered by the owner (D16): no guard exemption.**
 Author: Claude (architect). Builders: **Claude writes the reconciliation hunk** (CLAUDE.md: core logic inline); the worker (DeepSeek)

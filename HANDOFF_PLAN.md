@@ -199,7 +199,7 @@ Next step: hand the brief to DeepSeek, then review its report and triage the "su
 
 | # | Topic | Decision | Status |
 |---|---|---|---|
-| D1 | I-1: one-digit PO misread (phantom set, packet missing a page) | **Do not merge a suspected misread. Hold it and let the operator choose**: assign the page to the correct PO (type the right PO number), mark "not a misread", or Force Merge. No second read, no extra API calls. Design and risks below. | Decided; NOT built (T13) |
+| D1 (D18: NOT BUILT in this release, owner skipped it 2026-10-25; manual merger + supervised first week cover it) | I-1: one-digit PO misread (phantom set, packet missing a page) | **Do not merge a suspected misread. Hold it and let the operator choose**: assign the page to the correct PO (type the right PO number), mark "not a misread", or Force Merge. No second read, no extra API calls. Design and risks below. | Decided; NOT built (T13) |
 | D2 | POs printed "1 of 6" with only page 1 supplied | If the supplied PDF holds everything the program needs (PO number, line items, quantities), **match and merge it**. The packet uses the **original PDF pages** (the stored upload), never the rasterised PNGs sent to the model (`merge.py` reads `stored_path` with pypdf; images only go to the VLM). | Decided; no code change (confirm in T10) |
 | D3 | R-13 (split-gate reason overwritten, only with `split_combined: true`) | Defer to the future module for combined files / fragments. | Decided |
 | D4 | Extraction validation (hallucination defence, section 7) | **Not in the initial MVP.** Revisit after real-world testing; build in the next phase once proper data exists. | Deferred by decision |
