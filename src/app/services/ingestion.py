@@ -98,7 +98,9 @@ def _quarantine_unreadable(src: Path, cfg: AppConfig, exc: Exception) -> Path | 
     try:
         dest_dir = Path(cfg.paths.quarantine_folder) / "_documents"
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / f"{src.stem}_{uuid.uuid4().hex[:8]}{src.suffix}"
+        # Capped so a long or deep name cannot push the path past MAX_PATH (the move would
+        # fail and the file would be re-rejected on every pass).
+        dest = dest_dir / f"{src.stem[:60]}_{uuid.uuid4().hex[:8]}{src.suffix}"
         shutil.move(str(src), str(dest))
         dest.with_suffix(dest.suffix + ".reason.txt").write_text(
             f"Could not read input file before ingestion: {type(exc).__name__}: {exc}\n",
@@ -232,7 +234,7 @@ def ingest_file(src: Path, cfg: AppConfig) -> Document:
                     sp.parent.mkdir(parents=True, exist_ok=True)
                     sp.write_bytes(data)
                 except Exception:
-                    pass
+                    logger.warning("Could not restore the stored copy %s", sp, exc_info=True)
             return existing
         stored = Path(cfg.paths.stored_documents_folder) / f"{h}{src.suffix}"
         stored.parent.mkdir(parents=True, exist_ok=True)
@@ -394,20 +396,32 @@ def delete_input_files(po_set: POSet, input_folder: Path | str) -> list[str]:
                     target.unlink(missing_ok=True)
                     deleted.append(name)
             except Exception:
-                pass
+                logger.warning("Could not clear input copy %s", target, exc_info=True)
 
-    # 2. Delete any remaining duplicate files matching the SHA-256 hashes
+    # 2. Delete any remaining duplicate files matching the SHA-256 hashes. A set's own
+    # stored copies are the durable copy and are NEVER deleted here, even if a data folder
+    # was placed inside the input folder (config validation refuses that, this is the
+    # second line of defence).
+    stored_copies = set()
+    for doc in po_set.documents or []:
+        if doc.stored_path:
+            try:
+                stored_copies.add(Path(doc.stored_path).resolve())
+            except OSError:
+                continue
     if valid_hashes:
         for f in find_input_pdfs(in_dir):
             if not f.exists():
                 continue
             try:
+                if f.resolve() in stored_copies:
+                    continue
                 f_hash = hashlib.sha256(f.read_bytes()).hexdigest()
                 if f_hash in valid_hashes:
                     f.unlink(missing_ok=True)
                     if f.name not in deleted:
                         deleted.append(f.name)
             except Exception:
-                pass
+                logger.warning("Could not clear input copy %s", f, exc_info=True)
 
     return deleted

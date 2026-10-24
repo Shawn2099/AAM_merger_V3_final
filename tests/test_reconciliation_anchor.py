@@ -49,6 +49,7 @@ def test_fr_10_1_pinned(tmp_path) -> None:
         doc_dn1 = Document(
             sha256_hash="h_dn1",
             original_filename="dn1.pdf",
+            dn_no="DN-1",
             stored_path=str(tmp_path / "stored" / "dn1.pdf"),
             doc_type=DocType.DN,
             extraction_status=ExtractionStatus.valid,
@@ -58,6 +59,7 @@ def test_fr_10_1_pinned(tmp_path) -> None:
         doc_dn2 = Document(
             sha256_hash="h_dn2",
             original_filename="dn2.pdf",
+            dn_no="DN-2",
             stored_path=str(tmp_path / "stored" / "dn2.pdf"),
             doc_type=DocType.DN,
             extraction_status=ExtractionStatus.valid,

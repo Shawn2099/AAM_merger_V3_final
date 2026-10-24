@@ -131,6 +131,10 @@ def _redirect_paths(cfg):
 def _load_config(path=None):
     """The real loader, with every path redirected into the session dir."""
     cfg = _redirect_paths(_original_load_config(path))
+    if path is None:
+        # The app's own `load_config()` (lifespan). A developer config copied from the example
+        # has poll_enabled: true, and every TestClient(app) would start a real poller thread.
+        cfg.schedule.poll_enabled = False
     # Production quarantines combined PDFs unsplit; the splitter tests need it on.
     # Tests of the default set `cfg.extraction.split_combined = False` themselves.
     cfg.extraction.split_combined = True

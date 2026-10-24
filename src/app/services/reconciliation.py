@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextvars
 import json
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
@@ -31,6 +32,12 @@ from app.services.matching import (
 from app.services.quarantine import quarantine_copy
 
 logger = logging.getLogger(__name__)
+
+
+def _number_key(raw: str | None) -> str:
+    """Identity of a DN / invoice number: letters and digits, upper case, no leading zeros."""
+    key = "".join(c for c in (raw or "") if c.isalnum()).upper()
+    return re.sub(r"\d+", lambda m: m.group().lstrip("0") or "0", key)
 
 
 def _aware(value: datetime) -> datetime:
@@ -236,6 +243,10 @@ REASON_TEXT: dict[str, str] = {
     ),
     "packet_write_failed": "The merged packet could not be written to the output folder",
     "settling": SETTLING_PREFIX,
+    "placed_by_number_only": (
+        "A document was placed in this set only because its DN number matches another "
+        "document's; confirm that it belongs here (or Force Merge) before it can merge"
+    ),
     "no_line_item_evidence": "The set has no line-item evidence, so there is nothing to reconcile",
     "po_reference_mismatch": "A document references a different PO number",
     "duplicate_document_number": (
@@ -304,6 +315,7 @@ _DETAILED_REASONS = {
     "packet_source_unreadable",
     "packet_write_failed",
     "settling",
+    "placed_by_number_only",
 }
 
 
@@ -635,6 +647,29 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 "flags": [{"priority": 1, "type": "identification", "message": msg}],
             }
 
+        # A document placed here only by its DN number: hold until an operator confirms.
+        from app.services.grouping import PLACED_BY_NUMBER
+
+        unconfirmed = [
+            d
+            for d in docs
+            if d.archived_at is None and getattr(d, "po_no_source", None) == PLACED_BY_NUMBER
+        ]
+        if unconfirmed:
+            names = ", ".join(sorted(d.original_filename or "?" for d in unconfirmed))
+            ps.status = POSetStatus.pending
+            s.commit()
+            return {
+                "status": "pending",
+                "reason": "placed_by_number_only",
+                "detail": (
+                    f"{names} was placed in this set only because its DN number matches "
+                    "another document's. Confirm it belongs here, or Force Merge."
+                ),
+                "po_set_id": po_set_id,
+                "flags": [],
+            }
+
         # The same DN (or invoice) number on two documents is either one document
         # scanned twice (or re-issued) or the pages of one document. Summing a
         # re-scan would double the delivered (or invoiced) quantity and could
@@ -650,10 +685,12 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             shown: dict[str, str] = {}
             for d in vendor_docs:
                 raw_no = getattr(d, attr, None) or (d.si_no if label == "SI" else None)
-                key = "".join(c for c in (raw_no or "") if c.isalnum()).upper()
-                if key:
-                    by_number.setdefault(key, []).append(d)
-                    shown.setdefault(key, (raw_no or "").strip())
+                # Leading zeros are not part of the identity ("DN-0077" is "DN-77"),
+                # and documents with no readable number are compared among themselves:
+                # two number-less copies of one DN must not both be summed.
+                key = _number_key(raw_no)
+                by_number.setdefault(key, []).append(d)
+                shown.setdefault(key, (raw_no or "").strip() or "(no number)")
             clashes: list[str] = []
             for key, group in sorted(by_number.items()):
                 if len(group) < 2:
@@ -661,7 +698,8 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 seen_lines: set[str] = set()
                 overlap = False
                 for d in group:
-                    mine = {(li.line_item_no or "").strip().upper() for li in d.line_items}
+                    # The same key matching uses, so "1" and "01" are the same line.
+                    mine = {normalize_line_no(li.line_item_no) for li in d.line_items}
                     if "" in mine or mine & seen_lines:
                         overlap = True
                     seen_lines |= mine

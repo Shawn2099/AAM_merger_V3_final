@@ -121,10 +121,12 @@ def acquire_sync_lock(cfg_path: str | None = None) -> FileLock | None:
 
 def release_sync_lock(lock: FileLock) -> None:
     """Release a lock obtained via acquire_sync_lock (any thread) + sidecar."""
-    with contextlib.suppress(Exception):
-        lock.release()
+    # Remove the sidecar BEFORE releasing: a waiter that acquires in the gap writes its own
+    # sidecar, and unlinking afterwards would delete it and make a running sync look idle.
     with contextlib.suppress(OSError):
         _sidecar_for(Path(lock.lock_file)).unlink(missing_ok=True)
+    with contextlib.suppress(Exception):
+        lock.release()
 
 
 def heartbeat_sync_lock(cfg_path: str | None = None) -> None:

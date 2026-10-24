@@ -223,6 +223,19 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.warning("Manual-merge staging sweep failed at startup", exc_info=True)
 
+    # A service that stopped or crashed mid-sync leaves its sidecar behind, and every
+    # operator action is refused while a sidecar looks alive. If nobody holds the sync lock,
+    # take it and release it: that removes the orphan. (If another process holds it, a sync
+    # really is running and nothing is touched.)
+    try:
+        from app.services.sync_lock import acquire_sync_lock, release_sync_lock
+
+        orphan_check = acquire_sync_lock()
+        if orphan_check is not None:
+            release_sync_lock(orphan_check)
+    except Exception:
+        logger.warning("Could not clear a stale sync sidecar at startup", exc_info=True)
+
     # D5: poll the input folder inside this service when switched on in the config.
     from app.services.poller import start_if_enabled
 

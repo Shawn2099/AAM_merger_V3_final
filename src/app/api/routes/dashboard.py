@@ -337,6 +337,8 @@ def dashboard(request: Request, status: str | None = None):
                     "po_sets": po_sets,
                     "current_status": status if status in _ALLOWED_STATUSES else None,
                     "now_ts": _now_ts(),
+                    "stats": stats,
+                    "oob_stats": True,
                 },
             )
         return _templates.TemplateResponse(
@@ -371,6 +373,10 @@ def dashboard_table(request: Request, status: str | None = None):
                 "po_sets": po_sets,
                 "current_status": status if status in _ALLOWED_STATUSES else None,
                 "now_ts": _now_ts(),
+                # The KPI cards and tabs are refreshed with the rows (out-of-band), so a
+                # merge done in the background never leaves the page showing two truths.
+                "stats": _get_stats(s),
+                "oob_stats": True,
             },
         )
 
@@ -565,6 +571,7 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
             "po_set_detail.html",
             {
                 "request": request,
+                "sync_running": _sync_running_state(),
                 "po_set": ps,
                 "documents": docs,
                 "line_items": enriched,
@@ -828,7 +835,9 @@ def _upload_manual_doc_impl(
                 except HTTPException:
                     raise
                 except Exception as e:
-                    raise HTTPException(status_code=422, detail=f"unreadable PDF: {e}") from e
+                    raise HTTPException(
+                        status_code=422, detail=f"unreadable PDF: {_scrub_paths(str(e))}"
+                    ) from e
                 stored = Path(cfg.paths.stored_documents_folder) / f"{sha}.pdf"
                 stored.parent.mkdir(parents=True, exist_ok=True)
                 stored.write_bytes(data)
@@ -1203,6 +1212,40 @@ def normalize_po_preview(po_no: str = ""):
         return {"normalized": ""}
 
 
+def _refuse_if_target_busy(s, raw: str, norm: str, cfg) -> None:
+    """409 when an existing set this PO would join holds a per-PO lock.
+
+    Read-only: autoflush is off so the caller's pending document edits are not written
+    (and no write lock is taken) before the later, separate-session set creation.
+    """
+    from app.services.grouping import PoLettersConflict, get_or_create_po_set
+
+    with s.no_autoflush:
+        ids = {
+            ps.id
+            for ps in s.query(POSet)
+            .filter(POSet.po_no_normalized == norm, POSet.archived_at.is_(None))
+            .all()
+            if ps.status == POSetStatus.merged
+        }
+        try:
+            open_ps = get_or_create_po_set(raw, cfg, create=False)
+        except PoLettersConflict:
+            open_ps = None  # reported by the normal path
+        if open_ps is not None:
+            ids.add(open_ps.id)
+        for ps_id in ids:
+            ps = s.get(POSet, ps_id)
+            if ps is not None and ps.locked_by_action is not None and is_locked(ps, cfg):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"PO Set #{ps.id} is busy ({ps.locked_by_action}); nothing was "
+                        "changed. Try again in a moment."
+                    ),
+                )
+
+
 def _open_set_or_409(raw: str, cfg, *, create: bool):
     """`get_or_create_po_set`, with a letters clash reported as a 409 to the operator."""
     from app.services.grouping import PoLettersConflict, get_or_create_po_set
@@ -1354,6 +1397,14 @@ def reclassify_document(
             # showing in the holding area as unresolved.
             doc.po_reference_ambiguous = False
 
+            # Refuse while the set this would join is being changed by someone else
+            # (Force Merge, Re-Extract, ...). Checked before any write: a document must
+            # never be attached to a set mid-merge and then silently left unreconciled.
+            # (Customs/shipping may join a delivered packet while it is busy: that is the
+            # recorded-pending append path below.)
+            if new_doc_type not in (DocType.CUSTOMS, DocType.SHIPPING):
+                _refuse_if_target_busy(s, raw, norm, cfg)
+
             if new_doc_type in (DocType.CUSTOMS, DocType.SHIPPING):
                 # Customs/shipping documents may join a packet that has
                 # already been delivered; that is the append workflow. The
@@ -1457,7 +1508,22 @@ def reclassify_document(
                 doc_id,
                 attached_ps_id,
             )
-            return RedirectResponse(url="/unclassified", status_code=302)
+            busy_msg = (
+                f"Document placed in PO Set #{attached_ps_id}, but the set became busy; "
+                "it will be evaluated on the next pass."
+            )
+            if request.headers.get("HX-Request") == "true":
+                return HTMLResponse(
+                    content=(
+                        f'<tr id="doc-row-{doc_id}"><td colspan="6" '
+                        'style="color:#92400e;background:#fffbeb;padding:8px;">'
+                        f"{escape(busy_msg)}</td></tr>"
+                    ),
+                )
+            return RedirectResponse(
+                url=f"/po_sets/{attached_ps_id}/view?notice=" + quote(busy_msg),
+                status_code=302,
+            )
         try:
             try:
                 from app.services.reconciliation import reconcile_po_set

@@ -44,6 +44,8 @@ def _build(tmp_path, cfg, po_no, docs, po_no_normalized=None):
         s.refresh(ps)
         ps_id = ps.id
         for i, (dtype, lines, extra) in enumerate(docs):
+            if dtype == "DN" and "dn_no" not in extra:
+                extra = {**extra, "dn_no": f"DN-{po_no}-{i}"}  # real DNs carry a number
             p = Path(cfg.paths.stored_documents_folder) / f"{po_no}_{i}_{dtype}.pdf"
             _pdf(p)
             d = Document(

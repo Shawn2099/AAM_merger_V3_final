@@ -125,6 +125,8 @@ def _doc(
             po_set_id=ps_id if dtype != DocType.UNKNOWN else None,
             po_no_normalized=po_no or None,
             si_no=si_no,
+            # Real delivery notes carry a number; two without one are ambiguous (a re-scan).
+            dn_no=f"DN-{filename}" if dtype == DocType.DN else None,
         )
         s.add(doc)
         s.commit()

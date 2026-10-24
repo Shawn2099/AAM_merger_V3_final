@@ -279,7 +279,7 @@ Two browser-side hardening checks exist and are worth keeping on:
 - `server.allowed_hosts` (default `["*"]`, which accepts any host) can list the
   host's real names/IPs; when it does, an HTTP `Host` header that is not listed
   is refused. Set it when the host address is stable — it closes DNS-rebinding
-  reads that the no-auth design would otherwise allow.
+  reads AND writes (Force Merge, archive, upload) that the no-auth design would otherwise allow.
 
 They reduce cross-site request forgery and DNS rebinding; they are **not**
 authentication and do not make an internet-facing deployment safe.

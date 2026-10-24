@@ -223,7 +223,9 @@ class ScheduleConfig(_StrictConfigModel):
 
 
 class ConcurrencyConfig(_StrictConfigModel):
-    po_set_lock_timeout_seconds: int = 300
+    #: A per-PO lock older than this is treated as abandoned and cleared by the next dashboard
+    #: poll. Must exceed one document's worst-case extraction (see AppConfig.validate_attempt_budget).
+    po_set_lock_timeout_seconds: int = Field(default=900, ge=60, le=86400)
 
 
 class ManualMergeConfig(_StrictConfigModel):
@@ -335,6 +337,20 @@ class AppConfig(BaseSettings):
                 "sum(extraction.retry_backoff_seconds)); otherwise a live "
                 "extraction is reclaimed as stale and the PDF is read twice"
             )
+        if self.concurrency.po_set_lock_timeout_seconds <= worst_case_seconds:
+            # An older config (the default used to be 300 s) must keep working after an
+            # upgrade, so the value is raised instead of refusing to start. A lock cleared
+            # mid-action would let a second operator change the same set.
+            safe = worst_case_seconds + 60
+            logging.getLogger(__name__).warning(
+                "concurrency.po_set_lock_timeout_seconds (%ss) is shorter than the worst-case "
+                "extraction of one document (%ss); using %ss. Set it to at least that in "
+                "config.yaml.",
+                self.concurrency.po_set_lock_timeout_seconds,
+                worst_case_seconds,
+                safe,
+            )
+            self.concurrency.po_set_lock_timeout_seconds = safe
         return self
 
     @field_validator("paths", mode="after")
@@ -359,6 +375,30 @@ class AppConfig(BaseSettings):
         if v.database_path and isinstance(v.database_path, Path):
             v.database_path.parent.mkdir(parents=True, exist_ok=True)
         return v
+
+    @model_validator(mode="after")
+    def validate_data_folders_are_not_nested_in_input(self) -> AppConfig:
+        """The input folder is scanned recursively and cleared after a merge.
+
+        A stored, output, quarantine, combined, archive or log folder inside it (or the input
+        folder inside one of them) would put the system's own durable copies in the scan.
+        """
+        inp = Path(self.paths.input_folder).resolve()
+        for label, raw in (
+            ("output_folder", self.paths.output_folder),
+            ("quarantine_folder", self.paths.quarantine_folder),
+            ("stored_documents_folder", self.paths.stored_documents_folder),
+            ("combined_folder", self.paths.combined_folder),
+            ("archive_folder", self.paths.archive_folder),
+            ("log_folder", self.paths.log_folder),
+        ):
+            other = Path(raw).resolve()
+            if other == inp or inp in other.parents or other in inp.parents:
+                raise ValueError(
+                    f"paths.{label} ({other}) must be separate from paths.input_folder ({inp}): "
+                    "the input folder is scanned and cleared, so nothing else may live inside it"
+                )
+        return self
 
     @model_validator(mode="after")
     def validate_manual_merge_temp_folder(self) -> AppConfig:

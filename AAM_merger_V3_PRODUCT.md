@@ -94,7 +94,7 @@ does **not** mean matching is number-only: the description fallback in step 2
 above is a real matching signal, and it is the only one besides the number.
 §7 explains why each removed input was removed; §8 states what that costs.
 
-**Line-number fallback (2026-10-24).** Exact matching runs first and is untouched. Only when a vendor pool (DN or SI, each on its own) has numbered rows that exact matching cannot place on the PO, one of four rules may re-key a COPY of that pool's rows: `x10` (PO 10,20,30 vs vendor 1,2,3), `div10` (PO 1,2,3 vs vendor 10,20,30), `add_rel` (PO 1-1,2-1 vs vendor 1,2) and `strip_rel` (PO 1,2 vs vendor 1-1,2-1). Each rule has a switch under `matching.line_number_fallback` (all on by default). Invariants: PO keys are never rewritten; DN and SI resolve independently and may use different rules; one rule per pool, all-or-nothing (every numbered key must land on a PO key); a pool where any single document already fits the PO as printed is never mapped (`line_mapping_rejected`); a numberless row anywhere disables it; the function default is exact-only (`line_fallback=None`). The comparison is unchanged: PO == sum(DN) == sum(SI) per line, exact integers. The rule used is stored in `po_sets.line_mapping_rule`, shown as *lines mapped (rule)*, appended to the reason, and a merged set gets one `line_mapping_applied` audit row. Pinned by `tests/test_line_mapping*.py`.
+**Line-number fallback (2026-10-24).** Exact matching runs first. Only when a vendor pool (DN or SI, each on its own) has numbered rows that exact matching cannot place on the PO, one of four rules may re-key a COPY of that pool's rows: `x10` (PO 10,20,30 vs vendor 1,2,3), `div10` (PO 1,2,3 vs vendor 10,20,30), `add_rel` (PO 1-1,2-1 vs vendor 1,2) and `strip_rel` (PO 1,2 vs vendor 1-1,2-1). Each rule has a switch under `matching.line_number_fallback` (all on by default). Invariants: PO keys are never rewritten; DN and SI resolve independently and may use different rules; one rule per pool, all-or-nothing (every numbered key must land on a PO key); a pool where any single document already fits the PO as printed is never mapped (`line_mapping_rejected`); a numberless row anywhere disables it; when a rule applies it applies to EVERY key of the pool, so a vendor key that equals a PO key can be re-keyed (PO 10,20,100 vs DN 1,2,10 pairs DN 10 with PO 100; pinned by `test_known_limitation_x10_rekeys_a_vendor_key_that_equals_a_po_key`); the function default is exact-only (`line_fallback=None`). The comparison is unchanged: PO == sum(DN) == sum(SI) per line, exact integers. The rule used is stored in `po_sets.line_mapping_rule`, shown as *lines mapped (rule)*, appended to the reason, and a merged set gets one `line_mapping_applied` audit row. Pinned by `tests/test_line_mapping*.py`.
 
 ### Where it lives
 
@@ -174,6 +174,7 @@ approximation.
 | `quarantined` | `vendor_document_has_no_line_items` | any single DN or SI document was read but contains no line items (checked per document, so an empty DN beside a full one still quarantines) |
 | `quarantined` | `document_extraction_failed` | a PO/DN/SI document in the set failed extraction; its stale lines are never reconciled or merged. Use Re-Extract |
 | `pending` | `document_not_yet_read` | a PO/DN/SI document in the set is still pending/processing extraction |
+| `pending` | `placed_by_number_only` | a document was placed in the set only because its DN number matches another document's; an operator must confirm (or Force Merge) |
 | `pending` | `settling` | every gate passed, but the set was started by the poller and its newest file is younger than `schedule.merge_settle_minutes`; it merges on a later pass by itself unless something else arrives (text starts "Reconciled; waiting for more files to arrive") |
 | `pending` | `documents_changed_during_merge` | a document was attached to, or changed in, the set after reconcile read it and before the packet was written; no packet is written and the next reconcile re-checks the set |
 | `quarantined` | `unclassified_document_in_set` | a document that is not PO/DN/SI/CUSTOMS/SHIPPING (UNKNOWN, COMBINED) is attached to the set (legacy-row defence; the sweeps never attach one) |
@@ -628,11 +629,41 @@ of the next sync, resets the count; counting happens only during a sync, so a
 Re-Extract from the web page never trips or is refunded by it. A refunded document
 carries a marker: if it is rejected again it is judged on its own and fails as
 usual, so three genuinely bad files cannot halt every night. The cost is one
-halted night before such files are condemned, and a provider-wide 400 that
-persists after the config is fixed would condemn documents on the second night.
-Pinned by `test_the_400_breaker_refunds_attempts_and_reports_the_halt`,
+halted pass before such files are condemned. A refunded document that is rejected
+AGAIN is judged on its own, but its quarantine is still held back until the pass ends,
+so if that pass trips the breaker it is refunded too (nothing is condemned while the
+provider keeps rejecting every request). The input poller pauses for an hour after a
+halt (`vlm_halted`); documents stay pending and a manual Scan can run at any time.
+Pinned by `test_a_persistent_400_never_condemns_documents_across_passes`, `test_the_400_breaker_refunds_attempts_and_reports_the_halt`,
 `test_a_document_the_breaker_already_refunded_is_judged_on_its_own` and
 `test_a_good_read_between_400s_does_not_trip_the_breaker`.
+
+### L — operating limits found by the 2026-10-24 reviews (pipeline and web)
+
+- **Input files of sets that never merge** (quarantined, mismatched, pending, unattached)
+  stay in the input folder, so every pass that runs re-checks, parses and hashes all of
+  them. A pass only runs when something new arrives (or on the nightly sweep), but its
+  cost grows with the number of stuck files. Clear or archive resolved sets regularly.
+- **Prefect server down.** A poller-started sync fails in about 10 seconds; the poller
+  backs off 5 minutes and retries the same files (the snapshot is not committed). The
+  web service does not depend on the Prefect service at boot: start Prefect first.
+- **A hung sync that still holds the lock** (Windows cannot delete an open lock file)
+  leaves the poller queued behind it; it logs a warning every two minutes. Restart the
+  web service to clear it.
+- **Orphaned "sync running" marker.** A service that stopped mid-sync left a marker that
+  blocked every operator action for up to 20 minutes; startup now removes it when no
+  process holds the sync lock.
+- **Per-PO lock timeout** is 900 s by default and must exceed one document's worst-case
+  extraction (742 s with the defaults); the app refuses to start with a shorter value.
+- **Data folders may not sit inside the input folder** (config is refused), and a
+  merged set's cleanup never deletes a stored copy.
+- **Unused config keys:** `server.host`, `server.port` and
+  `prefect.max_concurrent_extraction_tasks` are validated but not read (the service is
+  started by NSSM with its own host and port).
+- **The upload route has no request-size middleware**; the 50 MB check runs after the
+  body is spooled to a temporary file.
+- **Re-Extract** shows "extraction queued" on any success; per-document errors are in
+  the JSON response, not in the toast.
 
 ### M — scheduling: input-folder poller, queue, settle time, nightly sweep (D5)
 
@@ -928,21 +959,20 @@ simply not have sent it yet, and POs arrive over days. The engine cannot tell
 set, which is what the PO-number step is for. The deliberate asymmetry: an
 incomplete set never merges either way, so leaving it pending risks nothing.
 
-### H — a re-scanned or re-issued DN or SI is summed twice
+### M — a re-scanned DN or SI is caught only when the guard can tell it is a copy
 
-A second copy of the same delivery note or invoice (a re-scan, or a re-issued
-copy) has different bytes, so it is a second document, not a duplicate. Its
-quantities are added to the first copy's. DN-A for 5 and a re-scan of DN-A for
-5 against a PO of 10 make the DN side 10, and the set reconciles although only 5
-were delivered.
-
-**Real-world consequence.** A packet can merge for a delivery that is only half
-made. The reconciliation compares line quantities only, never document numbers
-across documents.
-
-> Mitigation today: a person reviews the packet. Check the DN and SI numbers
-> printed on every document in the packet before release. Pinned by
-> `test_known_limitation_rescanned_dn_quantities_are_summed`.
+A second copy of a delivery note or invoice has different bytes, so it is a second
+document. The `duplicate_document_number` guard quarantines two DNs (or two SIs) in
+one set that share a number AND a line number: the key ignores case, punctuation and
+leading zeros ("DN-0077" = "DN-77"), line numbers are compared the way matching does
+("1" = "01"), and documents with no readable number are compared among themselves.
+Pages of one document with different lines still sum. The remaining holes: a copy
+whose number was read as a genuinely different string ("DN-77" vs "DN-71") or whose
+lines were read under different numbers escapes the guard, and a re-scan of a document
+whose only copy sits in a different set cannot be seen. In those cases a person checking
+the numbers printed on every document of the packet is the control. The pure comparison
+still sums (`test_known_limitation_rescanned_dn_quantities_are_summed`); the engine-level
+guard is pinned by `tests/test_core_review_fixes.py` and `tests/test_duplicate_document_number.py`.
 
 ### M — a numberless row can match a description that differs by one token
 
@@ -1000,7 +1030,7 @@ sides that differ (`TOGA-PO-25-26-163` vs `ARM-PO-25-26-163`) are held
 (`po_letters_conflict`), and reconcile quarantines a set whose documents carry
 two different letter groups (`po_reference_mismatch`). Accepted failures:
 `J255-300115876` keys as `255300115876` and never joins a plain `300115876`;
-a PO number with no digits (`OPG`) has no key and is held.
+a PO number with no digits (`OPG`) has no key and is held. Pinned by `tests/test_po_digit_key.py`.
 
 **Fresh database required.** Migration `a9b0c1d2e3f4` adds `po_no_letters` but does
 not rewrite `po_no_normalized` keys created before the digit key. A database from
@@ -1050,15 +1080,18 @@ if it is another valid type the set reconciles on that type. Nothing is merged o
 a type the operator did not confirm, but the operator's correction can be lost
 silently. Not yet pinned by a test.
 
-### M — a DN number that matches another vendor's set is attached
+### M — a DN number that matches another vendor's set holds the set until confirmed
 
-The sweep that places unattached documents matches a DN or SI on its DN number
-alone against open sets. It does not check the vendor or the printed PO. The
-document is attached to the matching set, and reconcile then quarantines it with
-`po_reference_mismatch` if its PO differs. The wrong attach is therefore visible,
-but the document sits in a set that is not its own until an operator moves it, and
-the reclassify route refuses to move an attached document (see the entry on
-placing a document under the wrong PO). Pinned by
+The sweep that places unattached documents matches a DN on its DN number alone
+against open sets; it cannot check the vendor. Because the set's PO number is copied
+onto the document, the PO-mismatch guard could not see a foreign DN placed this way
+(proven by the 2026-10-24 review: a different vendor's DN 1001 completed a set and it
+merged). Now such a document is marked (`documents.po_no_source = 'dn_number'`) and the
+set stays `pending` with reason `placed_by_number_only` until an operator presses
+"Confirm it belongs here" on the set page (audited) or Force Merges. Placement through the
+PO's own per-line DN reference is not marked. Pinned by
+`test_a_dn_placed_by_its_number_alone_holds_the_set_instead_of_merging`,
+`test_the_operator_confirms_the_placement_and_it_is_audited` and
 `test_known_limitation_dn_number_collision_attaches`.
 
 ### L — reclassify attaches a document before it takes the set lock
@@ -1088,7 +1121,13 @@ DELIVERY.md). Not yet pinned by a test.
 
 `server.allowed_hosts` defaults to `["*"]`, so the dashboard answers any host
 name. This is deliberate for a LAN server behind a changing IP. The cost is that
-DNS-rebinding reads are not blocked until real names are listed. Pinned by
+DNS rebinding is not blocked until real names are listed, and it exposes WRITES too:
+a page on an attacker's name that resolves to the server's LAN address sends both
+`Host` and `Origin` as that name, so the Origin check (which compares only the
+host name) lets Force Merge, archive and upload through. Listing the PC's real name or
+address in `server.allowed_hosts` is therefore a required install step, not hardening
+(DELIVERY step 6). The Origin check compares host names only, so another web app on the
+same machine (different port) can also forge requests. Pinned by
 `test_known_limitation_allowed_hosts_defaults_to_any_host`.
 
 ### L — the quantity parser accepts exponent and underscore forms

@@ -389,7 +389,12 @@ def _recovery_flow_locked(
         )
 
     input_folder = Path(cfg.paths.input_folder)
-    input_folder.mkdir(parents=True, exist_ok=True)
+    try:
+        input_folder.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # The input share is unreachable. Stored documents can still be recovered,
+        # reconciled and merged, so this must not end the flow.
+        logger.error("Input folder %s is not reachable", input_folder, exc_info=True)
 
     touched_po_set_ids: set[int] = set(initial_touched_po_set_ids or [])
     recovered_processed = 0
@@ -706,21 +711,41 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
         )
 
     input_folder = Path(cfg.paths.input_folder)
-    input_folder.mkdir(parents=True, exist_ok=True)
+    scan_errors = 0
+    files: list[Path] = []
+    try:
+        input_folder.mkdir(parents=True, exist_ok=True)
+        # Discover PDFs in input folder and subfolders. find_input_pdfs matches the suffix
+        # case-insensitively in ONE pass: globbing "*.pdf" and "*.PDF" separately would
+        # double the list on Windows and send every document to the VLM twice.
+        files = input_pdfs(cfg)
+    except OSError:
+        # The input share went away after startup. Skip the scan, but still recover,
+        # reconcile and merge what is already stored.
+        logger.error(
+            "Input folder %s is not reachable; scanning skipped", input_folder, exc_info=True
+        )
+        scan_errors = 1
 
     processed = 0
     extracted = 0
     errors = 0
     touched_po_set_ids: set[int] = set()
 
-    # Discover PDFs in input folder. find_input_pdfs matches the suffix
-    # case-insensitively in ONE pass — globbing "*.pdf" and "*.PDF" separately
-    # would double the list on Windows and send every document to the VLM twice.
-    files = input_pdfs(cfg)
-
     # Stability poll (FR-4.5) for the whole batch, taken together.
     stable_map = _poll_stability(files, cfg)
     heartbeat_sync_lock(cfg_path)
+    # Non-empty files skipped as not stable (still copying, or a transient read error): the
+    # poller retries a few times instead of treating them as handled. Zero-byte files are
+    # skipped on purpose and are not counted.
+    unstable = 0
+    for f in files:
+        if not stable_map.get(f, False):
+            try:
+                if f.stat().st_size > 0:
+                    unstable += 1
+            except OSError:
+                unstable += 1
 
     vlm_halted = False
     deferred_400: list[tuple[int, Path | None]] = []
@@ -837,7 +862,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
         )
 
     total_processed = processed + rec_res.get("processed", 0)
-    total_errors = errors + rec_res.get("errors", 0)
+    total_errors = errors + scan_errors + rec_res.get("errors", 0)
 
     return {
         "processed": total_processed,
@@ -846,4 +871,5 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
         "touched_po_sets": rec_res.get("touched_po_sets", len(touched_po_set_ids)),
         "reconciled_count": rec_res.get("reconciled_count", 0),
         "vlm_halted": vlm_halted or provider_breaker_tripped(),
+        "unstable": unstable,
     }

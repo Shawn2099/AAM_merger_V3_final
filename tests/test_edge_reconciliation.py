@@ -52,6 +52,8 @@ def harness(tmp_path):
             for dtype, lines, extra in docs:
                 counter["n"] += 1
                 name = f"d{counter['n']}"
+                if dtype == "DN" and "dn_no" not in extra:
+                    extra = {**extra, "dn_no": f"DN-{name}"}  # real DNs carry a number
                 p = _tiny_pdf(tmp_path / "stored" / f"{name}.pdf")
                 d = Document(
                     sha256_hash=f"edge_{po_no}_{name}",

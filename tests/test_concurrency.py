@@ -209,7 +209,7 @@ def test_po_lock_409(client, tmp_db):
 
 
 def test_po_lock_timeout_releases(tmp_db, client):
-    # FR-CONFIG-2: lock auto-releases after po_set_lock_timeout_seconds (300s)
+    # FR-CONFIG-2: lock auto-releases after po_set_lock_timeout_seconds (900s by default)
     po_id = _create_po_set(tmp_db, po_no="PO2002")
     eng = get_engine(tmp_db)
     from sqlalchemy.orm import Session
@@ -217,8 +217,10 @@ def test_po_lock_timeout_releases(tmp_db, client):
     with Session(eng) as s:
         ps = s.get(POSet, po_id)
         ps.locked_by_action = "force_merge"
-        # set locked_at to 400s ago (beyond 300s timeout)
-        ps.locked_at = datetime.now(UTC) - timedelta(seconds=400)
+        # set locked_at beyond the configured timeout
+        ps.locked_at = datetime.now(UTC) - timedelta(
+            seconds=tmp_db.concurrency.po_set_lock_timeout_seconds + 100
+        )
         s.commit()
     # now second action should NOT 409 because lock is stale and auto-released
     r = client.post(f"/po_sets/{po_id}/force_merge")

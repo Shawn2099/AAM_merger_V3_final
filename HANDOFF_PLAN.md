@@ -6,6 +6,8 @@ Older state: `SESSION_HANDOFF.md` (2026-10-22, delivery readiness; still valid f
 
 Last updated: 2026-10-24. Branch `fix/mvp-high-priority`, remote `origin` (push the branch; never force-push; never push main).
 
+> **2026-10-25: the forward plan, the full decision log (D1-D13), open questions Q1-Q6 and the delegation packets (WS0-WS9) live in `docs/DEPLOYMENT_PLAN.md`. Operating model: Opus architects/reviews, DeepSeek via OpenCode does token-heavy work.**
+
 ## 1. Rules of the game (from the user)
 
 - **Precision over recall.** Whatever is merged must be absolutely correct. Doubt about ONE document → Unclassified
@@ -215,11 +217,27 @@ Next step: hand the brief to DeepSeek, then review its report and triage the "su
 
 ### D5 design notes (T14) - read before building
 Measured on the real run (data/logs/real_sync_20261024.out): 200 documents in 33 min sequentially; median 8.9 s, p90 16 s per document. A typical set (PO+DN+SI) is about 30 s of work.
-- Switches (config, later editable in the UI): `schedule.poll_enabled`, `schedule.poll_interval_minutes`, `schedule.nightly_enabled` (+ existing time/timezone), `schedule.merge_settle_minutes` (0 = merge as soon as a set reconciles).
-- "Never skip": today a second sync returns `sync_already_running`. Change to: a request while a sync runs records "run again" and the running sync starts one more pass when it ends. One follow-up pass covers every file that arrived meanwhile (a pass takes all waiting files), so N queued ticks collapse into one without skipping a file. Applies to manual Scan too.
+- Switches (config, later editable in the UI): `schedule.poll_enabled`, `schedule.poll_interval_seconds`, `schedule.nightly_enabled` (+ existing time/timezone), `schedule.merge_settle_minutes` (0 = merge as soon as a set reconciles).
+- "Never skip": today a second sync returns `sync_already_running`. Change to: a request while a sync runs records "run again" and the running sync starts one more pass when it ends. One follow-up pass covers every file that arrived meanwhile (a pass takes all waiting files), so N queued ticks collapse into one without skipping a file. (Manual Scan still answers 409 while a sync runs: the button is disabled and the poller picks the work up anyway.)
 - Immediate merge: correctness is unchanged (same rule PO == DN == SI), but timing matters when a PO's documents arrive minutes apart: a set can merge as soon as what has arrived agrees (e.g. PO page 1 + matching DN/SI before PO page 2). `merge_settle_minutes` (suggest 5-10) merges a set only after its newest file is that old. Decide the default with the user.
 - Waiting-time levers (cheap to expensive): shorter poll (a folder listing costs nothing and makes no API calls; 1 min instead of 5 cuts the average wait from 2.5 min to 30 s); 3-4 parallel extractions (same API cost, about 3x throughput: 200 documents in ~11 min instead of 33); call extraction in-process instead of one Prefect task launch per file; folder watcher (event-driven) instead of polling; lower DPI or reasoning effort (NOT recommended: accuracy is the priority).
 - Prefect schedule is registered by `scripts/deploy_prefect.py`; re-run after any change.
+
+## 6d. Opus review of the whole branch (2026-10-24) and what was done
+
+Three Opus reviewers (core engine, pipeline, web/config/tests) read the branch against `origin/main` and proved their findings with probes. Fixed in the commit after `736fdc6` (tests in `tests/test_core_review_fixes.py`, `test_pipeline_review_fixes.py`, `test_web_review_fixes.py`):
+
+| Sev | Finding | Fix |
+|---|---|---|
+| CRITICAL | A PO-less DN that shares a number with another vendor's DN was attached on the number alone and the set's PO was copied onto it, so a foreign DN could complete a set and merge | Such a document is marked `po_no_source='dn_number'`; the set holds (`placed_by_number_only`) until an operator presses "Confirm it belongs here" (audited) or Force Merges |
+| HIGH | Duplicate-DN guard missed `01` vs `1` line keys, number-less copies, `DN-0077` vs `DN-077` | Same normalisation as matching; number-less documents are compared among themselves; leading zeros ignored |
+| HIGH | Reclassify attached a document before taking the set lock (set mid Force Merge) | 409 before anything is written; honest notice if the lock turns busy later |
+| HIGH | Per-PO lock (300 s) could be cleared during a 742 s extraction; value 0 allowed | Default 900, `ge=60`, validator requires it to exceed worst-case extraction |
+| HIGH | HTTP-400 breaker: refunded documents were quarantined at once; the poller retried and condemned 9 documents in 4 passes | Refunded documents are deferred too; poller pauses 1 h after `vlm_halted`; no error retries then |
+| HIGH | Stored copy could be deleted when a data folder sat inside input | Config refuses nested folders; cleanup never deletes a stored copy |
+| MED | Stability/OSError left files unhandled; Prefect-down committed the snapshot; renamed copy of a failed document stayed; offline input share aborted the whole flow; sidecar race; orphan sidecar blocked actions 20 min; buttons enabled during a sync; KPI cards stale; UI tests order-dependent; poller could start from a dev config | All fixed (see PRODUCT section 8 "operating limits") |
+| LOW | x10 re-keys a vendor key equal to a PO key | Kept (intended); documented and pinned `test_known_limitation_x10_rekeys_...` |
+| NOT FIXED (decided/noted) | Origin guard compares host names only; upload has no size middleware; unused config keys; downgrade of a create_all DB below d4e5; DNS rebinding exposes writes; per-minute O(N) re-hash of stuck input; split-parent cleanup matches by name | Documented in PRODUCT section 8; DELIVERY step 6 (pin `allowed_hosts`) is now mandatory |
 
 ## 6b. NEXT PHASE (user request 2026-10-24, to be DISCUSSED later; nothing here is approved or started)
 

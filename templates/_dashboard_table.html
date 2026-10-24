@@ -152,3 +152,8 @@
     </tbody>
   </table>
 </div>
+{% if oob_stats and stats %}
+{% set oob = true %}
+{% include "_dashboard_kpi_grid.html" %}
+{% include "_dashboard_tabs.html" %}
+{% endif %}

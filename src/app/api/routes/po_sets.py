@@ -502,7 +502,7 @@ def redo_extract(po_set_id: int):
                     }
                 )
             except Exception as e:
-                extraction_results.append({"doc_id": doc_id, "error": str(e)})
+                extraction_results.append({"doc_id": doc_id, "error": _scrub_paths(str(e))})
 
         rec_res = reconcile_po_set(po_set_id, cfg)
         return {
@@ -548,6 +548,60 @@ def merge_now(po_set_id: int):
         raise _merge_failure(e, "Merge", po_set_id) from e
     finally:
         _release_lock(po_set_id, cfg, "merge")
+
+
+@router.post("/{po_set_id}/documents/{doc_id}/confirm_placement")
+def confirm_placement(po_set_id: int, doc_id: int):
+    """The operator confirms a document that was placed here only by its DN number.
+
+    The set held (`placed_by_number_only`) because a different vendor can reuse a DN
+    number. Confirming records that a person checked, then re-evaluates the set; every
+    other gate still applies. Audited.
+    """
+    from app.models import AuditAction, AuditLog, Document
+    from app.services.grouping import PLACED_BY_NUMBER
+    from app.services.reconciliation import reconcile_po_set
+
+    cfg = load_config()
+    _acquire_lock(po_set_id, "confirm_placement", cfg)
+    try:
+        with Session(get_engine(cfg)) as s:
+            doc = s.get(Document, doc_id)
+            if doc is None or doc.po_set_id != po_set_id:
+                raise HTTPException(status_code=404, detail="Document is not in this PO Set")
+            if doc.po_no_source != PLACED_BY_NUMBER:
+                raise HTTPException(
+                    status_code=409, detail="This document's placement needs no confirmation"
+                )
+            doc.po_no_source = "manual"
+            s.add(
+                AuditLog(
+                    po_set_id=po_set_id,
+                    action=AuditAction.manual_status_change,
+                    detail=json.dumps(
+                        {
+                            "confirmed_placement": True,
+                            "document_id": doc_id,
+                            "filename": doc.original_filename,
+                        }
+                    ),
+                    source="operator",
+                )
+            )
+            s.commit()
+        res = reconcile_po_set(po_set_id, cfg)
+        return {
+            "status": res.get("status"),
+            "po_set_id": po_set_id,
+            "reason": res.get("reason"),
+            "detail": _scrub_paths(str(res.get("detail") or "")) or None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _merge_failure(e, "Confirm placement", po_set_id) from e
+    finally:
+        _release_lock(po_set_id, cfg, "confirm_placement")
 
 
 @router.post("/{po_set_id}/redo_match")

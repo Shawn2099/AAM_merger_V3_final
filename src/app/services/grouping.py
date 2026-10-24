@@ -474,6 +474,11 @@ def _anchor_from_po_line_ref(session, dn_no: str | None) -> tuple[int | None, st
     return only_set, anchor.po_no_normalized
 
 
+#: `documents.po_no_source` value for a document placed in a set only because its DN number
+#: equals another document's. The set will not merge until the placement is confirmed.
+PLACED_BY_NUMBER = "dn_number"
+
+
 def resolve_unattached_documents(cfg) -> set[int]:
     """Group unattached documents (e.g. Delivery Notes without printed PO) into PO Sets.
 
@@ -523,6 +528,7 @@ def resolve_unattached_documents(cfg) -> set[int]:
                 continue
             matched_ps_id: int | None = None
             matched_po_norm: str | None = None
+            matched_by_number_only = False
 
             # 1. Match by Delivery Note number. Anchor types stay open
             # (human decision 2026-09-05: any logical common anchor may
@@ -545,6 +551,7 @@ def resolve_unattached_documents(cfg) -> set[int]:
                     anchor = next(a for a in anchors if a.po_set_id in anchor_sets)
                     matched_ps_id = anchor.po_set_id
                     matched_po_norm = anchor.po_no_normalized
+                    matched_by_number_only = True
 
             # 2. Match via the PO's per-line delivery-note reference: the
             # number is printed on the document itself, not inferred from a
@@ -560,6 +567,13 @@ def resolve_unattached_documents(cfg) -> set[int]:
                     doc.po_set_id = matched_ps_id
                     if not doc.po_no_normalized and matched_po_norm:
                         doc.po_no_normalized = matched_po_norm
+                    if matched_by_number_only and doc.po_no_source != "manual":
+                        # The only evidence is that another document in the set has the
+                        # same DN number. A different vendor can reuse a number, and the
+                        # PO copied onto the document above would hide that from the PO
+                        # mismatch guard. Mark it: the set holds (reason
+                        # placed_by_number_only) until an operator confirms the placement.
+                        doc.po_no_source = PLACED_BY_NUMBER
                     touched.add(matched_ps_id)
 
         s.commit()

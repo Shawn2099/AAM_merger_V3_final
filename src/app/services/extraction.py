@@ -847,6 +847,10 @@ def _is_infrastructure_leaf(exc: BaseException) -> bool:
 PROVIDER_400_LIMIT = 3
 _breaker_lock = threading.Lock()
 _rejected_400: set[int] = set()
+#: Documents the breaker already refunded once that were rejected AGAIN. They are judged on
+#: their own, but like the others their quarantine is held back until the pass ends, so a
+#: trip refunds them too instead of condemning them.
+_deferred_400: set[int] = set()
 _breaker_tripped = False
 #: True only while a sync runs. A 400 from a route (Re-Extract) is about that one
 #: document and must neither trip nor be refunded by the sync's breaker.
@@ -866,6 +870,7 @@ def reset_provider_breaker() -> None:
     global _breaker_tripped, _breaker_counting
     with _breaker_lock:
         _rejected_400.clear()
+        _deferred_400.clear()
         _breaker_tripped = False
         _breaker_counting = True
 
@@ -875,6 +880,7 @@ def end_provider_breaker() -> None:
     global _breaker_tripped, _breaker_counting
     with _breaker_lock:
         _rejected_400.clear()
+        _deferred_400.clear()
         _breaker_tripped = False
         _breaker_counting = False
 
@@ -882,7 +888,7 @@ def end_provider_breaker() -> None:
 def rejected_400_ids() -> set[int]:
     """Documents rejected with a 400 whose verdict may still be withdrawn by a trip."""
     with _breaker_lock:
-        return set(_rejected_400)
+        return set(_rejected_400) | set(_deferred_400)
 
 
 def provider_breaker_tripped() -> bool:
@@ -924,7 +930,14 @@ def _note_provider_400(doc_id: int) -> list[int] | None:
         if len(_rejected_400) < PROVIDER_400_LIMIT and not _breaker_tripped:
             return None
         _breaker_tripped = True
-        return sorted(_rejected_400)
+        return sorted(_rejected_400 | _deferred_400)
+
+
+def _defer_400(doc_id: int) -> None:
+    """A refunded document was rejected again: hold its quarantine until the pass ends."""
+    with _breaker_lock:
+        if _breaker_counting:
+            _deferred_400.add(doc_id)
 
 
 def _refund_rejected(eng, doc_ids: list[int]) -> None:
@@ -1152,9 +1165,10 @@ def extract_document(doc_id: int, cfg) -> Document:
                 )
                 raise e
             already_refunded = "provider_400_refund" in (doc.raw_extraction_json or "")
-            rejected = (
-                _note_provider_400(doc_id) if _is_http_400(e) and not already_refunded else None
-            )
+            is_400 = _is_http_400(e)
+            rejected = _note_provider_400(doc_id) if is_400 and not already_refunded else None
+            if is_400 and already_refunded:
+                _defer_400(doc_id)
             if rejected is not None:
                 # Provider-wide 400 (R-06): refund every document it condemned
                 # and leave them pending; the sync loops stop calling the VLM.

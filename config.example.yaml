@@ -84,7 +84,9 @@ prefect:
   schedule_timezone: "Asia/Kolkata"
 
 concurrency:
-  po_set_lock_timeout_seconds: 300
+  # Must exceed one document's worst-case extraction (vlm.request_timeout_seconds x attempts
+  # + backoff = 742 s with the defaults); the app refuses to start otherwise.
+  po_set_lock_timeout_seconds: 900
 
 schedule:
   # Poll the input folder inside the web service and sync when new files appear.

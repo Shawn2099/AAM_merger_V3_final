@@ -14,55 +14,81 @@ STATUS_TEXT = {
 }
 
 
-def test_ui_d_01_every_scenario_row_is_listed_with_its_status_and_doc_count(page: Page, manifest):
+def _active_sets(db):
+    """What the database holds NOW. Other tests archive or merge sets in the shared session
+    environment, so expectations come from here and never from the build-time manifest."""
+    return {
+        r["id"]: r
+        for r in db.execute(
+            "select id, po_no_normalized as po, status, reconcile_reason as reason "
+            "from po_sets where archived_at is null"
+        )
+    }
+
+
+def _doc_count(db, set_id):
+    return db.execute(
+        "select count(*) from documents where po_set_id=? and archived_at is null", (set_id,)
+    ).fetchone()[0]
+
+
+def test_ui_d_01_every_active_set_row_is_listed_with_its_status_and_doc_count(page: Page, db):
+    sets = _active_sets(db)
     page.goto("/dashboard")
     rows = page.get_by_test_id("po-row")
-    expect(rows).to_have_count(len(manifest["scenarios"]))
+    expect(rows).to_have_count(len(sets))
     problems = []
-    for name, sc in manifest["scenarios"].items():
-        row = page.locator(f'[data-testid="po-row"][data-set-id="{sc["id"]}"]')
+    for set_id, ps in sets.items():
+        row = page.locator(f'[data-testid="po-row"][data-set-id="{set_id}"]')
         if row.count() != 1:
-            problems.append(f"{name}: row for set {sc['id']} missing")
+            problems.append(f"set {set_id}: row missing")
             continue
         text = row.inner_text()
-        if sc["po_no"] not in text:
-            problems.append(f"{name}: PO {sc['po_no']} not shown")
-        if STATUS_TEXT[sc["status"]] not in text:
-            problems.append(f"{name}: status {sc['status']} not shown in {text[:80]!r}")
-        if row.get_attribute("data-status") != sc["status"]:
-            problems.append(
-                f"{name}: data-status {row.get_attribute('data-status')} != {sc['status']}"
-            )
-        if row.get_by_test_id("row-doc-count").inner_text().strip() != str(len(sc["docs"])):
-            problems.append(f"{name}: doc count differs from {len(sc['docs'])}")
-        if sc["reason"] and sc["reason"][:40] not in row.get_by_test_id("row-reason").inner_text():
-            problems.append(f"{name}: reason text differs")
+        if ps["po"] not in text:
+            problems.append(f"set {set_id}: PO {ps['po']} not shown")
+        if STATUS_TEXT[ps["status"]] not in text:
+            problems.append(f"set {set_id}: status {ps['status']} not shown in {text[:80]!r}")
+        if row.get_attribute("data-status") != ps["status"]:
+            problems.append(f"set {set_id}: data-status is {row.get_attribute('data-status')}")
+        if row.get_by_test_id("row-doc-count").inner_text().strip() != str(_doc_count(db, set_id)):
+            problems.append(f"set {set_id}: doc count differs from the database")
+        reason = ps["reason"]
+        if reason and reason[:40] not in row.get_by_test_id("row-reason").inner_text():
+            problems.append(f"set {set_id}: reason text differs")
     assert not problems, "\n".join(problems)
 
 
-def test_ui_d_02_kpi_cards_and_tabs_match_the_database(page: Page, manifest):
-    counts = manifest["counts"]
-    total = len(manifest["scenarios"])
+def _number_in(locator):
+    """The whole number inside a card or tab ('12' never matches '1')."""
+    match = re.search(r"\d+", locator.inner_text().replace("%", " "))
+    assert match, locator.inner_text()
+    return int(match.group())
+
+
+def test_ui_d_02_kpi_cards_and_tabs_match_the_database(page: Page, db):
+    sets = _active_sets(db)
+    counts = {}
+    for ps in sets.values():
+        counts[ps["status"]] = counts.get(ps["status"], 0) + 1
     page.goto("/dashboard")
-    expect(page.get_by_test_id("kpi-total")).to_contain_text(str(total))
-    expect(page.get_by_test_id("kpi-merged")).to_contain_text(str(counts.get("merged", 0)))
-    expect(page.get_by_test_id("kpi-quarantined")).to_contain_text(
-        str(counts.get("quarantined", 0))
-    )
-    expect(page.get_by_test_id("tab-all")).to_contain_text(str(total))
-    expect(page.get_by_test_id("tab-pending")).to_contain_text(str(counts.get("pending", 0)))
-    expect(page.get_by_test_id("tab-mismatched")).to_contain_text(str(counts.get("mismatched", 0)))
-    expect(page.get_by_test_id("tab-blocked-customs")).to_contain_text(
-        str(counts.get("blocked_customs", 0))
+    assert _number_in(page.get_by_test_id("kpi-total")) == len(sets)
+    assert _number_in(page.get_by_test_id("kpi-merged")) == counts.get("merged", 0)
+    assert _number_in(page.get_by_test_id("kpi-quarantined")) == counts.get("quarantined", 0)
+    assert _number_in(page.get_by_test_id("tab-all")) == len(sets)
+    assert _number_in(page.get_by_test_id("tab-pending")) == counts.get("pending", 0)
+    assert _number_in(page.get_by_test_id("tab-mismatched")) == counts.get("mismatched", 0)
+    assert _number_in(page.get_by_test_id("tab-blocked-customs")) == counts.get(
+        "blocked_customs", 0
     )
 
 
-def test_ui_d_03_a_status_tab_shows_only_that_status(page: Page, manifest):
+def test_ui_d_03_a_status_tab_shows_only_that_status(page: Page, db):
+    wanted = sum(1 for ps in _active_sets(db).values() if ps["status"] == "quarantined")
     page.goto("/dashboard")
     page.get_by_test_id("tab-quarantined").click()
     page.wait_for_url(re.compile(r"status=quarantined"))
     rows = page.get_by_test_id("po-row")
-    expect(rows).to_have_count(manifest["counts"]["quarantined"])
+    expect(rows).to_have_count(wanted)
     for i in range(rows.count()):
         assert rows.nth(i).get_attribute("data-status") == "quarantined"
 

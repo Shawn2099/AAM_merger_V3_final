@@ -56,6 +56,8 @@ managed = true
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Reports and docs contain code samples that are not meant to be formatted.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF"]

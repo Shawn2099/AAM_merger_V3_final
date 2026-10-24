@@ -111,6 +111,11 @@
   <!-- Quick Action Controls (hidden for archived sets) -->
   {% if not is_archived %}
   <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border); display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+    {% if sync_running %}
+    <div class="muted" data-testid="sync-running-note" style="width:100%; font-size:0.85rem;">
+      A sync is running. Actions on this set are disabled until it finishes (a few seconds to minutes).
+    </div>
+    {% endif %}
     <!-- Customs Toggle -->
     <button
       data-testid="btn-toggle-customs"
@@ -119,7 +124,7 @@
       hx-swap="none"
       hx-on::after-request="if (event.detail.successful) { let b = {}; try { b = JSON.parse(event.detail.xhr.responseText) } catch (e) {} if (!b.append_pending) location.reload() }"
       title="Toggle whether Customs and Shipping documents are required for this PO Set"
-      {% if is_locked %}disabled{% endif %}
+      {% if is_locked or sync_running %}disabled{% endif %}
     >
       <span>🛡️ Customs Check:</span>
       <strong>{{ 'ON' if po_set.has_customs_toggle else 'OFF' }}</strong>
@@ -135,7 +140,7 @@
       hx-swap="none"
       hx-on::after-request="if (event.detail.successful) setTimeout(() => location.reload(), 1200)"
       title="Re-check and merge if now eligible. All checks still apply - use Force Merge only to override them"
-      {% if is_locked or status_str == 'merged' %}disabled title="This set is already merged"{% endif %}
+      {% if is_locked or sync_running or status_str == 'merged' %}disabled{% endif %}
     >
       <span>Merge Now</span>
     </button>
@@ -148,7 +153,7 @@
       hx-swap="none"
       hx-on::after-request="if (event.detail.successful) location.reload()"
       title="Re-run matching rules on existing extracted data without calling the AI (Fast &amp; Free)"
-      {% if is_locked or po_set.status.value == 'merged' %}disabled{% endif %}
+      {% if is_locked or sync_running or po_set.status.value == 'merged' %}disabled{% endif %}
     >
       <span>🔄 Re-Match (Instant)</span>
     </button>
@@ -161,7 +166,7 @@
       hx-swap="none"
       hx-on::after-request="if (event.detail.successful) location.reload()"
       title="Re-send all documents to the AI vision parser to re-extract lines and text"
-      {% if is_locked or po_set.status.value == 'merged' %}disabled{% endif %}
+      {% if is_locked or sync_running or po_set.status.value == 'merged' %}disabled{% endif %}
     >
       <span>⚡ Re-Extract with AI</span>
     </button>
@@ -173,7 +178,7 @@
         data-testid="btn-force-merge"
         onclick="document.getElementById('force-merge-modal').classList.add('open')"
         title="Override matching and customs requirements to merge immediately with available documents"
-        {% if is_locked or status_str == 'merged' %}disabled title="This set is already merged; use the customs append path"{% endif %}
+        {% if is_locked or sync_running or status_str == 'merged' %}disabled{% endif %}
       >
         <span>⚠️ Force Merge</span>
       </button>
@@ -392,6 +397,19 @@
             >
               <span>👁️ Preview</span>
             </button>
+            {% if d.po_no_source == 'dn_number' %}
+            <button
+              data-testid="btn-confirm-placement"
+              class="btn btn-primary btn-sm"
+              hx-post="/po_sets/{{ po_set.id }}/documents/{{ d.id }}/confirm_placement"
+              hx-swap="none"
+              hx-on::after-request="if (event.detail.successful) location.reload()"
+              title="This document was placed here only because its DN number matches another document's. Confirm it really belongs to this PO."
+              {% if is_locked %}disabled{% endif %}
+            >
+              <span>✔ Confirm it belongs here</span>
+            </button>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

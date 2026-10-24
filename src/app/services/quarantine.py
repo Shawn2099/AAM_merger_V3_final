@@ -479,6 +479,22 @@ def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
                     input_copy.unlink(missing_ok=True)
         except OSError:
             logger.warning("Could not remove input copy %s", input_copy, exc_info=True)
+    # A renamed byte-identical copy would be re-hashed and re-counted as an error on every
+    # sync, forever. Once a quarantine copy exists, remove every input file with the same
+    # content (the quarantine copy is the durable one).
+    if (folder / out_name).is_file():
+        import hashlib
+
+        from app.services.ingestion import input_pdfs
+
+        for other in input_pdfs(cfg):
+            try:
+                if other.stat().st_size == (folder / out_name).stat().st_size and (
+                    hashlib.sha256(other.read_bytes()).hexdigest() == sha
+                ):
+                    other.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Could not remove duplicate input copy %s", other, exc_info=True)
     text = "\n".join(
         [
             "QUARANTINED DOCUMENT",
