@@ -99,6 +99,9 @@ Enabled: both a `CUSTOMS` and a `SHIPPING` document are required.
   with an audit row (`customs_append`). The rebuild is idempotent.
 - One document alone does not rebuild the packet; the dashboard shows
   "Customs append pending".
+- Before the merge, a wrong CUSTOMS/SHIPPING file can be removed on the set page (detached and archived, audited,
+  stored file kept) and replaced; after the merge it cannot. The operator finishes a customs set with Merge Now,
+  never Force Merge. Details: `docs/CUSTOMS_OPERATIONS.md`.
 
 ## 6. The packet
 

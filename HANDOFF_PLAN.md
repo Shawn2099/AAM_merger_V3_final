@@ -86,6 +86,7 @@ Last updated: 2026-10-24. Branch `fix/mvp-high-priority`, remote `origin` (push 
   `REAL_RUN_DIAGNOSIS_2026-10-24.md`, `robustness_audit_2026-10-24.md`.
 - Full suite last green: 6138 passed (before the R-02/04/05/10 fixes; re-running). `ty check src` clean.
 - Committed and pushed (T1 done): 395a7a0 grouping/digit key/guards, 254bba3 extraction images, 339f821 robustness. Opus review still owed (T10).
+- Customs (2026-10-25): operator procedures in `docs/CUSTOMS_OPERATIONS.md`; replace-before-merge route built (`d41deb8`, D19), template button pending after the UI batch; decisions D19/D20 in `docs/DEPLOYMENT_PLAN.md`.
 - Open from commit split: PRODUCT section 8 entry "input copy is removed even when the quarantine copy fails" contradicts R-10 and must be updated; other unstaged PRODUCT entries (documents_changed_during_merge, blocked_customs, circuit breaker, nine section 8 entries) go with T12/T5.
 
 ## 4. Plan as task cards (unambiguous; execute in order unless marked parallel-safe)
