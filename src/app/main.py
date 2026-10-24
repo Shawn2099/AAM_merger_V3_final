@@ -46,16 +46,27 @@ logger = logging.getLogger(__name__)
 _STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
-def _host_from_url(value: str) -> str | None:
-    """Return the hostname of an Origin/Referer value, or None if unusable.
+#: Port a URL means when it names none. Taken from the Origin/Referer's own scheme on BOTH sides
+#: of the comparison, so a TLS-terminating proxy that forwards the bare Host cannot break it.
+_DEFAULT_PORTS = {"http": 80, "https": 443}
 
-    `urlsplit` never raises for a malformed authority; a value such as the
-    opaque `null` Origin yields no hostname and is therefore rejected.
+
+def _origin_parts(value: str) -> tuple[str, int | None, int | None] | None:
+    """Return (hostname, explicit port, default port) of an Origin/Referer, or None if unusable.
+
+    `urlsplit` tolerates a malformed authority but raises ValueError when `.port` is read
+    (`http://pc:abc`, `:99999`); that is unusable, not a server error. The opaque `null`
+    Origin has no hostname and is rejected too.
     """
     try:
-        return urlsplit(value).hostname
-    except ValueError:  # pragma: no cover - urlsplit tolerates almost anything
+        parts = urlsplit(value)
+        host = parts.hostname
+        port = parts.port
+    except ValueError:
         return None
+    if host is None:
+        return None
+    return host, port, _DEFAULT_PORTS.get(parts.scheme.casefold())
 
 
 class OriginGuardMiddleware:
@@ -84,19 +95,30 @@ class OriginGuardMiddleware:
             await self.app(scope, receive, send)
             return
 
-        source_host = _host_from_url(source)
-        request_host = URL(scope=scope).hostname
-        if (
-            source_host is None
-            or request_host is None
-            or source_host.casefold() != request_host.casefold()
-        ):
+        parts = _origin_parts(source)
+        try:
+            request_url = URL(scope=scope)
+            request_host, request_port = request_url.hostname, request_url.port
+        except ValueError:
+            request_host, request_port = None, None
+        if parts is None or request_host is None:
+            same_origin = False
+            source_host, source_port = (parts[0] if parts else None), None
+        else:
+            source_host, explicit_port, default_port = parts
+            source_port = explicit_port or default_port
+            same_origin = source_host.casefold() == request_host.casefold() and source_port == (
+                request_port or default_port
+            )
+        if not same_origin:
             logger.warning(
-                "Refused %s %s: Origin/Referer host %r does not match Host %r",
+                "Refused %s %s: Origin/Referer %r:%r does not match Host %r:%r",
                 scope.get("method"),
                 scope.get("path"),
                 source_host,
+                source_port,
                 request_host,
+                request_port,
             )
             response = JSONResponse(
                 {

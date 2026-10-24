@@ -101,6 +101,85 @@ def test_opaque_null_origin_is_refused(client):
     assert response.status_code == 403
 
 
+# H1-1: the guard compares the port as well as the host. Another web service on the same PC
+# (a different port) must not be able to post to this one.
+
+
+def test_same_host_different_port_is_refused(client):
+    response = client.post(
+        "/no-such-route", headers={"Host": "pc:8000", "Origin": "http://pc:9000"}
+    )
+
+    assert response.status_code == 403
+
+
+def test_same_host_and_port_passes_the_guard(client):
+    response = client.post(
+        "/no-such-route", headers={"Host": "pc:8000", "Origin": "http://pc:8000"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_origin_default_port_equals_an_explicit_default_port_on_the_host(client):
+    # Origin without a port is port 80; a Host that spells :80 is the same origin.
+    assert (
+        client.post(
+            "/no-such-route", headers={"Host": "testserver:80", "Origin": "http://testserver"}
+        ).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            "/no-such-route", headers={"Host": "testserver", "Origin": "http://testserver:80"}
+        ).status_code
+        == 404
+    )
+
+
+def test_a_non_default_port_does_not_match_the_default_port(client):
+    response = client.post(
+        "/no-such-route", headers={"Host": "testserver", "Origin": "http://testserver:8000"}
+    )
+
+    assert response.status_code == 403
+
+
+def test_https_origin_behind_a_proxy_that_forwards_the_bare_host_passes(client):
+    # The scheme is not compared. Origin https://pc (443) against Host pc: the default port of
+    # the ORIGIN's scheme is used on both sides, so a TLS-terminating proxy does not break it.
+    response = client.post("/no-such-route", headers={"Host": "pc", "Origin": "https://pc"})
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("origin", ["http://testserver:abc", "http://testserver:99999"])
+def test_a_malformed_origin_port_is_refused_not_a_server_error(client, origin):
+    response = client.post("/no-such-route", headers={"Origin": origin})
+
+    assert response.status_code == 403
+
+
+def test_referer_port_is_checked_too(client):
+    refused = client.post(
+        "/no-such-route", headers={"Host": "pc:8000", "Referer": "http://pc:9000/dashboard"}
+    )
+    allowed = client.post(
+        "/no-such-route", headers={"Host": "pc:8000", "Referer": "http://pc:8000/dashboard"}
+    )
+
+    assert refused.status_code == 403
+    assert allowed.status_code == 404
+
+
+def test_an_ipv6_literal_host_and_port_match(client):
+    response = client.post(
+        "/no-such-route", headers={"Host": "[::1]:8000", "Origin": "http://[::1]:8000"}
+    )
+
+    assert response.status_code == 404
+
+
 # ---------------------------------------------------------------------------
 # P1-10 — TrustedHost only when server.allowed_hosts is configured
 # ---------------------------------------------------------------------------
