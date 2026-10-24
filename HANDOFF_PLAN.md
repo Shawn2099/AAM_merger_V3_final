@@ -44,7 +44,8 @@ Last updated: 2026-10-24. Branch `fix/mvp-high-priority`, remote `origin` (push 
   no wrong merge. Reports: `REAL_RUN_ISSUES_2026-10-24.md` (index), `REAL_RUN_MERGED_VERIFY_2026-10-24.md`,
   `REAL_RUN_DIAGNOSIS_2026-10-24.md`, `robustness_audit_2026-10-24.md`.
 - Full suite last green: 6138 passed (before the R-02/04/05/10 fixes; re-running). `ty check src` clean.
-- NOTHING from this hardening phase is committed yet at the time of writing (see Log for commits).
+- Committed and pushed (T1 done): 395a7a0 grouping/digit key/guards, 254bba3 extraction images, 339f821 robustness. Opus review still owed (T10).
+- Open from commit split: PRODUCT section 8 entry "input copy is removed even when the quarantine copy fails" contradicts R-10 and must be updated; other unstaged PRODUCT entries (documents_changed_during_merge, blocked_customs, circuit breaker, nine section 8 entries) go with T12/T5.
 
 ## 4. Plan as task cards (unambiguous; execute in order unless marked parallel-safe)
 
@@ -69,6 +70,7 @@ Global acceptance for every code card: `uv run ruff check <files>`, `uv run ruff
 | T9 | Cleanup list: propose which `scratch_*`, `batch_*`, stray reports to delete/gitignore; ASK the user; do not delete | OC proposes, user decides | yes |
 | T10 | **Opus code review** of the whole branch diff + retest results; `make business-logic`; gitnexus refresh + `detect_changes` | CLAUDE (Opus) | after T8 |
 | T11 | pymupdf AGPL licence check; write result in docs/DELIVERY.md | OC (research) + user decision | yes |
+| T12 | **Manual merger** (user-tested, KEEP, never discard): Opus review, `tests/test_manual_*.py`, check vs single-doc/single-PO scope, commit by named files + push. Files: `manual_merger.py` (route), `manual_merge.py`, `http_errors.py`, `templates/manual_merger.html`, `tests/test_manual_*`, its hunks in `main.py`, `base.html`, `dashboard.html`, `limits.py`, `config.py` (ManualMergeConfig), `quarantine.py`, `conftest.py`, `config.example.yaml`, SPEC FR-14, PRODUCT 6.2, CLAUDE.md tiers section | CLAUDE (Opus review) | no |
 
 ### T2 detail (user-approved 2026-10-24)
 `QUARANTINE.txt` for sets AND single documents, one layout, English only, in `src/app/services/quarantine.py`
@@ -119,3 +121,4 @@ non-server mode or stop the server at session end (e.g. `PREFECT_SERVER_ALLOW_EP
 
 - 2026-10-24 task cards T1-T11 written; OC/DeepSeek assignment proposed (CLAUDE keeps reconcile/grouping/quarantine/sync logic and all reviews).
 - 2026-10-24 real run, verification, R-01/R-14/R-12 + dup-guard refinement, R-02/04/05/10 fixes (uncommitted until step 1).
+- 2026-10-24 T1 done: commits 395a7a0, 254bba3, 339f821 pushed to origin/fix/mvp-high-priority. T12 (manual merger) added.
