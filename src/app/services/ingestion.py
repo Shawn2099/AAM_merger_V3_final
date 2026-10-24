@@ -64,12 +64,13 @@ _RECENT_WRITE_SECONDS = 300
 
 
 def _reject_incomplete_pdf(src: Path, cfg: AppConfig, problem: str) -> None:
-    """Refuse an incomplete PDF without ever creating a Document row.
+    """Refuse an incomplete PDF.
 
-    No row is written, so the truncated bytes never become a permanent SHA
-    duplicate: the finished file ingests as a normal new document. A file
-    written in the last few minutes stays in the input folder to be retried; an
-    older one is quarantined with a reason file so the operator can see it.
+    A file written in the last few minutes may still be copying: it gets NO row
+    and stays in the input folder to be retried, so the truncated bytes never
+    become a permanent SHA duplicate and the finished file ingests as a normal
+    new document. An older one is permanently bad: it is quarantined with a
+    reason file and listed as a failed row (R-03) so the operator can see it.
     """
     reason = f"{_INCOMPLETE_PDF_REASON}: {problem}"
     try:

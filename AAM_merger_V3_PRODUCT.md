@@ -618,15 +618,20 @@ An HTTP 400 is the provider rejecting the request, normally for one bad file.
 When three DIFFERENT documents in a row are rejected with a 400, the cause is
 taken to be the request (a wrong `vlm.model`, an unsupported option, a provider
 schema change), not the documents. The breaker refunds those documents' attempts
-and leaves them `pending`, stops calling the provider for the rest of the sync,
-logs one clear error, and reports `vlm_halted: true` in the sync summary. A
-successful read, or the start of the next sync, resets the count. Two limits:
-the first documents of the run were already moved to `quarantine/_documents/`
-before the third rejection (their stored copies remain and they are re-read from
-`stored/` on the next sync, but the quarantine copies stay as residue); and the
-count is per process, so Re-Extract in the web process shares it until the next
-sync starts. Pinned by `test_the_400_breaker_refunds_attempts_and_reports_the_halt`
-and `test_a_good_read_between_400s_does_not_trip_the_breaker`.
+and leaves them `pending`, stops calling the provider for the rest of the sync
+(Prefect does not retry the tripping call), logs one clear error, and reports
+`vlm_halted: true` in the sync summary. While a rejection might still be withdrawn
+by a trip, the document's quarantine is held back: nothing is moved out of input
+and no audit row is written for a batch that trips. A successful read, or the start
+of the next sync, resets the count; counting happens only during a sync, so a
+Re-Extract from the web page never trips or is refunded by it. A refunded document
+carries a marker: if it is rejected again it is judged on its own and fails as
+usual, so three genuinely bad files cannot halt every night. The cost is one
+halted night before such files are condemned, and a provider-wide 400 that
+persists after the config is fixed would condemn documents on the second night.
+Pinned by `test_the_400_breaker_refunds_attempts_and_reports_the_halt`,
+`test_a_document_the_breaker_already_refunded_is_judged_on_its_own` and
+`test_a_good_read_between_400s_does_not_trip_the_breaker`.
 
 ### L — files rejected at ingest are listed, re-sent merged files are cleared (R-03, R-16)
 
@@ -638,6 +643,9 @@ A byte-identical file re-sent after its set merged resolves to the existing
 document, no longer mints an empty set, and is removed from input once the set
 is merged, the stored copy exists and the bytes still hash to the stored SHA.
 An unreadable file (permission or I/O error) still has no row: only a reason file.
+A rejected row cannot be reclassified, previewed or uploaded as a customs/shipping
+document (422 with the reason). Quarantined filenames are made safe for Windows
+(invalid characters, reserved names and length), falling back to the stored name.
 
 ### M — a document the provider can never serve is retried every run
 

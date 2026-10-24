@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -141,6 +142,30 @@ def _document_rows(docs, names: dict[int, str]) -> list[str]:
     return out
 
 
+_BAD_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_MAX_FILENAME_LEN = 100
+
+
+def _safe_filename(name: str | None, fallback: str) -> str:
+    """The operator's filename made safe to create on Windows, or `fallback`.
+
+    Strips path parts, characters Windows refuses (`<>:"/\\|?*` and control
+    characters; `:` would otherwise write an alternate data stream), trailing
+    dots/spaces, reserved device stems (CON, NUL, ...), and caps the length so a
+    quarantine folder path stays inside MAX_PATH on Server 2016.
+    """
+    base = re.split(r"[/\\]", name or "")[-1].strip()
+    base = _BAD_FILENAME_CHARS.sub("_", base).strip(" .")
+    if not base:
+        return fallback
+    stem, suffix = Path(base).stem, Path(base).suffix
+    if stem.upper() in _RESERVED_NAMES:
+        stem = f"_{stem}"
+    if len(stem) + len(suffix) > _MAX_FILENAME_LEN:
+        stem = stem[: max(1, _MAX_FILENAME_LEN - len(suffix))]
+    return f"{stem}{suffix}"
+
+
 def _copy_documents(folder: Path, docs) -> dict[int, str]:
     """Copy each document's stored PDF into `folder` under its ORIGINAL filename.
 
@@ -156,14 +181,21 @@ def _copy_documents(folder: Path, docs) -> dict[int, str]:
         src = _source_file(doc)
         if src is None:
             continue
-        base = Path(doc.original_filename or "").name.strip() or src.name
+        base = _safe_filename(doc.original_filename, src.name)
         stem, suffix = Path(base).stem, Path(base).suffix or src.suffix
         candidate, n = f"{stem}{suffix}", 1
         while candidate.lower() in used or candidate.lower() in reserved:
             n += 1
             candidate = f"{stem}_{n}{suffix}"
         used.add(candidate.lower())
-        shutil.copy(str(src), str(folder / candidate))
+        try:
+            shutil.copy(str(src), str(folder / candidate))
+        except OSError:
+            # A name the file system still refuses must not stop the report: the
+            # stored name (a hash) always works.
+            logger.warning("Could not copy %s as %s; using its stored name", src, candidate)
+            candidate = src.name
+            shutil.copy(str(src), str(folder / candidate))
         names[doc.id] = candidate
     return names
 
@@ -419,7 +451,7 @@ def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
     folder = Path(cfg.paths.quarantine_folder) / "_documents" / name.replace(".pdf", "")
     folder.mkdir(parents=True, exist_ok=True)
     # The copy keeps the operator's own filename (the folder is keyed by hash).
-    out_name = Path(original or "").name.strip() or name
+    out_name = _safe_filename(original, name)
     if out_name.lower() in ("quarantine.txt", ".po_set_id"):
         out_name = f"document_{out_name}"
     input_copy = Path(cfg.paths.input_folder) / original if original else None

@@ -273,7 +273,14 @@ def _write_merged(ordered: list, out: Path, allow_missing: bool = False) -> int:
         if missing and not allow_missing:
             raise MergeSourceError(f"Missing stored PDF(s) during merge: {'; '.join(missing)}")
 
-        writer.write(str(tmp))
+        try:
+            writer.write(str(tmp))
+        except OSError:
+            raise  # disk/share fault: the caller reports packet_write_failed
+        except Exception as e:
+            # pypdf resolves objects lazily, so a damaged source can fail here
+            # rather than in the read loop above. It is still the source's fault.
+            raise MergeSourceError(f"A source PDF could not be written into the packet: {e}") from e
         pages = len(writer.pages)
         if pages == 0:
             raise MergeEmptyError(

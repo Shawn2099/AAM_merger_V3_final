@@ -846,6 +846,13 @@ PROVIDER_400_LIMIT = 3
 _breaker_lock = threading.Lock()
 _rejected_400: set[int] = set()
 _breaker_tripped = False
+#: True only while a sync runs. A 400 from a route (Re-Extract) is about that one
+#: document and must neither trip nor be refunded by the sync's breaker.
+_breaker_counting = False
+#: Written to a document the breaker refunded. If it is rejected again it is
+#: judged on its own (failed as usual), so a document-specific 400 cannot halt
+#: every night.
+_REFUND_MARKER = '{"provider_400_refund": 1}'
 
 
 class ProviderRequestRejected(RuntimeError):
@@ -853,11 +860,27 @@ class ProviderRequestRejected(RuntimeError):
 
 
 def reset_provider_breaker() -> None:
-    """Forget earlier rejections. Called at the start of every sync."""
-    global _breaker_tripped
+    """Forget earlier rejections and start counting. Called at the start of every sync."""
+    global _breaker_tripped, _breaker_counting
     with _breaker_lock:
         _rejected_400.clear()
         _breaker_tripped = False
+        _breaker_counting = True
+
+
+def end_provider_breaker() -> None:
+    """Stop counting and clear the trip, so nothing outside a sync is affected."""
+    global _breaker_tripped, _breaker_counting
+    with _breaker_lock:
+        _rejected_400.clear()
+        _breaker_tripped = False
+        _breaker_counting = False
+
+
+def rejected_400_ids() -> set[int]:
+    """Documents rejected with a 400 whose verdict may still be withdrawn by a trip."""
+    with _breaker_lock:
+        return set(_rejected_400)
 
 
 def provider_breaker_tripped() -> bool:
@@ -893,6 +916,8 @@ def _note_provider_400(doc_id: int) -> list[int] | None:
     """Record a 400. Returns every rejected document id once the breaker trips, else None."""
     global _breaker_tripped
     with _breaker_lock:
+        if not _breaker_counting:
+            return None
         _rejected_400.add(doc_id)
         if len(_rejected_400) < PROVIDER_400_LIMIT and not _breaker_tripped:
             return None
@@ -908,7 +933,11 @@ def _refund_rejected(eng, doc_ids: list[int]) -> None:
         s.execute(
             _sa_update(Document)
             .where(Document.id.in_(doc_ids), Document.archived_at.is_(None))
-            .values(extraction_status=ExtractionStatus.pending, extraction_attempt_count=0)
+            .values(
+                extraction_status=ExtractionStatus.pending,
+                extraction_attempt_count=0,
+                raw_extraction_json=_REFUND_MARKER,
+            )
             .execution_options(synchronize_session=False)
         )
         s.commit()
@@ -1055,16 +1084,11 @@ def extract_document(doc_id: int, cfg) -> Document:
                 doc.raw_extraction_json = None
             # Dev-only file dump for optimization/debugging — mapped to filename+hash, gitignored
             try:
+                # Derived from the configured data folder only (R-18): a CWD-relative
+                # fallback let test runs from the repo root write into the repository.
                 raw_dir = Path(cfg.paths.log_folder).parent / "raw_extractions"
-                # also respect data/raw_extractions if log_folder is elsewhere
-                alt_raw_dir = Path("data/raw_extractions")
-                if (
-                    raw_dir.exists()
-                    or alt_raw_dir.exists()
-                    or Path("data/raw_extractions").exists()
-                ):
-                    target_dir = raw_dir if raw_dir.exists() else alt_raw_dir
-                    target_dir.mkdir(parents=True, exist_ok=True)
+                if raw_dir.exists():
+                    target_dir = raw_dir
                     safe_stem = Path(doc.original_filename).stem.replace(" ", "_")[:80]
                     fname = f"{doc.sha256_hash[:8]}_{safe_stem}.json"
                     (target_dir / fname).write_text(
@@ -1125,7 +1149,10 @@ def extract_document(doc_id: int, cfg) -> Document:
                     type(e).__name__,
                 )
                 raise e
-            rejected = _note_provider_400(doc_id) if _is_http_400(e) else None
+            already_refunded = "provider_400_refund" in (doc.raw_extraction_json or "")
+            rejected = (
+                _note_provider_400(doc_id) if _is_http_400(e) and not already_refunded else None
+            )
             if rejected is not None:
                 # Provider-wide 400 (R-06): refund every document it condemned
                 # and leave them pending; the sync loops stop calling the VLM.

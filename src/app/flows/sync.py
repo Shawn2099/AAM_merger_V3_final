@@ -271,6 +271,17 @@ def extract_task(doc_id: int, cfg_path: str | None = None) -> str:
     )
 
 
+def _retry_unless_provider_rejected(task, task_run, state) -> bool:
+    """Prefect retry condition: a tripped 400 breaker is a verdict, not a transient fault."""
+    from app.services.extraction import ProviderRequestRejected
+
+    try:
+        exc = state.result(raise_on_failure=False)
+    except Exception:
+        return True
+    return not isinstance(exc, ProviderRequestRejected)
+
+
 def _extract_task_for(cfg):
     """extract_task with retry policy driven by config (NFR-2).
 
@@ -280,7 +291,29 @@ def _extract_task_for(cfg):
     return extract_task.with_options(
         retries=cfg.extraction.max_retries,
         retry_delay_seconds=list(cfg.extraction.retry_backoff_seconds),
+        retry_condition_fn=_retry_unless_provider_rejected,
     )
+
+
+def _flush_deferred_quarantines(deferred, cfg, eng, touched_po_set_ids) -> None:
+    """Quarantine documents whose 400 verdict was held back, unless the breaker tripped.
+
+    A document rejected with a 400 is not condemned at once: if enough different
+    documents follow it the cause is the request, and the breaker refunds them
+    all. Quarantining them early would remove their input files for nothing.
+    """
+    from app.services.extraction import provider_breaker_tripped
+
+    if provider_breaker_tripped():
+        if deferred:
+            logger.error(
+                "Provider breaker tripped: %d held document(s) were refunded and not quarantined",
+                len(deferred),
+            )
+        return
+    for doc_id, input_file in deferred:
+        if _persisted_extraction_status(eng, doc_id) == ExtractionStatus.failed:
+            _quarantine_broken_document(doc_id, cfg, eng, input_file, touched_po_set_ids)
 
 
 @flow(name="recovery_flow")
@@ -332,7 +365,11 @@ def _recovery_flow_locked(
     from app.models import Document as _Doc
     from app.models import POSet as _POSet
     from app.models import POSetStatus
-    from app.services.extraction import provider_breaker_tripped, reclaim_stale_processing
+    from app.services.extraction import (
+        provider_breaker_tripped,
+        reclaim_stale_processing,
+        rejected_400_ids,
+    )
     from app.services.grouping import (
         attach_unattached_to_open_sets,
         group_document,
@@ -344,7 +381,12 @@ def _recovery_flow_locked(
 
     # A document claimed by a worker that died is still marked `processing`.
     # Release it first, so it is picked up as pending below and read again.
-    reclaim_stale_processing(cfg)
+    try:
+        reclaim_stale_processing(cfg)
+    except Exception:
+        logger.warning(
+            "Releasing stale documents failed; they are retried next sync", exc_info=True
+        )
 
     input_folder = Path(cfg.paths.input_folder)
     input_folder.mkdir(parents=True, exist_ok=True)
@@ -414,6 +456,7 @@ def _recovery_flow_locked(
             .all()
         ]
 
+    deferred_400: list[tuple[int, Path | None]] = []
     for doc_id in pending_ids:
         heartbeat_sync_lock(cfg_path)
         if provider_breaker_tripped():
@@ -433,7 +476,10 @@ def _recovery_flow_locked(
                     doc_id,
                 )
                 recovered_errors += 1
-                _quarantine_broken_document(doc_id, cfg, eng, None, touched_po_set_ids)
+                if doc_id in rejected_400_ids():
+                    deferred_400.append((doc_id, None))
+                else:
+                    _quarantine_broken_document(doc_id, cfg, eng, None, touched_po_set_ids)
             elif persisted == ExtractionStatus.valid:
                 recovered_extracted += 1
 
@@ -468,13 +514,24 @@ def _recovery_flow_locked(
             logger.warning("Grouping failed for pending doc %s", doc_id, exc_info=True)
             recovered_errors += 1
 
+    _flush_deferred_quarantines(deferred_400, cfg, eng, touched_po_set_ids)
+
     # 2. Resolve unattached documents (e.g. Delivery Notes without PO printed on face)
-    unattached_touched = resolve_unattached_documents(cfg)
-    touched_po_set_ids.update(unattached_touched)
+    # A failing sweep (for example "database is locked" past the busy timeout) is
+    # counted and logged; it must not stop the sets that are ready from being
+    # reconciled (R-15).
+    try:
+        touched_po_set_ids.update(resolve_unattached_documents(cfg))
+    except Exception:
+        logger.warning("Resolving unattached documents failed", exc_info=True)
+        recovered_errors += 1
 
     # 3. Attach DN/SI/UNKNOWN docs that waited for their PO anchor (BLOCKER-5)
-    attached_touched = attach_unattached_to_open_sets(cfg)
-    touched_po_set_ids.update(attached_touched)
+    try:
+        touched_po_set_ids.update(attach_unattached_to_open_sets(cfg))
+    except Exception:
+        logger.warning("Attaching unattached documents failed", exc_info=True)
+        recovered_errors += 1
 
     # 4. Phase 1: Reconcile newly touched PO Sets (FR-4.8, FR-14.1)
     # Per-PO lock guard: if a UI action (force_merge, redo_extract) holds the
@@ -609,6 +666,9 @@ def sync_flow(cfg_path: str | None = None, held_lock=None) -> dict:
         # above, released below) or held_lock (owned by the route caller).
         return _sync_flow_locked(cfg_path)
     finally:
+        from app.services.extraction import end_provider_breaker
+
+        end_provider_breaker()
         if own_lock is not None:
             release_sync_lock(own_lock)
 
@@ -624,6 +684,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     from app.services.extraction import (
         provider_breaker_tripped,
         reclaim_stale_processing,
+        rejected_400_ids,
         reset_provider_breaker,
     )
     from app.services.grouping import group_document
@@ -637,7 +698,12 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     # Release documents whose worker died mid-extraction before anything else
     # looks at them, so they are read again in this run rather than being
     # reported as processed and never read.
-    reclaim_stale_processing(cfg)
+    try:
+        reclaim_stale_processing(cfg)
+    except Exception:
+        logger.warning(
+            "Releasing stale documents failed; they are retried next sync", exc_info=True
+        )
 
     input_folder = Path(cfg.paths.input_folder)
     input_folder.mkdir(parents=True, exist_ok=True)
@@ -657,6 +723,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     heartbeat_sync_lock(cfg_path)
 
     vlm_halted = False
+    deferred_400: list[tuple[int, Path | None]] = []
     for f in files:
         heartbeat_sync_lock(cfg_path)
         if provider_breaker_tripped():
@@ -695,7 +762,10 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
                             doc.id,
                         )
                         errors += 1
-                        _quarantine_broken_document(doc.id, cfg, eng, f, touched_po_set_ids)
+                        if doc.id in rejected_400_ids():
+                            deferred_400.append((doc.id, f))
+                        else:
+                            _quarantine_broken_document(doc.id, cfg, eng, f, touched_po_set_ids)
                     else:
                         extracted += 1
 
@@ -746,6 +816,8 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
             logger.warning("Ingestion loop failed for file %s", f, exc_info=True)
             errors += 1
             continue
+
+    _flush_deferred_quarantines(deferred_400, cfg, eng, touched_po_set_ids)
 
     # Run recovery flow as a Prefect subflow (or directly if outside Prefect context)
     from prefect.context import FlowRunContext

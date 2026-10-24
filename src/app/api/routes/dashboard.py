@@ -617,6 +617,11 @@ def preview_document(doc_id: int):
         doc = s.get(Document, doc_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
+        if doc.ingest_reject_reason:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Rejected on arrival, no preview: {doc.ingest_reject_reason}",
+            )
         p = _served_file(
             doc.stored_path,
             cfg.paths.stored_documents_folder,
@@ -835,6 +840,14 @@ def _upload_manual_doc_impl(
                 # Re-typing it as a customs document would corrupt a real
                 # document. The split parent is recognised by the generic
                 # hierarchy column, not by naming the packaging type.
+                if existing.ingest_reject_reason:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            "This file was rejected on arrival and cannot be used: "
+                            f"{existing.ingest_reject_reason}. Upload a valid PDF instead."
+                        ),
+                    )
                 pipeline_types = {DocType.PO.value, DocType.DN.value, DocType.SI.value}
                 existing_type = (
                     existing.doc_type.value
@@ -1235,6 +1248,14 @@ def reclassify_document(
             raise HTTPException(
                 status_code=409,
                 detail="This document belongs to an archived PO Set and is read-only.",
+            )
+        if doc.ingest_reject_reason:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "This file was rejected on arrival and cannot be placed in a PO Set: "
+                    f"{doc.ingest_reject_reason}. Replace it with a valid PDF."
+                ),
             )
         current_ps = s.get(POSet, doc.po_set_id) if doc.po_set_id else None
         if current_ps is not None and current_ps.status == POSetStatus.merged:

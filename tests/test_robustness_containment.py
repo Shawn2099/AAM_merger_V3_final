@@ -27,7 +27,7 @@ from test_robustness_harness import (
 )
 
 from app.core.database import get_engine
-from app.models import Document, ExtractionStatus, POSet, POSetStatus
+from app.models import AuditLog, Document, ExtractionStatus, POSet, POSetStatus
 
 
 @pytest.fixture()
@@ -227,13 +227,36 @@ def test_a_provider_wide_400_does_not_condemn_the_whole_batch(rcfg, monkeypatch)
 
 def test_the_400_breaker_refunds_attempts_and_reports_the_halt(rcfg, monkeypatch):
     bad = ("status", 400, {"error": {"message": "x is not a valid model ID", "code": 400}})
-    HttpVLM(monkeypatch, {W_PO: bad, W_DN: bad, W_SI: bad})
+    vlm = HttpVLM(monkeypatch, {W_PO: bad, W_DN: bad, W_SI: bad})
     _drop(rcfg)
     res = run_sync()
     assert res["vlm_halted"] is True
     docs = all_docs(rcfg)
     assert {d.extraction_status for d in docs} == {ExtractionStatus.pending}
     assert {d.extraction_attempt_count for d in docs} == {0}, "no attempt may be charged"
+    # The verdict was withheld, so nothing was moved or recorded as quarantined.
+    qdocs = Path(rcfg.paths.quarantine_folder) / "_documents"
+    assert not qdocs.exists() or not list(qdocs.iterdir())
+    with Session(get_engine(rcfg)) as s:
+        assert s.query(AuditLog).count() == 0
+    assert sorted(p.name for p in Path(rcfg.paths.input_folder).iterdir()) == [
+        "DN.pdf",
+        "PO.pdf",
+        "SI.pdf",
+    ]
+    # The tripping call is not retried by Prefect.
+    assert max(vlm.calls.values()) <= rcfg.extraction.max_retries + 1
+
+
+def test_a_document_the_breaker_already_refunded_is_judged_on_its_own(rcfg, monkeypatch):
+    """Night two: the same three 400s no longer halt the run; each fails as usual."""
+    bad = ("status", 400, {"error": {"message": "image too large", "code": 400}})
+    HttpVLM(monkeypatch, {W_PO: bad, W_DN: bad, W_SI: bad})
+    _drop(rcfg)
+    assert run_sync()["vlm_halted"] is True  # night one: all refunded, marked
+    res = run_sync()  # night two: the marker makes each rejection its own verdict
+    assert res["vlm_halted"] is False
+    assert {d.extraction_status for d in all_docs(rcfg)} == {ExtractionStatus.failed}
 
 
 def test_a_good_read_between_400s_does_not_trip_the_breaker(rcfg, monkeypatch):
@@ -368,15 +391,6 @@ def test_set_recovers_after_disk_full_is_fixed(rcfg, monkeypatch):
     assert ps.status == POSetStatus.merged
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="DEFECT R-08: a pypdf error raised while WRITING the packet (lazy object "
-    "resolution of a damaged source) is not wrapped in MergeSourceError - only the read "
-    "loop is (merge.py:261-276). It escapes reconcile_po_set, the set is left 'pending' "
-    "with no reason code, and it retries every night instead of quarantining as "
-    "packet_source_unreadable.",
-)
 def test_pypdf_error_during_packet_write_quarantines_the_set(rcfg, monkeypatch):
     from pypdf.errors import PdfReadError
 
@@ -416,14 +430,6 @@ def test_stored_file_vanished_before_merge_quarantines_as_source_unreadable(rcfg
     assert list(Path(rcfg.paths.output_folder).glob("*.pdf")) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="DEFECT R-09: reconcile commits status=quarantined BEFORE quarantine_copy runs; "
-    "if the copy raises (quarantine share offline, disk full) the exception escapes, "
-    "_persist_reason never runs, and every later sweep returns early for a quarantined "
-    "set - so the set is quarantined forever with NO reason text.",
-)
 def test_quarantine_folder_failure_still_records_the_reason(rcfg, monkeypatch):
     HttpVLM(monkeypatch, _good(dn_lines=[line("1", "-10", "BOLT"), line("2", "5", "NUT")]))
     q = Path(rcfg.paths.quarantine_folder)
@@ -636,15 +642,6 @@ def test_resent_identical_po_after_merge_does_not_mint_a_phantom_set(rcfg, monke
     assert len(all_sets) == 1, [(s.id, s.status, len(s.documents)) for s in all_sets]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=RuntimeError,
-    reason="DEFECT R-15 (low, fault-injected): recovery steps 2/3 "
-    "(resolve_unattached_documents, attach_unattached_to_open_sets), reclaim_stale_processing "
-    "and the open-set query are not wrapped (flows/sync.py:312, 434-439, 460). Any exception "
-    "there (e.g. 'database is locked' past the busy timeout) aborts the whole sync before "
-    "ANY set is reconciled, although every per-document step is contained.",
-)
 def test_a_failing_attach_sweep_does_not_stop_reconciliation(rcfg, monkeypatch):
     import app.services.grouping as grouping
 

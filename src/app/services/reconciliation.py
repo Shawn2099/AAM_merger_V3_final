@@ -31,6 +31,22 @@ from app.services.quarantine import quarantine_copy
 logger = logging.getLogger(__name__)
 
 
+def _quarantine_set(*args, **kwargs):
+    """Copy a quarantined set's files out, without ever failing the reconcile.
+
+    The status is already committed as `quarantined` when this runs. If the copy
+    raises (quarantine share offline, disk full) and the exception escaped,
+    the reason would never be persisted and later sweeps would skip the set, which
+    would stay quarantined with no explanation (R-09). The files are still in
+    `stored/`, so a failed copy is logged and the verdict stands.
+    """
+    try:
+        return quarantine_copy(*args, **kwargs)
+    except Exception:
+        logger.error("Could not copy the quarantined set's files out", exc_info=True)
+        return None
+
+
 def compare_po_set_lines(
     po_lines: list[dict],
     dn_lines: list[dict],
@@ -455,7 +471,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             detail_msg = f"{names} could not be read; use Re-Extract or replace the file"
             ps.status = POSetStatus.quarantined
             s.commit()
-            quarantine_copy(ps.id, cfg, reason="document_extraction_failed", detail=detail_msg)
+            _quarantine_set(ps.id, cfg, reason="document_extraction_failed", detail=detail_msg)
             return {
                 "status": "quarantined",
                 "reason": "document_extraction_failed",
@@ -482,7 +498,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             )
             ps.status = POSetStatus.quarantined
             s.commit()
-            quarantine_copy(ps.id, cfg, reason="unclassified_document_in_set", detail=detail_msg)
+            _quarantine_set(ps.id, cfg, reason="unclassified_document_in_set", detail=detail_msg)
             return {
                 "status": "quarantined",
                 "reason": "unclassified_document_in_set",
@@ -545,7 +561,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                     f"PO reference mismatch: doc {d.original_filename} "
                     f"({d.po_no_normalized}) != PO Set ({ps.po_no_normalized})"
                 )
-                quarantine_copy(ps.id, cfg, reason="po_reference_mismatch", detail=msg)
+                _quarantine_set(ps.id, cfg, reason="po_reference_mismatch", detail=msg)
                 return {
                     "status": "quarantined",
                     "reason": "po_reference_mismatch",
@@ -591,7 +607,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             logger.warning("PO letters conflict in PO Set %s: %s", ps.id, parts)
             ps.status = POSetStatus.quarantined
             s.commit()
-            quarantine_copy(ps.id, cfg, reason="po_reference_mismatch", detail=msg)
+            _quarantine_set(ps.id, cfg, reason="po_reference_mismatch", detail=msg)
             return {
                 "status": "quarantined",
                 "reason": "po_reference_mismatch",
@@ -642,7 +658,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 logger.warning("Duplicate %s number in PO Set %s: %s", label, ps.id, parts)
                 ps.status = POSetStatus.quarantined
                 s.commit()
-                quarantine_copy(ps.id, cfg, reason="duplicate_document_number", detail=msg)
+                _quarantine_set(ps.id, cfg, reason="duplicate_document_number", detail=msg)
                 return {
                     "status": "quarantined",
                     "reason": "duplicate_document_number",
@@ -720,7 +736,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
         if not po_lines:
             ps.status = POSetStatus.quarantined
             s.commit()
-            quarantine_copy(ps.id, cfg, reason="po_document_has_no_line_items")
+            _quarantine_set(ps.id, cfg, reason="po_document_has_no_line_items")
             return {
                 "status": "quarantined",
                 "reason": "po_document_has_no_line_items",
@@ -751,7 +767,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 )
                 ps.status = POSetStatus.quarantined
                 s.commit()
-                quarantine_copy(
+                _quarantine_set(
                     ps.id,
                     cfg,
                     reason="vendor_document_has_no_line_items",
@@ -775,7 +791,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
         if any(int(line.get("quantity") or 0) <= 0 for line in all_lines):
             ps.status = POSetStatus.quarantined
             s.commit()
-            quarantine_copy(ps.id, cfg, reason="non_positive_quantity")
+            _quarantine_set(ps.id, cfg, reason="non_positive_quantity")
             return {
                 "status": "quarantined",
                 "reason": "non_positive_quantity",
@@ -800,7 +816,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
         if po_fail:
             ps.status = POSetStatus.quarantined
             s.commit()
-            quarantine_copy(ps.id, cfg, reason=po_fail)
+            _quarantine_set(ps.id, cfg, reason=po_fail)
             return {
                 "status": "quarantined",
                 "reason": po_fail,
@@ -826,7 +842,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             if any(f.get("type") == "identification" for f in failure_flags):
                 ps.status = POSetStatus.quarantined
                 s.commit()
-                quarantine_copy(ps.id, cfg, reason="unmatched_vendor_line", flags=flags)
+                _quarantine_set(ps.id, cfg, reason="unmatched_vendor_line", flags=flags)
                 return {
                     "status": "quarantined",
                     "reason": "unmatched_vendor_line",
@@ -904,7 +920,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             # write a clobbered or ambiguous file into the output folder.
             ps.status = POSetStatus.quarantined
             s.commit()
-            quarantine_copy(ps.id, cfg, reason="packet_naming_failed", detail=str(e))
+            _quarantine_set(ps.id, cfg, reason="packet_naming_failed", detail=str(e))
             return {
                 "status": "quarantined",
                 "reason": "packet_naming_failed",
@@ -922,7 +938,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             reason = getattr(e, "reason_code", "no_line_item_evidence")
             ps.status = POSetStatus.quarantined
             s.commit()
-            quarantine_copy(ps.id, cfg, reason=reason, detail=str(e))
+            _quarantine_set(ps.id, cfg, reason=reason, detail=str(e))
             return {
                 "status": "quarantined",
                 "reason": reason,
@@ -941,7 +957,7 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
             )
             ps.status = POSetStatus.quarantined
             s.commit()
-            quarantine_copy(ps.id, cfg, reason=reason, detail=str(e))
+            _quarantine_set(ps.id, cfg, reason=reason, detail=str(e))
             return {
                 "status": "quarantined",
                 "reason": reason,
