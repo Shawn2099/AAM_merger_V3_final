@@ -168,7 +168,8 @@ fine, pointing the app at a UNC path is not required and adds failure modes.
 
 ## 6. Daily operation
 
-- **Nightly sync** runs at 00:00 (Prefect deployment `aam-midnight-sync`).
+- **Input poller** (inside the web service): `schedule.poll_enabled`, `poll_interval_seconds` (60), `merge_settle_minutes` (5). Restart the web service after changing them. A new file is read within about a minute; its set merges after the settle time.
+- **Nightly sync** runs at 00:00 (Prefect deployment `aam-midnight-sync`); switch off with `schedule.nightly_enabled: false` and re-run `scripts/deploy_prefect.py`.
   `config.example.yaml` sets `prefect.schedule_timezone: "Asia/Kolkata"`, so
   this is **IST midnight**. Change it to the office's IANA zone if the client
   is elsewhere, and re-run the installer to re-register the schedule.

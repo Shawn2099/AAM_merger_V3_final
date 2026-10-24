@@ -255,6 +255,7 @@ def _config(root: Path) -> Path:
         "archive_folder": str(root / "archive"),
     }
     data["manual_merge"]["temp_folder"] = str(root / "manual_merge_tmp")
+    data["schedule"]["poll_enabled"] = False  # UI tests must be deterministic
     data["server"]["allowed_hosts"] = ["*"]
     path = root / "config.yaml"
     path.write_text(yaml.safe_dump(data), encoding="utf-8")

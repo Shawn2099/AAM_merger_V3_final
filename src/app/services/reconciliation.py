@@ -8,8 +8,10 @@ so the verdict a reviewer reads is the verdict the engine reached. See
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -29,6 +31,21 @@ from app.services.matching import (
 from app.services.quarantine import quarantine_copy
 
 logger = logging.getLogger(__name__)
+
+
+def _aware(value: datetime) -> datetime:
+    """SQLite hands back naive datetimes; they were written as UTC."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+#: Minutes a set's newest file must have been in the system before it may merge.
+#: Set ONLY by a poller-started sync (D5); 0 everywhere else, so the nightly run,
+#: manual Scan, Merge Now and every test merge as soon as the set reconciles.
+SETTLE_MINUTES: contextvars.ContextVar[int] = contextvars.ContextVar("settle_minutes", default=0)
+
+#: The reason text starts with this so the poller can find sets that are only
+#: waiting for their settle time to pass.
+SETTLING_PREFIX = "Reconciled; waiting for more files to arrive"
 
 
 def _quarantine_set(*args, **kwargs):
@@ -218,6 +235,7 @@ REASON_TEXT: dict[str, str] = {
         "A document's stored PDF is missing or unreadable; the packet cannot be written"
     ),
     "packet_write_failed": "The merged packet could not be written to the output folder",
+    "settling": SETTLING_PREFIX,
     "no_line_item_evidence": "The set has no line-item evidence, so there is nothing to reconcile",
     "po_reference_mismatch": "A document references a different PO number",
     "duplicate_document_number": (
@@ -285,6 +303,7 @@ _DETAILED_REASONS = {
     "packet_naming_failed",
     "packet_source_unreadable",
     "packet_write_failed",
+    "settling",
 }
 
 
@@ -880,6 +899,29 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 "po_set_id": po_set_id,
                 "flags": flags,
             }
+
+        # Settle time (D5): a poller-started sync does not merge a set whose newest
+        # file only just arrived. Every other gate has already passed here; this one
+        # only waits, so the set merges on a later pass without any operator action.
+        settle = SETTLE_MINUTES.get()
+        if settle > 0:
+            arrived = [_aware(d.created_at) for d in docs if d.archived_at is None and d.created_at]
+            if arrived:
+                ready_at = max(arrived) + timedelta(minutes=settle)
+                if ready_at > datetime.now(UTC):
+                    ps.status = POSetStatus.pending
+                    s.commit()
+                    local = ready_at.astimezone()
+                    return {
+                        "status": "pending",
+                        "reason": "settling",
+                        "detail": (
+                            f"{SETTLING_PREFIX}. Documents agree; it merges after "
+                            f"{local:%H:%M} unless something else arrives."
+                        ),
+                        "po_set_id": po_set_id,
+                        "flags": flags,
+                    }
 
         # Auto-merge (FR-14.1)
         from app.services.merge import (

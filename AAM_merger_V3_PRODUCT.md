@@ -174,6 +174,7 @@ approximation.
 | `quarantined` | `vendor_document_has_no_line_items` | any single DN or SI document was read but contains no line items (checked per document, so an empty DN beside a full one still quarantines) |
 | `quarantined` | `document_extraction_failed` | a PO/DN/SI document in the set failed extraction; its stale lines are never reconciled or merged. Use Re-Extract |
 | `pending` | `document_not_yet_read` | a PO/DN/SI document in the set is still pending/processing extraction |
+| `pending` | `settling` | every gate passed, but the set was started by the poller and its newest file is younger than `schedule.merge_settle_minutes`; it merges on a later pass by itself unless something else arrives (text starts "Reconciled; waiting for more files to arrive") |
 | `pending` | `documents_changed_during_merge` | a document was attached to, or changed in, the set after reconcile read it and before the packet was written; no packet is written and the next reconcile re-checks the set |
 | `quarantined` | `unclassified_document_in_set` | a document that is not PO/DN/SI/CUSTOMS/SHIPPING (UNKNOWN, COMBINED) is attached to the set (legacy-row defence; the sweeps never attach one) |
 | `quarantined` | `packet_naming_failed` | merged packet could not be named unambiguously |
@@ -632,6 +633,28 @@ persists after the config is fixed would condemn documents on the second night.
 Pinned by `test_the_400_breaker_refunds_attempts_and_reports_the_halt`,
 `test_a_document_the_breaker_already_refunded_is_judged_on_its_own` and
 `test_a_good_read_between_400s_does_not_trip_the_breaker`.
+
+### M — scheduling: input-folder poller, queue, settle time, nightly sweep (D5)
+
+`schedule.poll_enabled` (default off in code, on in `config.example.yaml`) starts a thread
+inside the web service. Every `poll_interval_seconds` (default 60, minimum 15) it lists the
+input folder and subfolders (a listing, no hashing, no API calls) and starts one sync when a
+non-empty PDF is new or changed since the last sync started. One pass reads every waiting
+file, oldest first, then reconciles and merges the touched sets. Nothing is skipped: while a
+sync runs the poller is busy, and its next tick sees whatever arrived meanwhile; if a manual
+Scan or the nightly run holds the sync lock the run is queued and retried every 5 seconds.
+A pass that reports errors is retried up to 3 times, then left for the nightly sweep.
+**Settle time:** a set started by the poller merges only when its newest document arrived at
+least `merge_settle_minutes` (default 5) ago, because the documents of one PO often arrive
+minutes apart; the poller wakes itself when that time passes. Manual Scan, Merge Now and the
+nightly run never wait (reason `settling` is only produced by a poller-started pass). Every
+other gate (PO == DN == SI per line, customs, naming, guards) is unchanged, so a set merges
+if and only if all conditions are satisfied. `schedule.nightly_enabled` (default true) keeps
+the midnight Prefect sweep (re-reconcile open sets, retry customs appends); after changing
+it re-run `scripts/deploy_prefect.py`. Limits: the "seen" memory is per process (a restart
+re-checks the input once, which is cheap because ingest de-duplicates by SHA); a file that
+fails every retry waits for the nightly sweep or a manual Scan; zero-byte files never trigger.
+Pinned by `tests/test_poller.py`.
 
 ### L — subfolders of the input folder are read; zero-byte files are skipped (R-17)
 

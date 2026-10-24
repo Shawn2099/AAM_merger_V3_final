@@ -201,6 +201,27 @@ class PrefectConfig(_StrictConfigModel):
         return v
 
 
+class ScheduleConfig(_StrictConfigModel):
+    """When the pipeline runs on its own (D5).
+
+    The poller is a lightweight thread inside the web service: every
+    `poll_interval_seconds` it looks for input files it has not seen (a folder
+    listing, no API calls) and starts a sync when there are any. A sync that is
+    already running is never interrupted or skipped: one more pass is queued and
+    starts when it ends (one pass takes every waiting file, oldest first).
+    """
+
+    poll_enabled: bool = False
+    poll_interval_seconds: int = Field(default=60, ge=15, le=3600)
+    #: Keep the midnight sweep (re-reconcile all open sets, retry customs appends).
+    #: Read by `scripts/deploy_prefect.py`; re-run it after changing this.
+    nightly_enabled: bool = True
+    #: A set started by the poller merges only when its NEWEST file is at least this
+    #: old, so documents of one PO that arrive minutes apart are not merged early.
+    #: 0 turns it off. Manual Scan, Merge Now and the nightly run never wait.
+    merge_settle_minutes: int = Field(default=5, ge=0, le=240)
+
+
 class ConcurrencyConfig(_StrictConfigModel):
     po_set_lock_timeout_seconds: int = 300
 
@@ -264,6 +285,7 @@ class AppConfig(BaseSettings):
     ingestion: IngestionConfig = IngestionConfig()
     prefect: PrefectConfig = PrefectConfig()
     concurrency: ConcurrencyConfig = ConcurrencyConfig()
+    schedule: ScheduleConfig = ScheduleConfig()
     manual_merge: ManualMergeConfig = ManualMergeConfig()
     reconciliation: ReconciliationConfig = ReconciliationConfig()
     logging: LoggingConfig = LoggingConfig()

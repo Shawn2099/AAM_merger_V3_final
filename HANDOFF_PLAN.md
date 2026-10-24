@@ -58,7 +58,7 @@ Last updated: 2026-10-24. Branch `fix/mvp-high-priority`, remote `origin` (push 
   visual layout; do a 10-minute click-through on the target PC. Known display quirks: qty-0 numberless PO rows read `0 0 0 Match`; sets whose
   stored status predates the line-number fallback (e.g. 48) show a stale status next to a live matrix that now matches (clears on a re-run).
 - **R-17 decided (2026-10-24, second answer):** subfolders ARE read now; zero-byte files stay skipped (a future module may use them).
-- **Still open (T13 build D1, T14 build D5):** T7 retest corpus + fresh-DB run (uses the paid provider; needs the user's go-ahead), T8 operator UI
+- **Still open (T13 build D1; T14 done):** T7 retest corpus + fresh-DB run (uses the paid provider; needs the user's go-ahead), T8 operator UI
   walk-through, T9 cleanup (list below, user decides), T10 final branch review + gitnexus refresh (`node .gitnexus/run.cjs analyze`).
 - **Decisions made by the user (2026-10-24 night):** R-07 -> a packet-write I/O failure leaves the set `pending` and is retried
   (implemented); R-17 -> subfolders are read, zero-byte files skipped (implemented, PRODUCT section 8);
@@ -201,13 +201,15 @@ Next step: hand the brief to DeepSeek, then review its report and triage the "su
 | D2 | POs printed "1 of 6" with only page 1 supplied | If the supplied PDF holds everything the program needs (PO number, line items, quantities), **match and merge it**. The packet uses the **original PDF pages** (the stored upload), never the rasterised PNGs sent to the model (`merge.py` reads `stored_path` with pypdf; images only go to the VLM). | Decided; no code change (confirm in T10) |
 | D3 | R-13 (split-gate reason overwritten, only with `split_combined: true`) | Defer to the future module for combined files / fragments. | Decided |
 | D4 | Extraction validation (hallucination defence, section 7) | **Not in the initial MVP.** Revisit after real-world testing; build in the next phase once proper data exists. | Deferred by decision |
-| D5 | Production run schedule / folder polling | **Poll the input folder on a short interval; each tick processes ALL waiting files, oldest first. Nothing is skipped; an overlapping tick is queued (coalesced into one follow-up pass). The midnight sweep stays as a SWITCHABLE option. Each processed file's set is reconciled and merged immediately (optional settle time).** Details and waiting-time options below. | Decided; NOT built (T14) |
+| D5 | Production run schedule / folder polling | **Poll the input folder on a short interval; each tick processes ALL waiting files, oldest first. Nothing is skipped; an overlapping tick is queued (coalesced into one follow-up pass). The midnight sweep stays as a SWITCHABLE option. Each processed file's set is reconciled and merged immediately (optional settle time).** Details and waiting-time options below. | **BUILT 2026-10-24 (T14): 1-minute poll, queue, settle time, nightly switch; see PRODUCT section 8 and `tests/test_poller.py`. No parallel extraction (user: no big refactor now).** |
 | D6 | pymupdf licence | Later. | Deferred |
 
 ### D1 design notes (T13) - read before building
-- Trigger: a set A that holds only PO document(s) (no DN/SI) whose PO number differs by EXACTLY ONE digit (same letters) from another set B.
-- **False-positive danger:** PO numbers are often sequential (4500051195 / 4500051196 are two real POs). A bare one-digit rule would hold legitimate sets. Proposed extra evidence: A's PO line numbers are a CONTINUATION of B's (no overlap, start after B's last line), as a continuation page would be. Confirm on the real corpus before enabling.
-- Effect: B (and A) show a clear hold reason ("possible misread: PO 4500057195 looks like 4500051195"); B does not merge until the operator acts.
+**Investigation on the real run (57 sets, read-only, 2026-10-24):**
+- A bare "PO numbers differ by exactly one digit" rule finds 3 pairs: sets 2/3 (50116501 / 50119501), 41/43 (90139566 / 90139766) and 8/9 (4500051195 / 4500057195). Only 8/9 is the real misread. The other two are legitimate separate POs, each with its own PO + DN + SI: **2 of 3 would be false positives.**
+- Refined rule: set A holds ONLY PO documents (no DN, no SI) AND A's number is one digit from a set B that already has a DN or SI. On this corpus that flags **exactly set 9 (vs 8) and nothing else: 0 false positives.** The earlier idea "A's line numbers continue B's" is dropped: the phantom page had NO extracted lines at all.
+- Remaining false-positive case: a legitimate PO that arrives before its DN/SI while a sequential neighbour is ready to merge. Use the settle time (the hold is evaluated only after the settle time has passed) and the operator's "not a misread" action. Small sample (57 sets): re-check on the next real corpus.
+- Effect: B does not merge; the page says "possible misread: PO 4500057195 looks like 4500051195" for both sets.
 - Operator actions needed (new): (1) "this page belongs to PO X" = move the document to the right set (today there is NO UI path that moves an attached document; reclassify refuses it), (2) "not a misread" = dismiss the hold (a flag on the set), (3) Force Merge (exists).
 - Pin with tests named `test_known_limitation_*` for any case left unguarded (PRODUCT section 8).
 

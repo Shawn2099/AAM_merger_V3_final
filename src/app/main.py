@@ -223,7 +223,16 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.warning("Manual-merge staging sweep failed at startup", exc_info=True)
 
-    yield
+    # D5: poll the input folder inside this service when switched on in the config.
+    from app.services.poller import start_if_enabled
+
+    poller = start_if_enabled(cfg)
+    app.state.poller = poller
+    try:
+        yield
+    finally:
+        if poller is not None:
+            poller.stop()
 
 
 def _manual_merge_request_bytes() -> int:

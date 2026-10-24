@@ -61,8 +61,11 @@ def deploy() -> None:
     cfg_path = str(ROOT / "config.yaml")
     cfg = load_config(cfg_path)
     pool_name = cfg.prefect.work_pool_name
-    schedule = _schedule(cfg)
-    tz_note = schedule.timezone or "UTC"
+    # `schedule.nightly_enabled: false` registers the deployment WITHOUT a cron, so
+    # re-running this script after switching the sweep off really removes it.
+    nightly = bool(getattr(getattr(cfg, "schedule", None), "nightly_enabled", True))
+    schedule = _schedule(cfg) if nightly else None
+    tz_note = (schedule.timezone or "UTC") if schedule is not None else "none"
 
     deployment = sync_flow.to_deployment(
         name="aam-midnight-sync",
@@ -75,7 +78,8 @@ def deploy() -> None:
     deployment_id = deployment.apply()
     print(
         f"[OK] Prefect deployment 'aam-midnight-sync' registered successfully "
-        f"(ID: {deployment_id}, Pool: {pool_name}, Schedule: 0 0 * * * {tz_note})"
+        f"(ID: {deployment_id}, Pool: {pool_name}, "
+        + (f"Schedule: {CRON} {tz_note})" if nightly else "nightly sweep OFF: no schedule)")
     )
 
 

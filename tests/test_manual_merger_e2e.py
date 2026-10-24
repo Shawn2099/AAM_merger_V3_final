@@ -71,6 +71,7 @@ def live_server(tmp_path_factory):
         "log_folder": str(tmp / "logs"),
     }
     data["manual_merge"]["temp_folder"] = str(tmp / "manual_merge_tmp")
+    data["schedule"]["poll_enabled"] = False
     config = tmp / "config.yaml"
     config.write_text(yaml.safe_dump(data), encoding="utf-8")
 

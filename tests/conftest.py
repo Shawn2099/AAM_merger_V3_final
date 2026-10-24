@@ -154,6 +154,8 @@ def _ensure_a_config_file() -> None:
         return
     data = yaml.safe_load((_REPO_ROOT / "config.example.yaml").read_text(encoding="utf-8"))
     data["paths"] = _session_paths()
+    # Tests start the app many times; none may start the background poller.
+    data.setdefault("schedule", {})["poll_enabled"] = False
     target = _SESSION_DIR / "config.yaml"
     target.write_text(yaml.safe_dump(data), encoding="utf-8")
     os.environ["AAM_CONFIG_PATH"] = str(target)

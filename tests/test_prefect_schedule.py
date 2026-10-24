@@ -118,3 +118,29 @@ def test_deployment_sets_working_dir_and_config_path(monkeypatch):
     assert jv["working_dir"] == str(ROOT)
     assert jv["env"]["AAM_CONFIG_PATH"] == str(ROOT / "config.yaml")
     assert captured["parameters"]["cfg_path"] == str(ROOT / "config.yaml")
+
+
+def test_nightly_switch_off_registers_the_deployment_without_a_schedule(monkeypatch):
+    """schedule.nightly_enabled: false removes the cron when deploy_prefect.py is re-run."""
+    from app.flows.sync import sync_flow
+
+    module = _load_deploy_module()
+    captured: dict = {}
+
+    class _Deployment:
+        def apply(self):
+            return "dep-id"
+
+    def fake_to_deployment(self, **kwargs):
+        captured.update(kwargs)
+        return _Deployment()
+
+    cfg = SimpleNamespace(
+        prefect=SimpleNamespace(schedule_timezone="Asia/Kolkata", work_pool_name="pool"),
+        schedule=SimpleNamespace(nightly_enabled=False),
+    )
+    monkeypatch.setenv("PREFECT_API_URL", "http://127.0.0.1:4200/api")
+    monkeypatch.setattr(module, "load_config", lambda *a, **k: cfg)
+    monkeypatch.setattr(type(sync_flow), "to_deployment", fake_to_deployment)
+    module.deploy()
+    assert captured["schedule"] is None
