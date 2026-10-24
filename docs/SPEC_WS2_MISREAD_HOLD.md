@@ -1,6 +1,6 @@
 # SPEC WS2 (T13): possible PO misread hold and the operator's actions
 
-Status: **rev 2 (after Opus review 2026-10-25, which rejected rev 1). Not built. Blocked on owner question Q8 for the Move action only.**
+Status: **rev 2 (after Opus review 2026-10-25, which rejected rev 1). Not built. Q8 answered by the owner (D16): no guard exemption.**
 Author: Claude (architect). Builders: **Claude writes the reconciliation hunk** (CLAUDE.md: core logic inline); the worker (DeepSeek)
 writes the routes, template, seed scenario and tests. Reviewer: Opus before commit. Decision source: D1 (owner, 2026-10-24):
 do not merge a suspected misread; hold it and let the operator choose. Evidence: HANDOFF section 6c "D1 design notes" (real run:
@@ -46,7 +46,7 @@ any is busy; release all in `finally`; refuse with a message when the page's set
 
 1. **Not a misread** `POST /po_sets/{id}/clear_misread`. The flag lives on A. On A's page it clears A. On B's page it clears every
    uncleared suspect A that is holding B. Then it reconciles every set it changed plus the page's set, each under its own lock.
-2. **Move to another PO** `POST /po_sets/{id}/documents/{doc_id}/move`, form field `po_no`. **BLOCKED on Q8** (see below).
+2. **Move to another PO** `POST /po_sets/{id}/documents/{doc_id}/move`, form field `po_no`. After the move the target holds two PO documents (`multiple_po_documents`); the page for the target must say so and point to Force Merge, which the operator uses (audited). Q8 is answered: nothing is exempted.
    Normalise X; refuse an empty or same key, a letters conflict (`PoLettersConflict`), a document not in this set, and a quarantined
    target. The target must be an OPEN set found with `get_or_create_po_set(create=False)` (`_find_open_set` excludes merged and
    archived sets): the message is "no open PO Set for {X}", never "does not exist". A move never mints a set. Sets the document's
@@ -56,13 +56,13 @@ any is busy; release all in `finally`; refuse with a message when the page's set
    Nothing is ever deleted. Reconcile both sets.
 3. **Force Merge**: unchanged.
 
-## Open question Q8 (owner) - the Move action cannot pass on the default config
+## Q8 (ANSWERED by the owner 2026-10-25, D16): option (a), accept; no exemption is built
 The phantom page is a PO document with zero line items (HANDOFF 6c). Moving it into B gives B two PO documents, and
 `single_po_document` defaults to true (`config.py:271`), so B holds as `multiple_po_documents` and never merges.
 Options: (a) accept it; the operator Force Merges after a Move (honest but clumsy); (b) **recommended:** a PO document that was
 placed by hand (`po_no_source == "manual"`) AND has zero line items is a continuation page and is not counted by the
 single-PO-document guard. (b) is a small change in the reconcile hunk (Claude writes it) and needs its own test and a PRODUCT
-section 8 line. Until the owner answers, the worker builds actions 1 and 3 only.
+section 8 line. The owner chose (a): do NOT build option (b). The Move test therefore asserts that the target set holds as `multiple_po_documents` after a move and merges only after a Force Merge (with the audit row). The worker builds all three actions.
 
 ## Schema and migration
 `po_sets.po_misread_cleared BOOLEAN NOT NULL DEFAULT 0` (server_default `0`) in `models.py`.

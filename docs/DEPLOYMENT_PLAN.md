@@ -50,6 +50,7 @@ Rules for every packet:
 | D10 | Per-PO lock timeout default 900 s; an older shorter value is raised with a warning, 0/tiny refused | 2026-10-24 | built | config.py |
 | D11 | Config must become fully editable from the UI; auto-run timings and folder polling to be finalised; then production deployment decisions and full testing | 2026-10-24 | **open, needs the answers in section 3 (WS3)** | HANDOFF 6b |
 | D12 | **Operating model: Opus as architect/reviewer, DeepSeek via OpenCode as worker for token-heavy work; keep this decision log; plan before deployment so other sessions/tools can implement and test** | 2026-10-25 | this file | section 0 |
+| D16 | Q7: a supervised pilot may run WITHOUT the misread hold for the first week only (operator checks every merged packet); after that WS2 must be live (no unattended running without it). Q8: after a manual Move the target set is NOT exempted from the single-PO guard; it holds as `multiple_po_documents` and the operator Force Merges (audited). No guard exemption is built | 2026-10-25 | final (owner) | WS2 spec |
 | D15 | Opus review of the plans (2026-10-25): WS2 spec rejected and rewritten (rev 2); PF-11 now persists run results in `last_sync.json` because the nightly run is another process; packets that share files run serially; PF brief got binding corrections | 2026-10-25 | applied | specs, brief |
 | D14 | Pre-deploy UI fixes PF-01..PF-10 approved (WS1b); archive justification optional; Re-Extract state machine unchanged; add PF-11 system-status pill | 2026-10-25 | approved, in progress | WS1b |
 | D13 | Not fixed on purpose, documented: Origin guard compares host names only; upload has no size middleware; unused config keys; per-minute re-hash of stuck input files; split-parent cleanup by name; no installer DependOnService for Prefect | 2026-10-24 | open (WS5) | PRODUCT 8 "operating limits" |
@@ -64,8 +65,8 @@ Rules for every packet:
 | Q4 | Is the settings page required for the FIRST go-live, or can the pilot run with `config.yaml` edited by IT? | Pilot first with `config.yaml`; settings page after the pilot | order of WS3 |
 | Q5 | pymupdf AGPL: accept (internal use only, never distributed), replace the rasteriser, or buy a licence? | Accept for internal use, record the decision, revisit if the software is ever shipped to others | WS8 |
 | Q6 | Who is the on-site contact for the Windows Server click-through and the first midnight run? | needed | WS9 |
-| Q7 | May a SUPERVISED pilot run before WS2 exists? Until then a one-digit PO misread can still produce a wrong merge (precision rule P2). | Yes, only with the operator checking every merged packet's page count for the first week; no unattended run | G2 |
-| Q8 | After "Move to another PO" the target has two PO documents and the single-PO guard holds it. Accept (operator Force Merges) or exempt a hand-placed PO page with zero line items? | Exempt (spec WS2 option b) | WS2 Move action |
+| Q7 (ANSWERED 2026-10-25: yes for the first week only; afterwards WS2 is required) | May a SUPERVISED pilot run before WS2 exists? Until then a one-digit PO misread can still produce a wrong merge (precision rule P2). | Yes, only with the operator checking every merged packet's page count for the first week; no unattended run | G2 |
+| Q8 (ANSWERED 2026-10-25: accept option a: a hand-placed page does not exempt the guard; the operator Force Merges) | After "Move to another PO" the target has two PO documents and the single-PO guard holds it. Accept (operator Force Merges) or exempt a hand-placed PO page with zero line items? | Exempt (spec WS2 option b) | WS2 Move action |
 
 ## 4. Work packets
 
@@ -143,7 +144,7 @@ All with the canned VLM, no network:
 |---|---|---|
 | **G1 Committed** | WS0 | Anyone can pull the branch and run the suite |
 | **G2 Pilot-ready (supervised)** | G1, WS1b done (the UI harness no longer spends real API money), WS1 triaged, WS4, Q7 answered | Install on the target PC, operator watches, `config.yaml` edited by IT |
-| **G3 Production-ready (unattended)** | G2, WS2, WS5, WS6, WS7, Q5, and WS3 if Q4 says it is required | Leave it running; the nightly sweep and poller run without a watcher |
+| **G3 Production-ready (unattended; owner: WS2 mandatory after the first pilot week)** | G2, WS2, WS5, WS6, WS7, Q5, and WS3 if Q4 says it is required | Leave it running; the nightly sweep and poller run without a watcher |
 | **G4 Accepted** | WS9 | Handover signed |
 
 ## 6. Delegation packet template (copy for each OpenCode session)
