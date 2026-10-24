@@ -45,9 +45,21 @@ Last updated: 2026-10-24. Branch `fix/mvp-high-priority`, remote `origin` (push 
   Repair commit 6bb1384: 3586491 had been pushed with SYNTAX ERRORS in config.py, quarantine.py and a misplaced
   `line_number_fallback` block in config.example.yaml (partial-hunk staging). Fixed. **Lesson: after staging hunks, always
   `git checkout-index -a --prefix=<tmp>/` and run the tests against that tree before committing.**
-- **Still open:** T6 (R-09, R-08, R-07, R-15, R-17, R-18), T7 retest corpus + fresh-DB run, T8 operator UI walk-through,
-  T9 cleanup list (ask the user), T10 final Opus branch review + `make business-logic` + gitnexus refresh. Full suite at 938188f:
-  6288 passed, 6 skipped, 49 xfailed.
+- **T6 done except two decisions:** R-08, R-09, R-15, R-18 fixed (bf7a294). Opus review of 6bb1384/12d4950/938188f found the R-06
+  breaker quarantining before the trip, document-specific 400s able to halt every night, shared breaker state, rejected rows
+  reclassifiable/previewable/uploadable, and unsafe quarantine filenames: all fixed in bf7a294 (see PRODUCT section 8 R-06 entry).
+  `make business-logic` files: 183 passed. Full suite at bf7a294: 6309 passed, 6 skipped, 46 xfailed.
+- **Still open:** T7 retest corpus + fresh-DB run (uses the paid provider; needs the user's go-ahead), T8 operator UI
+  walk-through, T9 cleanup (list below, user decides), T10 final branch review + gitnexus refresh (`node .gitnexus/run.cjs analyze`).
+- **Decisions waiting on the user:** R-07 (disk-full/offline share at packet-write time: leave the set `pending` and retry,
+  instead of sticky `quarantined`? my recommendation: yes for a plain OSError), R-17 (zero-byte `.pdf` and files in input
+  SUBFOLDERS are skipped invisibly: log+count them, or scan subfolders?), R-13 (only with `split_combined: true`),
+  I-1 second read, "1 of 6" PO pages, pymupdf AGPL, extraction validation (section 7).
+- **Live DB `data/aam_merger.db` is stale** (revision a9b0c1d2e3f4: still has `line_items.unit_price`, no `po_sets.line_mapping_rule`).
+  Run `uv run python scripts/migrate_db.py` (verified on a copy: reaches e8f9a0b1c2d3), then `scripts/requeue_line_mapping.py`
+  dry run (would change sets 39,40,41,42,43,47,48,49,50,51; 39,40,42,48,50 merge) before any new real run, or start a fresh DB.
+  Its 24 pending sets are explained: page-fragment sets ("...-pages-3.pdf", the out-of-scope fragments module), genuine partial
+  deliveries, and sets still waiting for a DN.
 - Windows note: Application Control (WDAC) blocked the venv python for a while on this PC; it works again. If `uv run`
   fails with os error 4551, see the Code Integrity event log (not an antivirus issue).
 
@@ -139,6 +151,26 @@ non-server mode or stop the server at session end (e.g. `PREFECT_SERVER_ALLOW_EP
 - 2026-10-24 T1 done: commits 395a7a0, 254bba3, 339f821 pushed to origin/fix/mvp-high-priority. T12 (manual merger) added.
 
 - 2026-10-24 evening: repaired broken push (6bb1384); T2 12d4950; manual merger ea2f511; T3/T4/T11 3f954b1; T5 938188f.
+
+- 2026-10-24 night: Opus review findings + R-08/R-09/R-15/R-18 fixed, bf7a294.
+
+## 6a. Handover-readiness checklist (what is and is not done for an MVP handover)
+
+Done and verified in the suite: reconciliation rule (PO == DN == SI per line, integers x1000), digit-keyed PO grouping with letters
+guard, duplicate-document guard, line-number fallback (x10, div10, -1 suffix), image-based extraction config, quarantine report +
+audit rows + original filenames, ingest rejects visible, 400 breaker, manual merger tool, DELIVERY checklist + licence note.
+NOT done (needs the user or the target machine): fix the stale live DB (above); pymupdf licence choice; real-corpus retest on a
+fresh DB (T7); operator UI walk-through (T8); one midnight Prefect run on the target Windows Server (DELIVERY section 8 item 9);
+R-07/R-17 decisions; scratch cleanup (T9); production-phase items in 6b.
+
+### T9 cleanup proposal (NOTHING deleted; the user decides)
+- Safe to delete (throwaway): `scratch_*.py` (36 files) and `scratch_dump/` (184 MB), `append_report.py`, `batch_inspector.py`,
+  `prepare_audit_batches.py`, `inspect_data.py`, `ordered_audit_docs.json`, `batch_02..30_findings.md` (merge their content into
+  `AUDIT_FINDINGS_REPORT.md` first if still wanted).
+- Keep and commit (they are referenced by this plan): `LINE_NUMBER_FALLBACK_PLAN.md`, `REAL_RUN_*_2026-10-24.md`,
+  `robustness_audit_2026-10-24.md`, `MANUAL_MERGER_AUDIT_2026-10-23.md`, `PDF_DB_COMPARISON_2026-10-23.md`.
+- Large data, keep outside git: `data/input_corpus_backup/` (67 MB, the real corpus: do not lose), `data/prev_run_20261024/` (117 MB old DB +
+  outputs), `pattern_lab/` (11 MB), `prompt_improvement/` (5 MB, evals behind the P5 prompt). Suggest adding all four plus `scratch_*` to `.gitignore`.
 
 ## 6b. NEXT PHASE (user request 2026-10-24, to be DISCUSSED later; nothing here is approved or started)
 
