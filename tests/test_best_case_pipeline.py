@@ -94,18 +94,26 @@ def _write_pdf(path: Path, width: float, pages: int = 1) -> Path:
     return path
 
 
+def _source_width(parts):
+    """The generated PDF's width, from either the new PNG part or an old file part."""
+    for part in parts:
+        if part.get("type") == "image_url":
+            raw = base64.b64decode(part["image_url"]["url"].split(",", 1)[1])
+            assert raw.startswith(b"\x89PNG\r\n\x1a\n"), "the image part must be a PNG"
+            pixels = int.from_bytes(raw[16:20], "big")
+            return float(round(pixels * 72 / 150))
+        if part.get("type") == "file":
+            raw = base64.b64decode(part["file"]["file_data"].split(",", 1)[1])
+            return float(PdfReader(io.BytesIO(raw)).pages[0].mediabox.width)
+    raise AssertionError("the request must carry a page image")
+
+
 @pytest.fixture()
 def fake_vlm(monkeypatch):
     """Replace only `instructor.from_openai`; the real `_call_vlm` still runs."""
 
     def create(self, **kwargs):
-        payload = None
-        for part in kwargs["messages"][1]["content"]:
-            if part.get("type") == "file":
-                payload = part["file"]["file_data"].split(",", 1)[1]
-        assert payload, "the request must carry the PDF"
-        reader = PdfReader(io.BytesIO(base64.b64decode(payload)))
-        width = float(reader.pages[0].mediabox.width)
+        width = _source_width(kwargs["messages"][1]["content"])
         assert width in RESPONSES, f"unexpected PDF width {width}"
         return RESPONSES[width]
 

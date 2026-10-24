@@ -63,6 +63,11 @@ class VLMConfig(_StrictConfigModel):
     # (audit P2-20).
     request_timeout_seconds: int = Field(default=60, ge=1)
     api_key_env_var: str = "OPENROUTER_API_KEY"
+    # Page rendering and reasoning for the validated "150 DPI images + effort high"
+    # recipe (prompt_improvement/eval). `extraction._vlm_settings` re-checks them.
+    raster_dpi: int = Field(default=150, ge=72, le=300)
+    reasoning_effort: Literal["minimal", "low", "medium", "high"] = "high"
+    max_pages: int = Field(default=30, ge=1)
 
 
 class ExtractionConfig(_StrictConfigModel):

@@ -111,22 +111,28 @@ def env(tmp_path, monkeypatch):
     return cfg
 
 
+def _source_width(parts):
+    """The source PDF width, from the new PNG part or an old file part."""
+    for part in parts:
+        if part.get("type") == "image_url":
+            raw = base64.b64decode(part["image_url"]["url"].split(",", 1)[1])
+            assert raw.startswith(b"\x89PNG\r\n\x1a\n"), "the image part must be a PNG"
+            pixels = int.from_bytes(raw[16:20], "big")
+            return float(round(pixels * 72 / 150))
+        if part.get("type") == "file":
+            raw = base64.b64decode(part["file"]["file_data"].split(",", 1)[1])
+            return float(PdfReader(io.BytesIO(raw)).pages[0].mediabox.width)
+    raise AssertionError("the request must carry a page image")
+
+
 @pytest.fixture()
 def vlm(monkeypatch):
     """Fake only the network. The real `_call_vlm` still runs."""
     state = {"responses": default_responses(), "calls": []}
 
     def create(self, **kwargs):
-        payload = None
-        for part in kwargs["messages"][1]["content"]:
-            if part.get("type") == "file":
-                payload = part["file"]["file_data"].split(",", 1)[1]
-        raw = base64.b64decode(payload)
-        state["calls"].append(raw)
-        try:
-            width = float(PdfReader(io.BytesIO(raw)).pages[0].mediabox.width)
-        except Exception:
-            width = "UNREADABLE"
+        width = _source_width(kwargs["messages"][1]["content"])
+        state["calls"].append(width)
         if width not in state["responses"]:
             raise ValueError(f"unreadable document (width={width})")
         return state["responses"][width]

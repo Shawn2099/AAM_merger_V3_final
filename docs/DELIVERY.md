@@ -65,7 +65,9 @@ Get-ChildItem -Recurse *.ps1 | Unblock-File
 
 What it does, in order:
 
-1. syncs the Python environment (`uv sync --no-dev`, or `pip install -e .`);
+1. syncs the Python environment (`uv sync --no-dev`, or `pip install -e .`); this installs PyMuPDF
+   (`pymupdf==1.28.2`, a binary wheel used to rasterise PDF pages for the VLM; it needs the
+   Microsoft Visual C++ 2015-2022 x64 redistributable, which a fresh Windows Server 2016 may lack);
 2. creates `config.yaml` if missing and the data folders;
 3. applies the database schema (`python scripts/migrate_db.py` — handles both a
    fresh database and the existing `create_all`-era database, which has no

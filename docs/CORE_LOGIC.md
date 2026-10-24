@@ -118,6 +118,29 @@ belonging to another set is never overwritten — that set quarantines as
   `quarantine/_documents`. The splitter (`services/splitting.py`) is kept and
   can be re-enabled by setting the flag. Pinned by `tests/test_combined_quarantine.py`.
 
+## 6b. How a document is read (FR-6.1, amended 2026-10-23)
+
+The reading step is one VLM request per document. Every page is rasterised
+(PyMuPDF, 150 DPI, PNG) and sent as an image, in real PDF page order, in a
+single request with reasoning effort `high`. This replaces the earlier
+"native PDF, no rasterisation" transport. The prompt returns identifiers
+(PO number, document number, line number) **exactly as printed** and `null`
+when unreadable; `normalize_po_no` and the sanitizer make the keys. Two or more
+different PO numbers on one document come back as `po_reference_ambiguous=true`
+with `po_reference=null`; the document is held unattached for a person.
+
+- Limits: at most `vlm.max_pages` pages (default 30; the longest real file is
+  13 pages, about 39k tokens), a per-page pixel ceiling and a total image-size
+  ceiling. An oversized, corrupt, truncated, empty or password-protected PDF is
+  refused **before** any request is built and takes the ordinary failed
+  extraction path (counted attempt, then `document_extraction_failed`). A
+  request that exceeds the model context errors; it is never truncated
+  (`transforms: []`).
+- Settings under `vlm:` in `config.yaml`: `raster_dpi` (72..300, default 150),
+  `reasoning_effort` (`minimal|low|medium|high`, default `high`), `max_pages`
+  (default 30). A bad value is a configuration fault: the document stays
+  pending. Pinned by `tests/test_extraction_raster.py`.
+
 ## 7. What this contract does **not** claim
 
 - It does not catch "same line number, same quantity, different item". That is

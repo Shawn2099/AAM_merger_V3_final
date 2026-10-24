@@ -848,6 +848,15 @@ with letter `R`. It waits unattached rather than joining `161538`, but it would
 join a genuine open PO `1615382`, where only quantities keep it from merging.
 Pinned by `test_known_limitation_a_bare_r_revision_stays_in_the_key`.
 
+### L — a document over `vlm.max_pages` pages is not read
+
+Pages are sent to the model as 150 DPI images, at most `vlm.max_pages`
+(default 30) per document. A longer file, a page larger than about A0, or more
+than 40 MB of page images fails extraction before any request is sent and is
+shown as a failed document, like any unreadable file. A combined packet over the limit is
+therefore never split. Pinned by
+`test_page_cap_refuses_before_a_request_is_built`.
+
 ---
 
 ## 9. Non-goals

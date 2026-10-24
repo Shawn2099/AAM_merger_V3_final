@@ -1,4 +1,4 @@
-"""VLM extraction — one native-PDF call per document via instructor+OpenRouter.
+"""VLM extraction — one call per document (all pages as images) via instructor+OpenRouter.
 
 Secrets: OPENROUTER_API_KEY only via env/.env (fail-closed, never logged).
 Model: read from cfg.vlm.model, never hardcoded here.
@@ -20,6 +20,7 @@ from typing import Literal
 
 import instructor
 from openai import OpenAI
+from openai.types.chat import ChatCompletionContentPartParam
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -29,71 +30,16 @@ from app.models.base import Base
 
 logger = logging.getLogger(__name__)
 
-# --- Ultimate Luna prompt — strict JSON Schema via instructor response_model, OpenAI vision guide ---
-# System role enforces parser identity; user role carries PDF + schema. No pypdf, no filename heuristic.
-# Multi-page: first page header for PO/DN/SI numbers, each page table row for line_items.
-_SYSTEM_PROMPT = (
-    "You are Luna document parser for AAM_merger V3. Return strict JSON matching schema: "
-    "document_type enum[PO,SI,DN,COMBINED,SKIP,UNKNOWN], "
-    "has_po_section:bool, has_dn_section:bool, has_si_section:bool, "
-    "page_count:int, components[] {document_type enum[PO,DN,SI,SKIP], page_start:int, page_end:int}, "
-    "document_number (own SI No/DN No/PO No or null for COMBINED), "
-    "po_reference (the PO No visible for SI/DN/COMBINED, null for PO), "
-    "po_reference_ambiguous:bool, "
-    "vendor_name, line_items[] {line_item_no, description, quantity: NUMBER-ONLY as printed "
-    "(no unit/UOM/currency), dn_no, unit_price}. "
-    "COMBINED = multi-document PDF containing runs of PO/DN/SI. When COMBINED: return page_count and "
-    "components (1-based page ranges for splitting); do NOT extract line_items (leave line_items empty []). "
-    "Omit nulls, no markdown."
-)
+# --- Luna extraction prompt (validated recipe "P5", prompt_improvement/eval/candidates/P5.py) ---
+# System role enforces parser identity; user role carries the page images + schema. No pypdf, no
+# filename heuristic. Identifiers (document_number, po_reference, line_item_no) are returned VERBATIM
+# as printed; downstream `normalize_po_no` / the sanitizer own all normalisation. An unreadable or
+# conflicting identifier comes back null (po_reference_ambiguous=true for >1 distinct PO).
+# Multi-page: every page is sent as an image in real PDF page order, so the component page ranges
+# the model returns for a COMBINED file are real 1-based page indices.
+_SYSTEM_PROMPT = "You are Luna document parser for AAM_merger V3. Return strict JSON matching schema: document_type enum[PO,SI,DN,COMBINED,SKIP,UNKNOWN], has_po_section:bool, has_dn_section:bool, has_si_section:bool, page_count:int, components[] {document_type enum[PO,DN,SI,SKIP], page_start:int, page_end:int}, document_number (own SI No/DN No/PO No or null for COMBINED), po_reference (the PO No printed on an SI/DN/COMBINED, copied exactly as printed, null for PO), po_reference_ambiguous:bool, vendor_name, line_items[] {line_item_no, description, quantity: NUMBER-ONLY as printed (no unit/UOM/currency), dn_no, unit_price}. COMBINED = multi-document PDF containing runs of PO/DN/SI. When COMBINED: return page_count and components (1-based page ranges for splitting); do NOT extract line_items (leave line_items empty []). You are a transcriber: every identifier must be exactly what is printed. If a value is missing or any character is unreadable, return null; a null is always acceptable, a guessed value never is. Omit nulls, no markdown."
 
-_PAGE_PROMPT = (
-    "STEP 1 — HEADER SCAN (first page top 20% for po_reference/document_number; each page table for rows):\n"
-    "  For SI and DN (never for a PO): locate strings 'PO No'/'P.O. No'/'Purchase Order No'/'Buyers Order No'/'Order No'/'PO Reference' → po_reference "
-    "(strip non-alnum, upper; e.g. PO-210851 → 210851). Never use filename.\n"
-    "  If MORE THAN ONE distinct PO number is visible on a document, set po_reference to the first and set "
-    "po_reference_ambiguous true — the document will be quarantined rather than guessed at.\n"
-    "  Locate 'DN No'/'Delivery Note No'/'GDN No'/'SI No'/'Invoice No'/'PO No' → document_number (its own number; for COMBINED use primary SI No or PO No).\n"
-    "  For a PO document po_reference is null and document_number is its own PO number; a quotation, RFQ, requisition or indent number printed on a PO is never the PO number.\n"
-    "  vendor_name = supplier company header.\n\n"
-    "STEP 2 — CLASSIFY document_type exactly one of PO, SI, DN, COMBINED, SKIP, UNKNOWN:\n"
-    "  PO=Purchase Order, SI=Sales/Tax Invoice, DN=Delivery Note/Packing List, "
-    "COMBINED=single PDF that visibly contains PO table + DN table + SI table together (often CA 'Combined' stamp, 3 sections, multi-page), "
-    "SKIP=covers/T&C/blank pages, UNKNOWN=unreadable. DN bundles '(2 DNs)'/'(3 DNs)' are DN not COMBINED.\n"
-    "  For COMBINED: set has_po_section=true, has_dn_section=true, has_si_section=true if and only if each respective section is visibly present.\n\n"
-    "STEP 3 — LINE ITEMS (every row that has a product description, scan ALL pages sequentially; "
-    "if a row's quantity is unreadable return quantity null — never drop the row):\n"
-    "  line_item_no — MOST IMPORTANT. The vendor's own side column (Sl No / Item No / #) is often just a running "
-    "docket counter and repeats '1' on every page or every docket. It is NOT the PO line. Resolution order:\n"
-    "    (a) if the description or a nearby note contains a marker like 'Line Item - 3' or 'Line No. 3', use THAT number;\n"
-    "    (b) otherwise use the printed side column number.\n"
-    "  Copy the number exactly as printed, including any hyphen: '1-1', '2-1', '10' stay verbatim. Do not renumber, pad or strip leading zeros.\n"
-    "  description: COMPLETE, do not truncate. Keep the 'Line Item - N' text inside it if it was printed there.\n"
-    "  dn_no: only if a delivery-note number is printed against THIS individual row; otherwise null. "
-    "Most vendors print the DN number once in the header, not per line.\n"
-    "  For COMBINED: DO NOT EXTRACT LINE ITEMS. Leave line_items empty []. The file is split by page range, and each child document will have its line items extracted individually.\n"
-    "  QUANTITY COLUMN, PO: quantity is the ORDERED quantity; never a received / delivered-to-date column.\n"
-    "  QUANTITY COLUMN, DN and SI only: if a table prints several quantity columns, quantity is the quantity DELIVERED / SHIPPED / DISPATCHED / INVOICED on THIS document (headers such as Delivered Qty, Qty Shipped, Dispatch Qty, Invoiced Qty, Qty). NEVER use Ordered, Balance, Pending, Outstanding, Previous, Cumulative or To-date columns. If you cannot tell which column is the delivered/invoiced one, return quantity null for those rows rather than guessing.\n"
-    "  EXCLUDE subtotal, VAT, tax, total, amount-in-words, payment terms, signatures, charge rows that have no item number (freight, transport, shipping charges, discount, rounding), and 'carried forward' / 'brought forward' / page-total rows. A goods line whose description merely contains a word like PACKING or HANDLING is an item: keep it.\n\n"
-    "STEP 4 — QUANTITY (the NUMBER ONLY; do NOT calculate, do NOT scale):\n"
-    '  quantity = the digits as printed, and nothing else. "1", "50", "12.5", "12.45000000".\n'
-    "  Strip anything that is not part of the number: unit / UOM (EA, PCS, BOX, KG, M, M3, "
-    "MT, BAGS), currency symbols, and words like EACH or SET. If the cell reads "
-    "'12.5 EA' return \"12.5\"; if it reads '1,200.00 M3' return \"1200.00\".\n"
-    "  UOM itself is NOT extracted anywhere in this system. Never return it.\n\n"
-    "STEP 5 — MULTI-PAGE / MULTI-DN: if PDF contains 2-3 DNs, emit first po_reference, include ALL line_items across pages in order.\n"
-    "STEP 6 — MULTI-DOC SPLIT (COMBINED branch only): enumerate each contiguous same-type run as a component "
-    "with its REAL PDF page indices (1-based position in this file as pypdf sees it, never numbers printed on the page). "
-    "A page that continues the current PO/DN/SI extends the run; a page that changes type ends the run and starts a new component. "
-    "A page that is none of PO/DN/SI (cover, T&C, blank) is a SKIP component so every page 1..N is claimed exactly once. "
-    "Also return page_count = the total number of pages in this file.\n\n"
-    "FEW-SHOTS (raw strings, copy verbatim):\n"
-    'SI: {"document_type":"SI","document_number":"SIV-ARS-26-4005","po_reference":"210851","vendor_name":"IBRAHIM ALI ALSHAB TRADING EST.","line_items":[{"line_item_no":"12","description":"NUT, HEX 9/16 IN-12 UNC GRADE B YELLOW ZINC PLATED","quantity":"50","unit_price":"350.00"}]}\n'
-    'PO: {"document_type":"PO","document_number":"210851","po_reference":null,"line_items":[{"line_item_no":"1","description":"WASHER, FLAT SAE 1/4 IN YELLOW ZINC PLATED CS","quantity":"1","unit_price":"1620.00"}]}\n'
-    'DN bundle: {"document_type":"DN","document_number":"GDN-ARS-26-4619","po_reference":"210851","line_items":[{"line_item_no":"1","description":"WASHER, LOCK, 3/8\\" - MFG: FLY","quantity":"50","unit_price":"1000.00"}]}\n'
-    'Re-indexed DN (side column lies, use the embedded marker): {"document_type":"DN","document_number":"GDN-RHO-25-513","po_reference":"8300023893","line_items":[{"line_item_no":"10","description":"GATE VALVE 2IN CL150 - Line Item - 10","quantity":"2","dn_no":"GDN-RHO-25-513"}]}\n'
-    'COMBINED: {"document_type":"COMBINED","document_number":null,"po_reference":"3049PO123","page_count":3,"components":[{"document_type":"PO","page_start":1,"page_end":1},{"document_type":"DN","page_start":2,"page_end":2},{"document_type":"SI","page_start":3,"page_end":3}],"line_items":[]}\n'
-)
+_PAGE_PROMPT = 'STEP 1 — HEADER SCAN. Scan the WHOLE first page, not only the top: header blocks can be narrow, boxed, in a side column, rotated, in a corner, or printed lower down. Check the other pages for a second PO number too.\n  COPY EXACTLY: document_number, po_reference and line_item_no are copied character for character as printed, keeping commas, slashes, hyphens, spaces, prefixes and revision digits (for example \'22613 , 0\' stays \'22613 , 0\'; \'AB12/3456\' stays \'AB12/3456\'; \'PO-210851\' stays \'PO-210851\'). Do not strip, reformat, merge, upper-case or \'fix\' anything; downstream code normalises. A number wrapped over two lines is joined only when it is clearly one number.\n  NEVER GUESS: if any character of an identifier is unreadable (blur, scan noise, overwritten, crossed out) or the number is not printed, return null for that field. Never take a number from the filename, from another document, or from what you expect it to be. Rig, vessel, well, project, site, truck or yard names and numbers are never a document_number or po_reference, even when handwritten next to the field.\n  For SI and DN (never for a PO): locate \'PO No\'/\'P.O. No\'/\'Purchase Order No\'/\'Buyers Order No\'/\'Order No\'/\'PO Reference\' → po_reference.\n  AMBIGUOUS PO: if two or more DIFFERENT order/PO numbers are printed anywhere on the document (header field, boxed field, handwritten note, stamp, any page), set po_reference_ambiguous=true and po_reference=null; the document will be quarantined for a person rather than guessed at. The same number printed twice, or with a revision suffix, is not ambiguous; a delivery-note number, rig number, quotation or requisition number is not a PO number. Apply this to SI, DN and COMBINED; on a PO leave it false.\n  Locate \'DN No\'/\'Delivery Note No\'/\'GDN No\'/\'SI No\'/\'Invoice No\'/\'PO No\' → document_number (its own number; for COMBINED use primary SI No or PO No).\n  For a PO document po_reference is null and document_number is its own PO number; a quotation, RFQ, requisition or indent number printed on a PO is never the PO number.\n  vendor_name = supplier company header.\n\nLABEL ALIASES (hints for where to look, not rules; the same field can be printed under different words, and labels and values may sit in separate columns of a table or in a narrow side block):\n  po_reference on an SI/DN may be labelled: \'PO No\', \'P.O. No.\', \'P.O.\', \'PO :\', \'Buyers Order No\', "Buyer\'s Order No"; a handwritten \'Po:\' near the logo can also be a PO number.\n  A PO\'s own number may be labelled: \'PO\', \'PO , Rev #\', \'PO NUMBER\', \'DPO Number\', \'Purchase order number\' (a separate \'PO Version No\' is the same number plus \'-0\').\n  document_number may be labelled: \'Invoice No\', \'Del. Note No\', \'Delivery Note No\', \'Doc No\' (may wrap onto two lines).\n  \'Delivery Note :\' printed on an invoice is the related DN, not the invoice\'s own number.\n  \'Rig / Location\', \'Rig No\', \'Rig Name\', \'Requisition Number\', \'GR#\' are not PO numbers.\n\nSTEP 2 — CLASSIFY document_type exactly one of PO, SI, DN, COMBINED, SKIP, UNKNOWN:\n  PO=Purchase Order, SI=Sales/Tax Invoice, DN=Delivery Note/Packing List, COMBINED=single PDF that visibly contains PO table + DN table + SI table together (often CA \'Combined\' stamp, 3 sections, multi-page), SKIP=covers/T&C/blank pages, UNKNOWN=unreadable. DN bundles \'(2 DNs)\'/\'(3 DNs)\' are DN not COMBINED.\n  For COMBINED: set has_po_section=true, has_dn_section=true, has_si_section=true if and only if each respective section is visibly present.\n\nSTEP 3 — LINE ITEMS (every row that has a product description, scan ALL pages sequentially; if a row\'s quantity is unreadable return quantity null — never drop the row):\n  line_item_no — MOST IMPORTANT. The vendor\'s own side column (Sl No / Item No / #) is often just a running docket counter and repeats \'1\' on every page or every docket. It is NOT the PO line. Resolution order:\n    (a) if the description or a nearby note contains a marker like \'Line Item - 3\' or \'Line No. 3\', use THAT number;\n    (b) otherwise use the printed side column number.\n  Copy the number exactly as printed, including any hyphen or dot: \'1-1\', \'2-1\', \'10\' stay verbatim. Do not renumber, pad or strip leading zeros. If it is not printed or not legible: null.\n  A schedule/release marker inside the description or beside the number, such as \'Line\\Rel No: 2\x01\', is text about the delivery schedule, not part of the line number: line_item_no is the item/line number (\'2\'), and the marker stays in the description.\n  description: COMPLETE, do not truncate. Keep the \'Line Item - N\' text inside it if it was printed there.\n  dn_no: only if a delivery-note number is printed against THIS individual row; otherwise null. Most vendors print the DN number once in the header, not per line.\n  For COMBINED: DO NOT EXTRACT LINE ITEMS. Leave line_items empty []. The file is split by page range, and each child document will have its line items extracted individually.\n  QUANTITY COLUMN, PO: quantity is the ORDERED quantity; never a received / delivered-to-date column.\n  QUANTITY COLUMN, DN and SI only: if a table prints several quantity columns, quantity is the quantity DELIVERED / SHIPPED / DISPATCHED / INVOICED on THIS document (headers such as Delivered Qty, Qty Shipped, Dispatch Qty, Invoiced Qty, Qty). NEVER use Ordered, Balance, Pending, Outstanding, Previous, Cumulative or To-date columns. If you cannot tell which column is the delivered/invoiced one, return quantity null for those rows rather than guessing.\n  EXCLUDE subtotal, VAT, tax, total, amount-in-words, payment terms, signatures, charge rows that have no item number (freight, transport, shipping charges, discount, rounding), and \'carried forward\' / \'brought forward\' / page-total rows. A goods line whose description merely contains a word like PACKING or HANDLING is an item: keep it.\n\nSTEP 4 — QUANTITY (the NUMBER ONLY; do NOT calculate, do NOT scale):\n  quantity = the digits as printed, and nothing else. "1", "50", "12.5", "12.45000000".\n  Strip anything that is not part of the number: unit / UOM (EA, PCS, BOX, KG, M, M3, MT, BAGS), currency symbols, and words like EACH or SET. If the cell reads \'12.5 EA\' return "12.5"; if it reads \'1,200.00 M3\' return "1200.00".\n  UOM itself is NOT extracted anywhere in this system. Never return it.\n\nSTEP 5 — MULTI-PAGE / MULTI-DN: if PDF contains 2-3 DNs, emit first po_reference, include ALL line_items across pages in order.\nSTEP 6 — MULTI-DOC SPLIT (COMBINED branch only): enumerate each contiguous same-type run as a component with its REAL PDF page indices (1-based position in this file as pypdf sees it, never numbers printed on the page). A page that continues the current PO/DN/SI extends the run; a page that changes type ends the run and starts a new component. A page that is none of PO/DN/SI (cover, T&C, blank) is a SKIP component so every page 1..N is claimed exactly once. Also return page_count = the total number of pages in this file.\n\nFEW-SHOTS (raw strings, copy verbatim):\nSI: {"document_type":"SI","document_number":"SIV-ARS-26-4005","po_reference":"210851","vendor_name":"IBRAHIM ALI ALSHAB TRADING EST.","line_items":[{"line_item_no":"12","description":"NUT, HEX 9/16 IN-12 UNC GRADE B YELLOW ZINC PLATED","quantity":"50","unit_price":"350.00"}]}\nPO: {"document_type":"PO","document_number":"210851","po_reference":null,"line_items":[{"line_item_no":"1","description":"WASHER, FLAT SAE 1/4 IN YELLOW ZINC PLATED CS","quantity":"1","unit_price":"1620.00"}]}\nDN bundle: {"document_type":"DN","document_number":"GDN-ARS-26-4619","po_reference":"210851","line_items":[{"line_item_no":"1","description":"WASHER, LOCK, 3/8\\" - MFG: FLY","quantity":"50","unit_price":"1000.00"}]}\nRe-indexed DN (side column lies, use the embedded marker): {"document_type":"DN","document_number":"GDN-RHO-25-513","po_reference":"8300023893","line_items":[{"line_item_no":"10","description":"GATE VALVE 2IN CL150 - Line Item - 10","quantity":"2","dn_no":"GDN-RHO-25-513"}]}\nCOMBINED: {"document_type":"COMBINED","document_number":null,"po_reference":"3049PO123","page_count":3,"components":[{"document_type":"PO","page_start":1,"page_end":1},{"document_type":"DN","page_start":2,"page_end":2},{"document_type":"SI","page_start":3,"page_end":3}],"line_items":[]}\n'
 
 
 def _coerce_number_to_str(value: object) -> object:
@@ -267,8 +213,112 @@ def _parse_scaled_int(val: int | float | str | None, locale: str = "en_IN") -> i
         return 0
 
 
+#: Rasterisation resolution and reasoning effort: the validated "img150+eff=high" recipe
+#: (prompt_improvement/eval). Both are overridable under `vlm:` in config.yaml.
+DEFAULT_RASTER_DPI = 150
+DEFAULT_REASONING_EFFORT = "high"
+#: Pages per document. The longest real file seen is 13 pages = 38,914 prompt tokens
+#: (~2.6k tokens per page image at 150 DPI plus ~4.5k of prompt). 30 pages is ~2.3x that
+#: and ~85k tokens, which still fits a 128k context window. Anything larger is refused
+#: before a request is built, never truncated and never silently chunked: a split
+#: request would hand the model a document with pages missing.
+DEFAULT_MAX_PAGES = 30
+_REASONING_EFFORTS = ("minimal", "low", "medium", "high")
+#: A single page above this many pixels at the chosen DPI (larger than A0 at 150 DPI)
+#: is a plotter drawing, not a document; rendering it would exhaust memory.
+_MAX_PAGE_PIXELS = 40_000_000
+#: Total raw PNG bytes per request (base64 inflates by a third). Guards the provider's
+#: request-size limit so an oversized upload fails here, loudly, rather than as a 413.
+_MAX_IMAGE_BYTES = 40 * 1024 * 1024
+
+
+class PdfRasterError(ValueError):
+    """The PDF cannot be turned into page images: corrupt, truncated, encrypted, empty
+    or unrenderable. A content error about this file, never a provider fault, so the
+    document takes the ordinary failed-extraction path."""
+
+
+class PdfTooLargeError(PdfRasterError):
+    """The PDF exceeds a page, pixel or byte limit. Refused before any request is sent."""
+
+
+def _vlm_settings(cfg) -> tuple[int, str, int]:
+    """(raster DPI, reasoning effort, max pages), each optional under `vlm:`.
+
+    A bad value is a configuration fault, not a verdict on the document: it raises the
+    fail-closed "not configured" RuntimeError, which leaves the document pending.
+    """
+    vlm = cfg.vlm
+    dpi = getattr(vlm, "raster_dpi", DEFAULT_RASTER_DPI)
+    effort = getattr(vlm, "reasoning_effort", DEFAULT_REASONING_EFFORT)
+    max_pages = getattr(vlm, "max_pages", DEFAULT_MAX_PAGES)
+    if isinstance(dpi, bool) or not isinstance(dpi, int) or not 72 <= dpi <= 300:
+        raise RuntimeError(f"vlm.raster_dpi {dpi!r} is not configured to an integer in 72..300")
+    if effort not in _REASONING_EFFORTS:
+        raise RuntimeError(
+            f"vlm.reasoning_effort {effort!r} is not configured to one of {_REASONING_EFFORTS}"
+        )
+    if isinstance(max_pages, bool) or not isinstance(max_pages, int) or max_pages < 1:
+        raise RuntimeError(f"vlm.max_pages {max_pages!r} is not configured to an integer >= 1")
+    return dpi, effort, max_pages
+
+
+def _rasterize_pdf(pdf_bytes: bytes, dpi: int, max_pages: int, name: str = "pdf") -> list[bytes]:
+    """Render every page to PNG, in real PDF page order (index 0 = page 1).
+
+    Raises PdfRasterError (corrupt/encrypted/empty) or PdfTooLargeError (limits). Never
+    returns a partial list: a page that fails to render fails the whole document.
+    """
+    import pymupdf
+
+    try:
+        pdf = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as e:
+        raise PdfRasterError(f"{name}: cannot open PDF ({type(e).__name__}: {e})") from e
+    with pdf:
+        if pdf.needs_pass:
+            raise PdfRasterError(f"{name}: PDF is password-protected; cannot be read")
+        count = pdf.page_count
+        if count < 1:
+            raise PdfRasterError(f"{name}: PDF has no pages")
+        if count > max_pages:
+            raise PdfTooLargeError(
+                f"{name}: {count} pages exceeds the {max_pages}-page limit (vlm.max_pages)"
+            )
+        zoom = dpi / 72
+        images: list[bytes] = []
+        total = 0
+        for index in range(count):
+            try:
+                page = pdf.load_page(index)
+                if page.rect.width * page.rect.height * zoom * zoom > _MAX_PAGE_PIXELS:
+                    raise PdfTooLargeError(
+                        f"{name}: page {index + 1} is too large to render at {dpi} DPI"
+                    )
+                png = page.get_pixmap(dpi=dpi).tobytes("png")
+            except PdfRasterError:
+                raise
+            except Exception as e:
+                raise PdfRasterError(
+                    f"{name}: cannot render page {index + 1} ({type(e).__name__}: {e})"
+                ) from e
+            total += len(png)
+            if total > _MAX_IMAGE_BYTES:
+                raise PdfTooLargeError(
+                    f"{name}: rendered pages exceed {_MAX_IMAGE_BYTES // (1024 * 1024)} MB"
+                )
+            images.append(png)
+    return images
+
+
 def _call_vlm(stored_path: str, doc_type: str, cfg) -> dict:
-    """Single Luna native PDF call via instructor (no rasterization, FR-6.1). Fail-closed on missing secrets."""
+    """One Luna call per document: every page rasterised and sent as an image (FR-6.1).
+
+    Pages go as `image_url` data URLs in a single request, in real PDF page order
+    (the split page indices depend on it), with reasoning effort in `extra_body`.
+    Fail-closed on missing secrets, an unreadable PDF, or an oversized one.
+    Synchronous on purpose: the caller is a Prefect task worker thread, never the event loop.
+    """
     # --- fail-closed secret handling (never hardcoded, never logged) ---
     # The secret lives in .env or in the environment. `load_env` is the one
     # place that reads the file (app.core.config); calling it here keeps the
@@ -287,13 +337,21 @@ def _call_vlm(stored_path: str, doc_type: str, cfg) -> dict:
     if not model:
         raise RuntimeError("vlm.model not configured in config.yaml (fail-closed)")
     timeout = int(getattr(cfg.vlm, "request_timeout_seconds", 60))
+    dpi, effort, max_pages = _vlm_settings(cfg)
 
     pdf_path = Path(stored_path)
     if not pdf_path.exists():
         raise FileNotFoundError(f"stored_path not found: {stored_path}")
-    pdf_bytes = pdf_path.read_bytes()
-    # OpenRouter expects base64 PDF as data URL; instructor will handle response_model validation
-    b64 = base64.b64encode(pdf_bytes).decode()
+    # Rasterise BEFORE building the client so a corrupt/oversized file never reaches the API.
+    page_images = _rasterize_pdf(pdf_path.read_bytes(), dpi, max_pages, pdf_path.name)
+    content: list[ChatCompletionContentPartParam] = [{"type": "text", "text": _PAGE_PROMPT}]
+    for png in page_images:
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64," + base64.b64encode(png).decode()},
+            }
+        )
 
     client = instructor.from_openai(
         OpenAI(
@@ -305,27 +363,22 @@ def _call_vlm(stored_path: str, doc_type: str, cfg) -> dict:
             max_retries=0,
         )
     )
-    # Native PDF input — no JPEG rasterization; system role per OpenAI guide, strict schema via response_model
+    # System role per OpenAI guide, strict schema via response_model. `transforms: []`
+    # switches off OpenRouter's middle-out compression so a request over the model's
+    # context fails with an error instead of being silently truncated.
     resp: _VLMPageExtraction = client.chat.completions.create(
         model=model,
         response_model=_VLMPageExtraction,
         messages=[
             {"role": "system", "content": _SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": _PAGE_PROMPT},
-                    {
-                        "type": "file",
-                        "file": {
-                            "filename": pdf_path.name,
-                            "file_data": f"data:application/pdf;base64,{b64}",
-                        },
-                    },
-                ],
-            },
+            {"role": "user", "content": content},
         ],
         max_retries=0,  # retries owned by the Prefect task envelope (flows/sync.py), driven by config
+        extra_body={
+            "reasoning": {"effort": effort},
+            "usage": {"include": True},
+            "transforms": [],
+        },
     )
     # Normalize to dict expected by caller — return raw strings (scaling done
     # in extract_document). Only fields the schema above actually declares may
@@ -914,8 +967,8 @@ def extract_document(doc_id: int, cfg) -> Document:
 
         doc.extraction_attempt_count = (doc.extraction_attempt_count or 0) + 1
         try:
-            # Multi-page PDFs (SPEC §7.3 FR-6.1): The entire PDF (all pages) is passed as a
-            # single base64 data URL. Luna sees every page natively in one API call.
+            # Multi-page PDFs (FR-6.1, amended: rasterised): every page is rendered to an
+            # image and all pages go to Luna in ONE request, in real page order.
             result = _call_vlm(doc.stored_path, dtype, cfg)
             # Persist raw VLM JSON for audit (Task 1) + dev file dump mapped to filename (Task 6)
             import json

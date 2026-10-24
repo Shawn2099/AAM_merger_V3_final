@@ -307,13 +307,15 @@ def test_call_vlm_maps_a_realistic_response(tmp_path, monkeypatch):
 
     out = ext._call_vlm(str(pdf), "PO", _cfg_with_vlm(tmp_path))
 
-    # the call really was made, with the PDF attached and the right model
+    # the call really was made, with the page image attached and the right model
     assert seen["model"] == _cfg_with_vlm(tmp_path).vlm.model
     assert seen["response_model"] is ext._VLMPageExtraction
     assert seen["max_retries"] == 0
     user_content = seen["messages"][1]["content"]
-    assert user_content[1]["type"] == "file"
-    assert user_content[1]["file"]["file_data"].startswith("data:application/pdf;base64,")
+    assert user_content[0]["type"] == "text"
+    assert user_content[1]["type"] == "image_url"
+    assert user_content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert seen["extra_body"]["reasoning"] == {"effort": "high"}
 
     # every key the caller reads must be present
     for key in (
