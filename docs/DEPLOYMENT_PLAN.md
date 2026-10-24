@@ -50,6 +50,7 @@ Rules for every packet:
 | D10 | Per-PO lock timeout default 900 s; an older shorter value is raised with a warning, 0/tiny refused | 2026-10-24 | built | config.py |
 | D11 | Config must become fully editable from the UI; auto-run timings and folder polling to be finalised; then production deployment decisions and full testing | 2026-10-24 | **open, needs the answers in section 3 (WS3)** | HANDOFF 6b |
 | D12 | **Operating model: Opus as architect/reviewer, DeepSeek via OpenCode as worker for token-heavy work; keep this decision log; plan before deployment so other sessions/tools can implement and test** | 2026-10-25 | this file | section 0 |
+| D14 | Pre-deploy UI fixes PF-01..PF-10 approved (WS1b); archive justification optional; Re-Extract state machine unchanged; add PF-11 system-status pill | 2026-10-25 | approved, in progress | WS1b |
 | D13 | Not fixed on purpose, documented: Origin guard compares host names only; upload has no size middleware; unused config keys; per-minute re-hash of stuck input files; split-parent cleanup by name; no installer DependOnService for Prefect | 2026-10-24 | open (WS5) | PRODUCT 8 "operating limits" |
 
 ## 3. Decisions still needed from the user (answer in one line each; defaults are my recommendation)
@@ -77,6 +78,12 @@ Order: WS0 first. WS1, WS2, WS5, WS6 can run in parallel in separate OpenCode se
 - Add cases for the two newest operator states: `settling` (set held during the settle window) and `placed_by_number_only` ("Confirm it belongs here" button, `btn-confirm-placement`; needs a seeded scenario in `scripts/ui_test_env.py`).
 - Allowed: `tests/ui/**`, `scripts/ui_test_env.py`. Forbidden: `src/`, `templates/`, `alembic/`, configs, other tests.
 - Acceptance: all cases implemented or marked `xfail(strict)` with "SUSPECTED PRODUCT BUG UI-xx"; whole `tests/ui` suite green twice in a row and in reverse file order; report lists findings. Claude triages each finding into fix / won't-fix / test error.
+
+### WS1b. Pre-deploy UI fixes from the DeepSeek exploration (reviewed 2026-10-25, APPROVED)
+- Evidence: `UI_EXPLORATION_2026-10-24.md` (20 product findings F-01..F-20, 2 harness findings H-01/H-02, verified-working list). Plan: `docs/UI_PREDEPLOY_PLAN_2026-10-25.md` (PF-01..PF-10). Worker brief with the reviewer's overrides: `docs/OPENCODE_PF_BRIEF.md`.
+- Reviewer verdict: findings are accurate and well evidenced. **H-01 is the important one**: the UI harness silently reloads the developer's `.env` and spends real money on Re-Extract; PF-01 fixes it (empty-string env var). Approved: PF-01..PF-10 (PF-08 focus trap last). Not changed: Re-Extract status machine (pinned by tests, only the message was dishonest), the type select is never pre-selected. Archive justification stays optional.
+- Added by the reviewer, not yet in the plan: **PF-11 operator-visible system status** (is polling on, time of last poll, last sync result incl. "all extractions failed"). Reason: with the 1-minute poller nobody clicks Scan, so F-16 ("a scan's outcome is never shown") becomes the only way an operator learns the system is stuck. Needs a short design (Claude) before the worker builds it; candidate source is `SyncPoller` state plus the last sync result. Tracked as the first item after PF-10.
+- Acceptance: whole suite + `tests/ui` x3 green, ruff/ty clean, Claude re-runs and reads the diff before commit.
 
 ### WS2. D1 misread hold (T13): Opus designs, DeepSeek builds, Opus reviews
 1. **Claude writes the design spec** (HANDOFF 6c "D1 design notes"): the exact rule (a PO-only set one digit away from a set that has DN/SI), its false-positive risk, the new reason `possible_po_misread`, the three operator actions (move a document to another PO, "not a misread" flag, Force Merge), audit rows, and the tests that must exist. No code before the spec is approved.
