@@ -71,7 +71,6 @@ def _set_with_docs(tmp_path, cfg, si_no: str, docs_info: list[dict]) -> int:
                     line_item_no="1",
                     description=f"{dt} item",
                     quantity=1000,
-                    unit_price=1000,
                 )
             )
         s.commit()

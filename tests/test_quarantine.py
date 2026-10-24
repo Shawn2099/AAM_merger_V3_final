@@ -65,7 +65,6 @@ def _create_quarantined_poset(tmp_path, cfg, po_no="PO-QUAR-001"):
                 document_id=doc.id,
                 description=f"item {i}",
                 quantity=1000,
-                unit_price=1000,
             )
             s.add(li)
         s.commit()
@@ -425,7 +424,6 @@ def test_quarantine_si_dn_missing_po_reference(tmp_path, monkeypatch):
                     "line_item_no": "1",
                     "description": "Item 1",
                     "quantity": "10",
-                    "unit_price": "100.00",
                 }
             ],
         },

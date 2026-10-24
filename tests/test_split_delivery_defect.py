@@ -177,7 +177,6 @@ def test_missing_dn_evidence_is_present_but_unused(case):
             "line_item_no": li["line_item_no"],
             "description": li["description"],
             "quantity": li["quantity"],
-            "unit_price": 0,
         }
         for li in arrived
     ]

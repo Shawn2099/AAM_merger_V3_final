@@ -101,7 +101,6 @@ def _po_result(po_no: str = "4500043712") -> dict:
                 "line_item_no": "1",
                 "description": "WASHER",
                 "quantity": "10",
-                "unit_price": "1.00",
                 "dn_no": None,
             }
         ],

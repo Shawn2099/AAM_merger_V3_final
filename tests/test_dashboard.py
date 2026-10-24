@@ -115,7 +115,7 @@ def _create_poset_with_docs(cfg, po_no="PO1234", status=POSetStatus.pending):
             s.query(Document).filter_by(id=doc.id).first()
             from app.models import LineItem as LI
 
-            s.add(LI(document_id=doc.id, description="Widget A", quantity=100000, unit_price=10000))
+            s.add(LI(document_id=doc.id, description="Widget A", quantity=100000))
         s.commit()
         return pid
 
@@ -755,7 +755,6 @@ def test_detail_matrix_absent_dn_pool_shows_mismatch(tmp_cfg, client, tmp_path):
                         line_item_no=ln,
                         description=f"item {ln}",
                         quantity=q * 1000,
-                        unit_price=1000,
                     )
                 )
             s.commit()

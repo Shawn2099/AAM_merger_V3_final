@@ -99,12 +99,11 @@ def write_pdf(path: Path, width: float, pages: int = 1, height: float = 200) -> 
 # --------------------------------------------------------------------------- VLM payloads
 
 
-def line(no, qty, desc="ITEM", price="1.00", dn_no=None) -> dict:
+def line(no, qty, desc="ITEM", dn_no=None) -> dict:
     return {
         "line_item_no": no,
         "description": desc,
         "quantity": qty,
-        "unit_price": price,
         "dn_no": dn_no,
     }
 

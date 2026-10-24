@@ -349,7 +349,6 @@ def test_a_recovered_set_does_not_keep_its_quarantine_reason(cfg):
                     line_item_no="1",
                     description="ITEM",
                     quantity=1000,
-                    unit_price=1000,
                 )
             )
         s.commit()

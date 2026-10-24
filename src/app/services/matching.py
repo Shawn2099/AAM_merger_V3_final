@@ -16,7 +16,7 @@ The rule:
      set, because a delivered line that resolves nowhere cannot be ignored.
   5. Anything that fails quarantines the whole set. There is no partial pass.
 
-Quantities are the only signal. Price, SKU/part number, UOM, positional order
+Quantities are the only signal. Price (not extracted), SKU/part number, UOM, positional order
 and ERP step-numbering are deliberately not matching inputs — see
 `AAM_merger_V3_PRODUCT.md` for why each was removed and what that costs.
 """

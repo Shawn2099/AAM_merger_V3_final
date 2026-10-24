@@ -617,7 +617,6 @@ def _persist_documents(cfg, documents: list[dict]) -> int:
                         line_item_no=line["line_item_no"],
                         description=line["description"],
                         quantity=line["quantity"],
-                        unit_price=1000,
                     )
                 )
             s.commit()

@@ -92,35 +92,30 @@ def test_fr_10_1_pinned(tmp_path) -> None:
             line_item_no="1",
             description="Widget A",
             quantity=100_000,
-            unit_price=10_000,
         )
         li_dn1 = LineItem(
             document_id=doc_dn1.id,
             line_item_no="1",
             description="Widget A",
             quantity=40_000,
-            unit_price=0,
         )
         li_dn2 = LineItem(
             document_id=doc_dn2.id,
             line_item_no="1",
             description="Widget A",
             quantity=60_000,
-            unit_price=0,
         )
         li_si1 = LineItem(
             document_id=doc_si1.id,
             line_item_no="1",
             description="Widget A",
             quantity=70_000,
-            unit_price=10_000,
         )
         li_si2 = LineItem(
             document_id=doc_si2.id,
             line_item_no="1",
             description="Widget A",
             quantity=30_000,
-            unit_price=10_000,
         )
         s.add_all([li_po, li_dn1, li_dn2, li_si1, li_si2])
         s.commit()

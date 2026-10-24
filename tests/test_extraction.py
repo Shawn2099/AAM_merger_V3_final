@@ -276,14 +276,12 @@ def test_call_vlm_maps_a_realistic_response(tmp_path, monkeypatch):
                 line_item_no="1",
                 description="WASHER, FLAT SAE 1/4 IN",
                 quantity="12.45000000",
-                unit_price="1620.00",
                 dn_no=None,
             ),
             ext._VLMLineItem(
                 line_item_no="2",
                 description="NUT, HEX 9/16",
                 quantity="50",
-                unit_price="350.00",
                 dn_no="GDN-9",
             ),
         ],
@@ -340,9 +338,8 @@ def test_call_vlm_maps_a_realistic_response(tmp_path, monkeypatch):
     # line items keep only the six schema fields, as raw strings
     assert len(out["line_items"]) == 2
     first = out["line_items"][0]
-    assert set(first) == {"line_item_no", "description", "quantity", "unit_price", "dn_no"}
+    assert set(first) == {"line_item_no", "description", "quantity", "dn_no"}
     assert first["quantity"] == "12.45000000", "quantity must be passed through verbatim"
-    assert first["unit_price"] == "1620.00"
     assert out["line_items"][1]["dn_no"] == "GDN-9"
 
 
@@ -373,7 +370,7 @@ def test_call_vlm_maps_every_declared_schema_field(tmp_path, monkeypatch):
         f"caller reads keys the schema lacks: {caller_reads - doc_fields}"
     )
 
-    caller_reads_line = {"line_item_no", "description", "quantity", "unit_price", "dn_no"}
+    caller_reads_line = {"line_item_no", "description", "quantity", "dn_no"}
     assert caller_reads_line <= line_fields, (
         f"caller reads line keys the schema lacks: {caller_reads_line - line_fields}"
     )
@@ -491,9 +488,16 @@ def test_uom_is_not_part_of_the_extraction_schema():
         "description",
         "quantity",
         "dn_no",
-        "unit_price",
     }
-    for gone in ("uom", "part_no", "item_code", "line_type", "total_price", "confidence"):
+    for gone in (
+        "unit_price",
+        "uom",
+        "part_no",
+        "item_code",
+        "line_type",
+        "total_price",
+        "confidence",
+    ):
         assert gone not in _VLMLineItem.model_fields
 
 
@@ -634,7 +638,7 @@ def test_real_sample_regression_siv_ars_25_7230(tmp_path, monkeypatch):
         items = s.query(LineItem).filter_by(document_id=doc_id).all()
         assert len(items) == 1
         assert items[0].quantity == 50000
-        assert items[0].unit_price == 26000
+        assert not hasattr(items[0], "unit_price")  # a stray legacy key is ignored
 
 
 def test_raw_json_column_exists(tmp_path):

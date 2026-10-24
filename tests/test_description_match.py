@@ -94,7 +94,6 @@ def _make_set(cfg, po_key: str, rows, *, si_number: str | None = None) -> int:
                         line_item_no=line_no,
                         description=description,
                         quantity=int(qty * 1000),
-                        unit_price=1000,
                     )
                 )
         s.commit()

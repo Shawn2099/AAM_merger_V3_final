@@ -90,7 +90,6 @@ def _reconcile_with_quantities(po_q, dn_q, si_q):
                     line_item_no="1",
                     description="W",
                     quantity=qty * 1000,
-                    unit_price=1000,
                 )
             )
             s.commit()
@@ -198,7 +197,6 @@ def test_reconcile_po_set_clean_auto_merges(tmp_path):
                 line_item_no="1",
                 description="Item 1",
                 quantity=100000,
-                unit_price=50000,
             )
         )
         # DN1 = 40, DN2 = 60
@@ -208,7 +206,6 @@ def test_reconcile_po_set_clean_auto_merges(tmp_path):
                 line_item_no="1",
                 description="Item 1",
                 quantity=40000,
-                unit_price=50000,
             )
         )
         s.add(
@@ -217,7 +214,6 @@ def test_reconcile_po_set_clean_auto_merges(tmp_path):
                 line_item_no="1",
                 description="Item 1",
                 quantity=60000,
-                unit_price=50000,
             )
         )
         # SI1 = 70, SI2 = 30
@@ -227,7 +223,6 @@ def test_reconcile_po_set_clean_auto_merges(tmp_path):
                 line_item_no="1",
                 description="Item 1",
                 quantity=70000,
-                unit_price=50000,
             )
         )
         s.add(
@@ -236,7 +231,6 @@ def test_reconcile_po_set_clean_auto_merges(tmp_path):
                 line_item_no="1",
                 description="Item 1",
                 quantity=30000,
-                unit_price=50000,
             )
         )
         s.commit()
@@ -323,7 +317,6 @@ def test_reconcile_po_set_customs_blocks_merge(tmp_path):
                 line_item_no="1",
                 description="Item 1",
                 quantity=10000,
-                unit_price=5000,
             )
         )
         s.add(
@@ -332,7 +325,6 @@ def test_reconcile_po_set_customs_blocks_merge(tmp_path):
                 line_item_no="1",
                 description="Item 1",
                 quantity=10000,
-                unit_price=5000,
             )
         )
         s.add(
@@ -341,7 +333,6 @@ def test_reconcile_po_set_customs_blocks_merge(tmp_path):
                 line_item_no="1",
                 description="Item 1",
                 quantity=10000,
-                unit_price=5000,
             )
         )
         s.commit()
@@ -428,7 +419,6 @@ def test_reconcile_po_decoy_mismatch_quarantines(tmp_path):
                 line_item_no="1",
                 description="Item",
                 quantity=10000,
-                unit_price=5000,
             )
         )
         s.add(
@@ -437,7 +427,6 @@ def test_reconcile_po_decoy_mismatch_quarantines(tmp_path):
                 line_item_no="1",
                 description="Item",
                 quantity=10000,
-                unit_price=5000,
             )
         )
         s.add(
@@ -446,7 +435,6 @@ def test_reconcile_po_decoy_mismatch_quarantines(tmp_path):
                 line_item_no="1",
                 description="Item",
                 quantity=10000,
-                unit_price=5000,
             )
         )
         s.commit()
@@ -520,7 +508,6 @@ def test_reconcile_missing_si_stays_pending(tmp_path):
                 line_item_no="1",
                 description="Item",
                 quantity=10000,
-                unit_price=5000,
             )
         )
         s.add(
@@ -529,7 +516,6 @@ def test_reconcile_missing_si_stays_pending(tmp_path):
                 line_item_no="1",
                 description="Item",
                 quantity=10000,
-                unit_price=5000,
             )
         )
         s.commit()
@@ -614,7 +600,6 @@ def test_reconcile_partial_fulfillment_stays_pending(tmp_path):
                 line_item_no="1",
                 description="Item 1",
                 quantity=10000,
-                unit_price=1000,
             )
         )
         s.add(
@@ -623,7 +608,6 @@ def test_reconcile_partial_fulfillment_stays_pending(tmp_path):
                 line_item_no="2",
                 description="Item 2",
                 quantity=20000,
-                unit_price=2000,
             )
         )
         # DN and SI only deliver line 1
@@ -633,7 +617,6 @@ def test_reconcile_partial_fulfillment_stays_pending(tmp_path):
                 line_item_no="1",
                 description="Item 1",
                 quantity=10000,
-                unit_price=1000,
             )
         )
         s.add(
@@ -642,7 +625,6 @@ def test_reconcile_partial_fulfillment_stays_pending(tmp_path):
                 line_item_no="1",
                 description="Item 1",
                 quantity=10000,
-                unit_price=1000,
             )
         )
         s.commit()
@@ -730,7 +712,6 @@ def test_reconcile_over_qty_fails_set(tmp_path):
                 line_item_no="1",
                 description="Item 1",
                 quantity=10000,
-                unit_price=1000,
             )
         )
         s.add(
@@ -739,7 +720,6 @@ def test_reconcile_over_qty_fails_set(tmp_path):
                 line_item_no="2",
                 description="Item 2",
                 quantity=20000,
-                unit_price=2000,
             )
         )
         s.add(
@@ -748,7 +728,6 @@ def test_reconcile_over_qty_fails_set(tmp_path):
                 line_item_no="1",
                 description="Item 1",
                 quantity=10000,
-                unit_price=1000,
             )
         )
         s.add(
@@ -757,7 +736,6 @@ def test_reconcile_over_qty_fails_set(tmp_path):
                 line_item_no="2",
                 description="Item 2",
                 quantity=25000,
-                unit_price=2000,
             )
         )
         s.add(
@@ -766,7 +744,6 @@ def test_reconcile_over_qty_fails_set(tmp_path):
                 line_item_no="1",
                 description="Item 1",
                 quantity=10000,
-                unit_price=1000,
             )
         )
         s.add(
@@ -775,7 +752,6 @@ def test_reconcile_over_qty_fails_set(tmp_path):
                 line_item_no="2",
                 description="Item 2",
                 quantity=25000,
-                unit_price=2000,
             )
         )
         s.commit()
@@ -861,7 +837,6 @@ def test_step_10_numbering_no_longer_maps_and_quarantines(tmp_path):
                         line_item_no=no,
                         description=f"Item {no}",
                         quantity=1000,
-                        unit_price=0,
                     )
                 )
         s.commit()
@@ -972,7 +947,6 @@ def test_sync_flow_sweep_reconciles_stale_mismatched_set(tmp_path):
                 line_item_no="1",
                 description="Item A",
                 quantity=5000,
-                unit_price=100000,
             )
         )
         s.add(
@@ -981,7 +955,6 @@ def test_sync_flow_sweep_reconciles_stale_mismatched_set(tmp_path):
                 line_item_no="1",
                 description="Item A",
                 quantity=5000,
-                unit_price=0,
             )
         )
         s.add(
@@ -990,7 +963,6 @@ def test_sync_flow_sweep_reconciles_stale_mismatched_set(tmp_path):
                 line_item_no="1",
                 description="Item A",
                 quantity=5000,
-                unit_price=100000,
             )
         )
         s.commit()

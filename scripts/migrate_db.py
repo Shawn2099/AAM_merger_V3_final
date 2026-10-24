@@ -25,6 +25,7 @@ The stamp is derived from structural markers, never guessed from a date:
     archive columns + both partial indexes -> c3d4e5f6a7b8
     po_sets.customs_append_pending    -> e7f8a9b0c1d2
     po_sets.po_no_letters             -> a9b0c1d2e3f4
+    line_items.unit_price absent      -> d5e6f7a8b9c0
 
 Usage:
     python scripts/migrate_db.py [--no-backup]
@@ -67,6 +68,8 @@ _MARKERS: list[tuple[str, str]] = [
     ("archive_schema", "c3d4e5f6a7b8"),
     ("po_sets.customs_append_pending", "e7f8a9b0c1d2"),
     ("po_sets.po_no_letters", "a9b0c1d2e3f4"),
+    # d5e6 dropped line_items.unit_price: an ABSENCE, so a synthetic key.
+    ("unit_price_dropped", "d5e6f7a8b9c0"),
 ]
 
 
@@ -129,6 +132,8 @@ def detect_stamp(db_path: Path) -> str | None:
             known.add("audit_fk_set_null")
         if "line_items.dn_no" in known and "documents.part_no" not in known:
             known.add("part_no_dropped")
+        if "line_items.id" in known and "line_items.unit_price" not in known:
+            known.add("unit_price_dropped")
         if (
             "po_sets.archived_at" in known
             and "documents.archived_at" in known
@@ -194,7 +199,7 @@ def _alembic_config():
     return cfg
 
 
-HEAD_REVISION = "a9b0c1d2e3f4"
+HEAD_REVISION = "d5e6f7a8b9c0"
 
 
 def _current_revision(db_path: Path) -> str | None:
@@ -251,6 +256,7 @@ def verify(report: dict) -> None:
     try:
         cols = _columns(conn, "documents")
         ps_cols = _columns(conn, "po_sets")
+        li_cols = _columns(conn, "line_items")
         index_sql = {
             row[0]: row[1] or ""
             for row in conn.execute(
@@ -259,6 +265,12 @@ def verify(report: dict) -> None:
         }
     finally:
         conn.close()
+    if "unit_price" in li_cols:
+        raise RuntimeError(
+            f"migration reported {report['revision']!r} but {db_path} still has "
+            "line_items.unit_price (NOT NULL); every line-item insert would fail "
+            "- do not start the app"
+        )
     required = {
         "po_no_source",
         "split_completed_at",

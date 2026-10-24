@@ -145,7 +145,6 @@ class LineItem(Base):
     line_item_no: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)  # scaled x1000
-    unit_price: Mapped[int] = mapped_column(Integer, nullable=False)  # scaled x1000
     # Delivery-note reference printed against this individual line. Some vendors
     # print it per line, others only once in the header, so this is nullable.
     # Read-only in Layer 2 by grouping._anchor_from_po_line_ref (attach path:

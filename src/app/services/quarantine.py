@@ -546,7 +546,6 @@ def _write_archive_manifest(
                 "line_item_no": li.line_item_no,
                 "description": li.description,
                 "quantity": li.quantity,
-                "unit_price": li.unit_price,
                 "dn_no": li.dn_no,
             }
             for li in line_items

@@ -67,7 +67,6 @@ def _build(tmp_path, cfg, po_no, docs, po_no_normalized=None):
                         line_item_no=ln,
                         description=desc,
                         quantity=qty * 1000,
-                        unit_price=1000,
                     )
                 )
             s.commit()

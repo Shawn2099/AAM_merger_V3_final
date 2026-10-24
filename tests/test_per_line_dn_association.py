@@ -107,7 +107,6 @@ def _add_doc(cfg, name, doc_type, po_set_id=None, po_no=None, dn_no=None, lines=
                     line_item_no=ln,
                     description=f"item {ln}",
                     quantity=qty * 1000,
-                    unit_price=100 * 1000,
                     dn_no=line_dn,
                 )
             )

@@ -111,7 +111,6 @@ def _build_set(cfg, po_no, docs):
                         line_item_no=ln,
                         description=f"item {ln}",
                         quantity=qty * S,
-                        unit_price=100 * S,
                         # the per-line delivery-note reference, as the VLM
                         # would have extracted it from a printed column
                         dn_no=doc_dn_no,

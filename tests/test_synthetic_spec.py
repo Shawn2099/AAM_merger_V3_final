@@ -106,7 +106,6 @@ def build(tmp_path, po_no, spec, name=None):
                         line_item_no=ln["no"],
                         description=ln["desc"],
                         quantity=q,
-                        unit_price=100000,
                     )
                 )
             s.commit()
@@ -664,7 +663,6 @@ def test_multiple_po_documents_are_pending_and_configurable():
                         line_item_no="1",
                         description="W",
                         quantity=100_000,
-                        unit_price=1000,
                     )
                 )
                 s.commit()
@@ -692,7 +690,6 @@ def test_multiple_po_documents_are_pending_and_configurable():
                         line_item_no="1",
                         description="W",
                         quantity=100_000,
-                        unit_price=1000,
                     )
                 )
                 s.commit()
@@ -735,31 +732,22 @@ def test_multiple_po_documents_are_pending_and_configurable():
     assert res["status"] == "mismatched", "two summed POs double the baseline and cannot reconcile"
 
 
-def test_price_is_never_compared():
-    """Quantities are the only reconciling signal. Prices ride along, unused.
+def test_limitation_price_is_not_extracted():
+    """Price is not extracted, stored, or compared; quantity is the sole signal.
 
-    If a price comparison is ever reintroduced this fails, which is the point:
-    it would have to be a product decision, and a flag type with it, documented
-    in PRODUCT 3.2.
+    If price is ever reintroduced it must be a product decision, documented in
+    PRODUCT section 8 with a flag type, and this test updated with it.
     """
     import app.services.reconciliation as rec
-    from app.services.matching import group_by_line_no
+    import app.services.sanitizer as sanitizer
+    from app.models.models import LineItem
+    from app.services.extraction import _PAGE_PROMPT, _SYSTEM_PROMPT, _VLMLineItem
 
+    assert "unit_price" not in _VLMLineItem.model_fields
+    assert "unit_price" not in LineItem.__table__.c
+    assert "unit_price" not in _SYSTEM_PROMPT + _PAGE_PROMPT
     assert not hasattr(rec, "check_price")
-
-    # unit_price is carried through the comparison untouched and never read
-    import inspect
-
-    src = inspect.getsource(group_by_line_no) + inspect.getsource(rec.compare_po_set_lines)
-    assert "unit_price" not in src
-
-    # and a price-only difference cannot change the outcome
-    def L(no, q, price):
-        return {"line_item_no": no, "description": "A", "quantity": q * 1000, "unit_price": price}
-
-    cheap = group_by_line_no([L("1", 100, 10_000)], [L("1", 100, 99_000)])
-    dear = group_by_line_no([L("1", 100, 99_000)], [L("1", 100, 10_000)])
-    assert cheap[0] == dear[0] and cheap[1] == dear[1] and cheap[2] == dear[2]
+    assert not hasattr(sanitizer, "parse_price_scaled")
 
 
 @pytest.mark.parametrize(

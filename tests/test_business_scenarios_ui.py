@@ -111,7 +111,7 @@ def _doc(
     """Add one attached document with line items.
 
     `lines` are `(line_no, description, qty)` or
-    `(line_no, description, qty, unit_price)`, unscaled.
+    `(line_no, description, qty, ignored)`, unscaled (a 4th item is tolerated and ignored).
     """
     sha, path = _pdf(cfg, seed or f"{ps_id}-{filename}-{dtype.value}")
     eng = get_engine(cfg)
@@ -129,15 +129,13 @@ def _doc(
         s.add(doc)
         s.commit()
         s.refresh(doc)
-        for name, desc, qty, *rest in lines:
-            price = rest[0] if rest else 0
+        for name, desc, qty, *_ in lines:
             s.add(
                 LineItem(
                     document_id=doc.id,
                     line_item_no=name,
                     description=desc,
                     quantity=qty * K,
-                    unit_price=price * K,
                 )
             )
         s.commit()
@@ -352,7 +350,6 @@ def test_identical_po_bytes_are_one_document_not_a_second_po(cfg, client):
                 line_item_no="1",
                 description="BOLT",
                 quantity=100 * K,
-                unit_price=0,
             )
         )
         s.commit()
@@ -1451,7 +1448,6 @@ def test_naming_the_po_on_a_held_document_reconciles_its_set(cfg, client):
                 line_item_no="1",
                 description="BOLT",
                 quantity=100 * K,
-                unit_price=0,
             )
         )
         s.commit()

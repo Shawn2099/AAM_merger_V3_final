@@ -71,7 +71,6 @@ def _resp(*components, page_count=3):
                 "line_item_no": "1",
                 "description": "Union row",
                 "quantity": "999",
-                "unit_price": "1.00",
                 "dn_no": None,
             }
         ],
@@ -286,7 +285,6 @@ def test_children_reextract_attach_and_merge_end_to_end(tmp_path, monkeypatch):
                     "line_item_no": line_no,
                     "description": "Widget",
                     "quantity": qty,
-                    "unit_price": "10.00",
                     "dn_no": None,
                 }
             ],

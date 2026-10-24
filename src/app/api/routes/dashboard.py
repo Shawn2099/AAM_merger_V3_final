@@ -215,7 +215,6 @@ def build_matrix_rows(
         si_scaled = comparison["si_totals"].get(key, 0)
         agg_dn = dn_scaled / 1000
         agg_si = si_scaled / 1000
-        raw_price = int(p.get("unit_price") or 0)
         po_q = po_scaled / 1000
         missing_pool = "DN" if not dn_lines else ("SI" if not si_lines else None)
         reconciled = not missing_pool and dn_scaled == po_scaled and si_scaled == po_scaled
@@ -239,8 +238,6 @@ def build_matrix_rows(
                 "po_qty": po_q,
                 "dn_agg_qty": agg_dn,
                 "si_agg_qty": agg_si,
-                "po_price": raw_price / 1000,
-                "si_price": None,
                 "row_class": row_class,
                 "badge": badge,
                 "verdict": verdict,
@@ -410,7 +407,6 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
                     "line_item_no": li.line_item_no,
                     "description": li.description,
                     "quantity": li.quantity,
-                    "unit_price": li.unit_price,
                     "doc_type": doc_type_map.get(li.document_id, ""),
                 }
                 for li in items

@@ -50,7 +50,7 @@
 |---|---|
 | documents | id PK; sha256_hash (dedup key; unique among ACTIVE rows only — partial index `WHERE archived_at IS NULL`, so archived bytes can be re-ingested); original_filename; stored_path (never auto-deleted); doc_type enum PO, DN, SI, COMBINED, CUSTOMS, SHIPPING, COMMERCIAL_INVOICE, UNKNOWN; archived_at nullable;
 aw_extraction_json; po_no_raw/po_no_normalized; po_reference_ambiguous (multi-PO doc is left unattached, never guessed); dn_no/si_no/invoice_no nullable; extraction_status enum pending, processing, valid, failed; extraction_attempt_count capped at 3; po_set_id FK nullable; created_at/updated_at |
-| line_items | id PK; document_id FK; line_item_no text nullable (**the** matching key); description; quantity int ×1000; unit_price int ×1000; dn_no nullable (per-line DN reference) |
+| line_items | id PK; document_id FK; line_item_no text nullable (**the** matching key); description; quantity int ×1000; dn_no nullable (per-line DN reference) |
 | po_sets | id PK; po_no_normalized indexed (grouping key); status enum pending, mismatched, quarantined, blocked_customs, merged; has_customs_toggle; customs_doc_count; merged_output_path; description_match_count (advisory fallback-link count, UI tag only);
 econcile_reason (plain-language, dashboard reads it); merged_at (immutable); locked_by_action; locked_at; created_at/updated_at |
 | udit_log | id PK; po_set_id FK nullable ON DELETE SET NULL; ction enum orce_merge, quarantine_delete, manual_status_change; detail JSON; justification (operator note, >= 20 chars when given); 	imestamp; source |
@@ -60,7 +60,7 @@ briefly to serve a retired matcher and were dropped in migration
 c1a2b3d4e5f6. Do not re-add them. See PRODUCT doc §7-§8 for why, and for what
 their absence costs.
 
-**Numeric:** all quantities and prices are integers scaled ×1000. Every
+**Numeric:** all quantities are integers scaled ×1000. Every
 comparison is on those integers, never a float.
 
 **Reconciliation** (PRODUCT doc §2): group both sides by normalised

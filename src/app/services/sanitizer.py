@@ -21,7 +21,7 @@ is harmless - an exact integer is still what every comparison operates on.
 
 from __future__ import annotations
 
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 from babel.numbers import NumberFormatError, parse_decimal
 
@@ -71,31 +71,3 @@ def parse_quantity_scaled(raw_qty_str: str, locale: str = "en_IN") -> int:
             f"{MAX_DECIMAL_PLACES}): {raw_qty_str!r}"
         )
     return int(val * 1000)
-
-
-def parse_price_scaled(raw_price_str: str | None) -> int:
-    """Parse a printed unit price to a scaled integer (x1000).
-
-    Prices are documentation only (they never decide a verdict), so this is
-    deliberately more permissive than the quantity parser: signed values,
-    more than two decimals, and zero are all real in vendor documents
-    (per-metre rates, credit lines, free-of-charge lines). The old path reused
-    `parse_quantity_scaled`, which turned "0.125" and "-250.00" into 0 — a
-    silent wrong price in the packet.
-    """
-    if raw_price_str is None or not str(raw_price_str).strip():
-        return 0
-    cleaned = str(raw_price_str).strip().replace(",", "")
-    try:
-        val = Decimal(cleaned)
-    except Exception:
-        return 0
-    if not val.is_finite():
-        return 0
-    # A misread long number (barcode, concatenated column) must not overflow the
-    # SQLite INTEGER column and block the document; prices are documentation only.
-    if abs(val) > Decimal("1e12"):
-        return 0
-    # Keep the column's x1000 contract; half-up is the least surprising rule
-    # for a price with more precision than the column can hold.
-    return int((val * 1000).quantize(Decimal("1"), rounding=ROUND_HALF_UP))

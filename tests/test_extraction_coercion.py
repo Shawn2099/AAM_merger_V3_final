@@ -15,8 +15,9 @@ from pydantic import ValidationError
 
 # sha256 of json.dumps(_VLMPageExtraction.model_json_schema(), sort_keys=True, indent=1)
 # captured BEFORE the before-validators were added. The validators must not change
-# the schema instructor sends to the model.
-_SCHEMA_SHA256_BEFORE_COERCION = "2e9a09d12dc6c2fb0bcb02af6f8e3d82086060b7c4838e6dbe79c58237782118"
+# the schema instructor sends to the model. Re-pinned when unit_price was removed from
+# _VLMLineItem (the only schema change).
+_SCHEMA_SHA256_BEFORE_COERCION = "acf27e88ea587e4f2b0397cada4824d7008d6273190e2c46b3a37325a7f668fb"
 
 
 def test_schema_sent_to_model_is_unchanged():
@@ -111,4 +112,4 @@ def test_whole_page_with_numeric_quantity_validates():
     assert doc.po_reference == "210851"
     assert [li.quantity for li in doc.line_items] == ["50", "12.5"]
     assert doc.line_items[0].line_item_no == "1"
-    assert doc.line_items[1].unit_price == "350"
+    assert "unit_price" not in doc.line_items[1].model_dump()

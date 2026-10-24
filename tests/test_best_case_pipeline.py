@@ -70,10 +70,8 @@ def _extraction(doc_type, number, po_ref, lines):
         po_reference_ambiguous=False,
         vendor_name="ACME TRADING EST.",
         line_items=[
-            ext._VLMLineItem(
-                line_item_no=no, description=desc, quantity=qty, unit_price=price, dn_no=None
-            )
-            for no, desc, qty, price in lines
+            ext._VLMLineItem(line_item_no=no, description=desc, quantity=qty, dn_no=None)
+            for no, desc, qty, _price in lines
         ],
     )
 
@@ -206,7 +204,6 @@ def test_best_case_reaches_a_merged_packet(pipeline, fake_vlm, monkeypatch):
         assert po_lines["1"].quantity == 50_000
         assert po_lines["2"].quantity == 100_000
         assert po_lines["3"].quantity == 200_000
-        assert po_lines["1"].unit_price == 350_000
 
     # the merged packet exists, is named from the invoice, and has every page
     out = list(Path(cfg.paths.output_folder).iterdir())

@@ -77,7 +77,6 @@ def _create_poset_with_docs(tmp_path, cfg, po_no="PO-1234", status=None, docs_in
                     line_item_no="1",
                     description=f"{dt} item",
                     quantity=1000,
-                    unit_price=1000,
                 )
             )
         s.commit()

@@ -64,10 +64,8 @@ def _extraction(doc_type, number, po_ref, lines, **kw):
         po_reference_ambiguous=kw.get("ambiguous", False),
         vendor_name="ACME TRADING EST.",
         line_items=[
-            ext._VLMLineItem(
-                line_item_no=no, description=desc, quantity=qty, unit_price=price, dn_no=None
-            )
-            for no, desc, qty, price in lines
+            ext._VLMLineItem(line_item_no=no, description=desc, quantity=qty, dn_no=None)
+            for no, desc, qty, _price in lines
         ],
     )
 
@@ -295,7 +293,6 @@ def test_reconciled_set_with_no_invoice_number_merges_as_the_po_number(env, vlm)
                     line_item_no="1",
                     description="NUT, HEX 9/16",
                     quantity="50.00",
-                    unit_price="350.00",
                 )
             ],
         ),

@@ -73,23 +73,17 @@ def _status(cfg, doc_id):
 # ======================================================================= DB-level faults
 
 
-def test_absurd_unit_price_does_not_leave_document_stuck_in_processing(rcfg, monkeypatch):
-    HttpVLM(
-        monkeypatch,
-        {W_DN: extraction("DN", "DN-1", PO_NO, [line("1", "10", price="100000000000000000")])},
-    )
+def test_a_stray_unit_price_in_the_vlm_reply_is_ignored(rcfg, monkeypatch):
+    stray = line("1", "10")
+    stray["unit_price"] = "100000000000000000"  # price is not extracted; a stray key is ignored
+    HttpVLM(monkeypatch, {W_DN: extraction("DN", "DN-1", PO_NO, [stray])})
     doc_id, extract = _ingest_and_extract(rcfg, "dn.pdf", W_DN)
-    extract()  # the absurd price is sanitised to 0 and never blocks the document
+    extract()
     status, _attempts, _ = _status(rcfg, doc_id)
     assert status == ExtractionStatus.valid
+    from app.models.models import LineItem
 
-
-def test_absurd_unit_price_is_sanitised_to_zero():
-    from app.services.sanitizer import parse_price_scaled
-
-    assert parse_price_scaled("100000000000000000") == 0
-    assert parse_price_scaled("-100000000000000000") == 0
-    assert parse_price_scaled("12.5") == 12500
+    assert not hasattr(LineItem, "unit_price")
 
 
 def test_db_error_at_extraction_commit_ends_as_a_counted_failure(rcfg, monkeypatch):

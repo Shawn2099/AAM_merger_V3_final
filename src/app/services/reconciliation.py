@@ -598,7 +598,6 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 "line_item_no": li.line_item_no,
                 "description": li.description,
                 "quantity": li.quantity,
-                "unit_price": li.unit_price,
             }
             for d in po_docs
             for li in d.line_items
@@ -611,7 +610,6 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 "line_item_no": li.line_item_no,
                 "description": li.description,
                 "quantity": li.quantity,
-                "unit_price": li.unit_price,
             }
             for d in dn_source
             for li in d.line_items
@@ -621,7 +619,6 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 "line_item_no": li.line_item_no,
                 "description": li.description,
                 "quantity": li.quantity,
-                "unit_price": li.unit_price,
             }
             for d in si_source
             for li in d.line_items

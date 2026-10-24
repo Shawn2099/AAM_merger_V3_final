@@ -109,7 +109,6 @@ def _add_doc(
                 line_item_no=line_no,
                 description=f"item {line_no}",
                 quantity=qty * 1000,
-                unit_price=1000,
             )
         )
     s.flush()
@@ -328,7 +327,6 @@ def test_the_recovery_flow_reads_a_document_a_dead_worker_left_behind(tmp_path, 
                 line_item_no="1",
                 description="NUT, HEX 9/16",
                 quantity="50.00",
-                unit_price="350.00",
                 dn_no=None,
             )
         ],

@@ -64,7 +64,7 @@ partial merge.
 
 | Only these are compared | Never compared |
 |---|---|
-| `line_item_no` (the key) | price / unit_price |
+| `line_item_no` (the key) | price (not extracted) |
 | quantity (scaled integer) | description (except the numberless fallback) |
 | | UOM (not stored) |
 | | part number / SKU (not stored) |

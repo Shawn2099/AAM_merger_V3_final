@@ -52,8 +52,8 @@ def _extraction(doc_type, number, po_ref, lines):
         po_reference_ambiguous=False,
         vendor_name="ACME TRADING EST.",
         line_items=[
-            ext._VLMLineItem(line_item_no=n, description=d, quantity=q, unit_price=p, dn_no=None)
-            for n, d, q, p in lines
+            ext._VLMLineItem(line_item_no=n, description=d, quantity=q, dn_no=None)
+            for n, d, q, _p in lines
         ],
     )
 

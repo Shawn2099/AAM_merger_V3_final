@@ -52,7 +52,6 @@ def _run(tmp_path, si_pages, po_lines=(("1", 100), ("2", 50))):
                         document_id=d.id,
                         line_item_no=ln,
                         description="item",
-                        unit_price=0,
                         quantity=qty * 1000,
                     )
                 )

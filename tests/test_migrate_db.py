@@ -22,7 +22,14 @@ import migrate_db  # noqa: E402
 
 from app.core.config import load_config  # noqa: E402
 from app.core.database import get_engine  # noqa: E402
-from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus  # noqa: E402
+from app.models import (  # noqa: E402
+    DocType,
+    Document,
+    ExtractionStatus,
+    LineItem,
+    POSet,
+    POSetStatus,
+)
 from app.models.base import Base  # noqa: E402
 
 
@@ -78,6 +85,8 @@ def _drop_legacy_gap(db_path: Path) -> None:
         conn.execute("ALTER TABLE po_sets DROP COLUMN customs_append_pending")
         conn.execute("ALTER TABLE po_sets DROP COLUMN po_no_letters")
         conn.execute("CREATE UNIQUE INDEX ix_documents_sha256_hash ON documents (sha256_hash)")
+        # The live DB still had the NOT NULL price column the code no longer writes.
+        conn.execute("ALTER TABLE line_items ADD COLUMN unit_price INTEGER NOT NULL DEFAULT 0")
         conn.execute("DROP TABLE IF EXISTS alembic_version")
         conn.commit()
     finally:
@@ -99,6 +108,8 @@ def test_a_fresh_database_is_built_to_head(rig):
     cols = {r[1] for r in conn.execute("pragma table_info(documents)")}
     indexes = {r[0] for r in conn.execute("select name from sqlite_master where type='index'")}
     assert {"documents", "line_items", "po_sets", "audit_log"} <= tables
+    li_cols = {r[1] for r in conn.execute("pragma table_info(line_items)")}
+    assert "unit_price" not in li_cols
     assert "po_no_source" in cols
     assert "archived_at" in cols
     assert "uq_po_sets_open_po_no" in indexes
@@ -171,16 +182,17 @@ def test_a_create_all_database_is_stamped_then_upgraded_and_keeps_data(rig):
         ps = POSet(po_no_normalized="PO-LIVE", status=POSetStatus.pending)
         s.add(ps)
         s.flush()
-        s.add(
-            Document(
-                sha256_hash="a" * 64,
-                original_filename="kept.pdf",
-                stored_path=str(tmp_path / "stored" / "kept.pdf"),
-                doc_type=DocType.PO,
-                extraction_status=ExtractionStatus.valid,
-                po_set_id=ps.id,
-            )
+        kept = Document(
+            sha256_hash="a" * 64,
+            original_filename="kept.pdf",
+            stored_path=str(tmp_path / "stored" / "kept.pdf"),
+            doc_type=DocType.PO,
+            extraction_status=ExtractionStatus.valid,
+            po_set_id=ps.id,
         )
+        s.add(kept)
+        s.flush()
+        s.add(LineItem(document_id=kept.id, line_item_no="1", description="W", quantity=5000))
         s.commit()
 
     _drop_legacy_gap(db)
@@ -198,6 +210,16 @@ def test_a_create_all_database_is_stamped_then_upgraded_and_keeps_data(rig):
         assert doc.original_filename == "kept.pdf"
         assert doc.po_no_source is None
         assert s.query(POSet).filter_by(po_no_normalized="PO-LIVE").one()
+        assert s.query(LineItem).one().quantity == 5000
+    conn = sqlite3.connect(str(db))
+    try:
+        assert "unit_price" not in {r[1] for r in conn.execute("pragma table_info(line_items)")}
+        indexes = {r[0] for r in conn.execute("select name from sqlite_master where type='index'")}
+        assert "ix_line_items_document_id" in indexes
+        fks = conn.execute("pragma foreign_key_list(line_items)").fetchall()
+        assert any(row[2] == "documents" for row in fks)
+    finally:
+        conn.close()
 
 
 def test_a_current_database_without_a_version_row_is_stamped_at_head(rig):
@@ -242,3 +264,63 @@ def test_duplicate_open_sets_are_refused_with_the_po_numbers(rig):
 
     with pytest.raises(RuntimeError, match="DUP"):
         migrate_db.migrate(backup=False)
+
+
+def test_a_database_at_the_previous_head_with_unit_price_drops_the_column_and_keeps_rows(rig):
+    cfg = rig[1]
+    db = Path(cfg.paths.database_path)
+    Base.metadata.create_all(get_engine(cfg))
+    from sqlalchemy.orm import Session
+
+    with Session(get_engine(cfg)) as s:
+        ps = POSet(po_no_normalized="PO-OLD", status=POSetStatus.pending)
+        s.add(ps)
+        s.flush()
+        doc = Document(
+            sha256_hash="b" * 64,
+            original_filename="old.pdf",
+            stored_path="old.pdf",
+            doc_type=DocType.PO,
+            extraction_status=ExtractionStatus.valid,
+            po_set_id=ps.id,
+        )
+        s.add(doc)
+        s.flush()
+        s.add_all(
+            [
+                LineItem(document_id=doc.id, line_item_no="1", description="A", quantity=1000),
+                LineItem(document_id=doc.id, line_item_no="2", description="B", quantity=2000),
+            ]
+        )
+        s.commit()
+    conn = sqlite3.connect(str(db))
+    conn.execute("ALTER TABLE line_items ADD COLUMN unit_price INTEGER NOT NULL DEFAULT 0")
+    conn.execute("UPDATE line_items SET unit_price = 350000")
+    conn.execute("DROP TABLE IF EXISTS alembic_version")
+    conn.commit()
+    conn.close()
+
+    # Columns prove everything up to the previous head, not the drop.
+    assert migrate_db.detect_stamp(db) == "a9b0c1d2e3f4"
+    report = migrate_db.migrate(backup=False)
+    migrate_db.verify(report)
+
+    assert report["revision"] == migrate_db.HEAD_REVISION
+    conn = sqlite3.connect(str(db))
+    try:
+        assert "unit_price" not in {r[1] for r in conn.execute("pragma table_info(line_items)")}
+        rows = conn.execute("select line_item_no, quantity from line_items order by id").fetchall()
+        assert rows == [("1", 1000), ("2", 2000)]
+    finally:
+        conn.close()
+
+
+def test_verify_refuses_a_database_that_still_has_unit_price(rig):
+    cfg = rig[1]
+    report = migrate_db.migrate(backup=False)
+    conn = sqlite3.connect(str(cfg.paths.database_path))
+    conn.execute("ALTER TABLE line_items ADD COLUMN unit_price INTEGER NOT NULL DEFAULT 0")
+    conn.commit()
+    conn.close()
+    with pytest.raises(RuntimeError, match="unit_price"):
+        migrate_db.verify(report)

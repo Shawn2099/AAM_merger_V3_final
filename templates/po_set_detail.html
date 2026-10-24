@@ -249,7 +249,6 @@
           <th style="text-align:right;">PO Ordered</th>
           <th style="text-align:right;">DN Delivered</th>
           <th style="text-align:right;">SI Invoiced</th>
-          <th style="text-align:right;">Unit Price</th>
           <th style="text-align:center;">Verdict</th>
         </tr>
       </thead>
@@ -274,11 +273,6 @@
               {{ '{:g}'.format(r.si_agg_qty) }}
             </span>
           </td>
-
-          <td style="text-align:right; font-family:ui-monospace, monospace; font-size:0.85rem;">
-            <span class="muted">{{ '{:g}'.format(r.po_price) if r.po_price else '—' }}</span>
-          </td>
-
           <td style="text-align:center;">
             <span class="badge {{ r.badge }}">{{ r.verdict }}</span>
             {% if r.desc_matched %}

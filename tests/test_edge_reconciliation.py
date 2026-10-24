@@ -72,7 +72,6 @@ def harness(tmp_path):
                             line_item_no=ln.get("no"),
                             description=ln.get("desc", "Widget"),
                             quantity=ln["qty"],
-                            unit_price=ln.get("price", 100000),
                         )
                     )
                 s.commit()

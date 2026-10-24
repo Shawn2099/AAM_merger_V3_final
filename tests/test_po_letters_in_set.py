@@ -86,7 +86,6 @@ def _set(cfg, set_raw: str, docs: list[tuple[DocType, str]]) -> int:
                     line_item_no="1",
                     description="Item",
                     quantity=10_000,
-                    unit_price=1_000,
                 )
             )
         s.commit()

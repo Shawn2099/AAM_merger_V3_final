@@ -79,7 +79,6 @@ def _doc(s, cfg, ps_id, dtype, name, lines=(), **extra):
                 line_item_no=no,
                 description="Widget",
                 quantity=qty,
-                unit_price=1000,
             )
         )
     return d
@@ -139,14 +138,12 @@ def test_matrix_uses_one_row_per_comparison_key():
             "line_item_no": "1",
             "description": "A",
             "quantity": 40_000,
-            "unit_price": 1000,
         },
         {
             "doc_type": "PO",
             "line_item_no": "1",
             "description": "A",
             "quantity": 60_000,
-            "unit_price": 1000,
         },
     ]
     dn = [{"doc_type": "DN", "line_item_no": "1", "description": "A", "quantity": 100_000}]
@@ -436,17 +433,6 @@ def test_quarantine_delete_keeps_a_same_named_file_with_different_bytes(tmp_path
     incoming.write_bytes(b"%PDF-1.4 a different file with the same name")
     delete_quarantined(pid, cfg)
     assert incoming.exists(), "a hash mismatch must not be treated as the deleted document"
-
-
-def test_price_parser_keeps_fractional_and_negative_rates():
-    from app.services.sanitizer import parse_price_scaled
-
-    assert parse_price_scaled("0.125") == 125
-    assert parse_price_scaled("-250.00") == -250_000
-    assert parse_price_scaled("1,234.50") == 1_234_500
-    assert parse_price_scaled(None) == 0
-    assert parse_price_scaled("") == 0
-    assert parse_price_scaled("not a number") == 0
 
 
 def test_force_merge_writes_a_truthful_reason(tmp_path):

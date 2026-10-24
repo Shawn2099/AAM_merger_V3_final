@@ -78,7 +78,6 @@ def _doc(s, cfg, ps_id, dtype, name, lines=(), **extra):
                 line_item_no=ln.get("no"),
                 description=ln.get("desc", "Widget"),
                 quantity=ln["qty"],
-                unit_price=ln.get("price", 1000),
             )
         )
     s.commit()

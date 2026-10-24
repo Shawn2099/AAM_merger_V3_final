@@ -101,7 +101,6 @@ def test_prop_reconcile_verdict_is_sound(data):
                     line_item_no=no,
                     description=desc,
                     quantity=q,
-                    unit_price=1000,
                 )
             )
         s.commit()

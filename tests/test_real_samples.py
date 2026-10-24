@@ -459,7 +459,6 @@ def _build(tmp_path, po_no, spec):
                         line_item_no=line_no,
                         description=desc,
                         quantity=q,
-                        unit_price=100000,
                     )
                 )
                 s.commit()
