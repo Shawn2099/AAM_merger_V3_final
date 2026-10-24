@@ -43,7 +43,7 @@ Code: `services/customs.py`, `services/merge.py`, `services/reconciliation.py`, 
 - Check the file before uploading; there is no content check.
 - Keep Customs Check ON while replacing a file; with it OFF a later upload does not rebuild a packet.
 - Turning the switch OFF after an append leaves the customs pages in the packet. Nothing rebuilds it without them.
-- Turning the switch on or off is not audited (known limitation, `test_known_limitation_customs_toggle_writes_no_audit_row`).
+- Turning the switch on or off is audited (H1-5): action `manual_status_change`, note "Customs check switched ON/OFF".
 
 ## Known limits (accepted)
 - No copy of the pre-customs packet.

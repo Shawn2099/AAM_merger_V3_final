@@ -100,12 +100,41 @@ def test_known_limitation_dn_number_collision_attaches(cfg):
 # --- L: missing audit rows ----------------------------------------------------
 
 
-def test_known_limitation_customs_toggle_writes_no_audit_row(cfg, client):
+def test_customs_toggle_writes_an_audit_row(cfg, client):
+    # Was a pinned limitation (no audit row); fixed by H1-5. The switch decides whether
+    # a packet must contain customs pages, so each flip is recorded.
+    import json
+
     pid = _std(cfg, "NOAUD")
     assert reconcile_po_set(pid, cfg)["status"] == "merged"
     _doc(cfg, pid, DocType.CUSTOMS, "noaud-c.pdf", [], po_no="NOAUD", seed="noaud-c")
     before = _audit_count(cfg, pid)
     assert client.post(f"/po_sets/{pid}/toggle_customs").status_code == 200
+    assert client.post(f"/po_sets/{pid}/toggle_customs").status_code == 200
+    with Session(get_engine(cfg)) as s:
+        rows = (
+            s.query(AuditLog).filter(AuditLog.po_set_id == pid).order_by(AuditLog.id.asc()).all()
+        )[before:]
+    assert [json.loads(r.detail)["customs_check"] for r in rows] == [True, False]
+    assert [json.loads(r.detail)["note"] for r in rows] == [
+        "Customs check switched ON",
+        "Customs check switched OFF",
+    ]
+    assert {r.source for r in rows} == {"operator"}
+
+
+def test_a_refused_customs_toggle_writes_no_audit_row(cfg, client):
+    pid = _std(cfg, "NOAUD2")
+    with Session(get_engine(cfg)) as s:
+        from app.models import POSet
+
+        ps = s.get(POSet, pid)
+        from datetime import UTC, datetime
+
+        ps.archived_at = datetime.now(UTC)
+        s.commit()
+    before = _audit_count(cfg, pid)
+    assert client.post(f"/po_sets/{pid}/toggle_customs").status_code >= 400
     assert _audit_count(cfg, pid) == before
 
 

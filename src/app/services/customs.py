@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
+
 from sqlalchemy.orm import Session
 
 from app.core.database import get_engine
-from app.models import DocType, POSet, POSetStatus
+from app.models import AuditAction, AuditLog, DocType, POSet, POSetStatus
 from app.models.base import Base
 
 
@@ -88,6 +90,21 @@ def toggle_customs(po_set_id: int, cfg) -> POSet:
         ):
             ps.status = POSetStatus.pending
 
+        # The switch decides whether the packet must contain customs pages, so each
+        # flip is recorded in the same commit as the flip.
+        s.add(
+            AuditLog(
+                po_set_id=ps.id,
+                action=AuditAction.manual_status_change,
+                detail=json.dumps(
+                    {
+                        "note": f"Customs check switched {'ON' if ps.has_customs_toggle else 'OFF'}",
+                        "customs_check": ps.has_customs_toggle,
+                    }
+                ),
+                source="operator",
+            )
+        )
         s.commit()
         s.refresh(ps)
         # ensure documents are loaded for caller's is_blocked check

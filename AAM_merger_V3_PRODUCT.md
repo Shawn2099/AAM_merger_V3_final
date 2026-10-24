@@ -1119,10 +1119,8 @@ pinned by a test.
 
 ### L — some operator actions write no audit row
 
-Toggling customs writes no `audit_log` row. Reclassify, Re-Extract (`redo_*`) and
-upload also write none. Pinned for the customs
-toggle by `test_known_limitation_customs_toggle_writes_no_audit_row`; the others
-are not yet pinned.
+Reclassify, Re-Extract (`redo_*`) and the customs/shipping upload write no `audit_log` row; they are not yet
+pinned. Toggling the customs requirement now writes one (H1-5, `test_customs_toggle_writes_an_audit_row`).
 
 ### L — a manual Scan needs the Prefect server
 
