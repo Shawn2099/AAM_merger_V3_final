@@ -209,18 +209,21 @@ def test_a_missing_stored_file_is_recorded_and_the_removal_goes_ahead(cfg):
         assert s.get(POSet, set_id) is None
 
 
-def test_a_failed_copy_leaves_rows_and_input_untouched_and_no_folder(cfg, monkeypatch):
+def test_a_failed_copy_leaves_rows_and_input_untouched_and_keeps_the_folder_as_failed(
+    cfg, monkeypatch
+):
+    """Review 2: a step-1 failure keeps the folder, reported as failed, with a 500 for the operator."""
     set_id, doc_ids, input_copy, _unrelated = _set_with_files(cfg)
     monkeypatch.setattr(q, "_same_bytes", lambda path, data: False)
-    with pytest.raises(OSError):
+    with pytest.raises(q.SetRemovalRefused) as exc:
         q.remove_set_to_quarantine(set_id, cfg)
+    assert exc.value.status_code == 500
     with Session(get_engine(cfg)) as s:
         assert s.get(POSet, set_id) is not None
         assert len(s.scalars(select(Document).where(Document.id.in_(doc_ids))).all()) == 2
     assert input_copy.is_file()
+    # The failure is before the folder is renamed into place, so there is no folder to keep.
     assert _removed_folders(cfg) == []
-    base = Path(cfg.paths.quarantine_folder) / q.REMOVED_SETS_FOLDER
-    assert not base.exists() or list(base.iterdir()) == []
 
 
 def test_the_route_removes_the_set_and_shows_the_folder(cfg, client):
@@ -410,7 +413,7 @@ def test_a_real_restore_failure_keeps_the_only_copy_and_says_so(cfg, monkeypatch
     with pytest.raises(q.SetRemovalRefused) as exc:
         q.remove_set_to_quarantine(set_id, cfg)
     assert exc.value.status_code == 500
-    assert "could not be put back" in exc.value.message
+    assert "Input files not put back" in exc.value.message
     folder = _removed_folders(cfg)[0]
     moved = [p for p in (folder / "input").iterdir() if p.suffix == ".pdf"]
     assert moved, "the moved copy stays in the folder when it cannot be restored"
@@ -522,3 +525,22 @@ def test_the_same_bytes_can_be_added_again_after_removal(cfg):
         )
         s.commit()
         assert s.query(Document).filter(Document.sha256_hash == sha).count() == 1
+
+
+def test_an_unreadable_input_file_stops_the_removal(cfg, monkeypatch):
+    """Review 1: an input file that cannot be read might hold the set's bytes; the removal stops."""
+    set_id, doc_ids, input_copy, unrelated = _set_with_files(cfg, po="PO8700")
+    real_read = Path.read_bytes
+
+    def unreadable(self):
+        if self.name == "unrelated.pdf":
+            raise OSError("locked by another program")
+        return real_read(self)
+
+    monkeypatch.setattr(Path, "read_bytes", unreadable)
+    with pytest.raises(q.SetRemovalRefused) as exc:
+        q.remove_set_to_quarantine(set_id, cfg)
+    assert exc.value.status_code == 500
+    with Session(get_engine(cfg)) as s:
+        assert s.get(POSet, set_id) is not None
+    assert unrelated.is_file()

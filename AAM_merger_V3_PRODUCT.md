@@ -515,6 +515,16 @@ on the new set's page.
 A future set that reuses the old id does not adopt the old folder: the marker is
 rewritten to `removed:<id>:<stamp>`.
 
+Audit detail: the old audit rows keep their history, but their `po_set_id` link is
+cleared (ON DELETE SET NULL); that link survives only in `audit_log.json` in the
+removal folder and in the new audit row's detail.
+
+Failure behaviour: if any step fails, nothing is deleted. Input files moved out are
+put back, and the folder is kept with REMOVAL_FAILED.txt and a 500 that names it.
+An unreadable input-folder file stops the removal, because it might hold the set's
+bytes. The shared-hash rule: an input copy is left in place when another active
+document holds the same bytes.
+
 > The same bytes can be added again after a removal: the removed rows are gone, so the
 > hash is free (test_the_same_bytes_can_be_added_again_after_removal).
 

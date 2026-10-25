@@ -353,12 +353,14 @@ def _configured_allowed_hosts() -> list[str]:
     return hosts or ["*"]
 
 
-def _styled_http_error(request: Request, exc: StarletteHTTPException):
+def _styled_http_error(request: Request, exc: Exception):
     """A browser navigation to an unknown page gets the themed error page.
 
     API clients, HTMX requests and any non-404 status keep the JSON body that
     FastAPI returns by default. Synchronous on purpose: it does no I/O.
     """
+    if not isinstance(exc, StarletteHTTPException):
+        raise exc
     if exc.status_code == 404 and wants_html(request) and "HX-Request" not in request.headers:
         message = (
             "There is no page at this address. Check the link, or go back to the dashboard."

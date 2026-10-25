@@ -718,7 +718,7 @@ def _set_aside_locked(doc_id: int, cfg) -> Path | None:
             .values(archived_at=datetime.now(UTC))
         )
         s.commit()
-        if result.rowcount == 0:
+        if (getattr(result, "rowcount", 0) or 0) == 0:
             raise SetAsideRefused(
                 409, "The document changed while it was being moved. Reload the page and try again."
             )
@@ -1433,12 +1433,12 @@ def remove_set_to_quarantine(
         missing: list[str] = []
         try:
             for d in doc_rows:
-                src = Path(d["stored_path"])
+                src = Path(str(d["stored_path"]))
                 if not src.is_file():
-                    missing.append(d["filename"])
+                    missing.append(str(d["filename"]))
                     continue
                 data = src.read_bytes()
-                name = _unique_name(files_dir, d["filename"] or src.name)
+                name = _unique_name(files_dir, str(d["filename"] or src.name))
                 (files_dir / name).write_bytes(data)
                 if not _same_bytes(files_dir / name, data):
                     raise OSError(f"copy verification failed for {d['filename']}")
@@ -1498,10 +1498,14 @@ def remove_set_to_quarantine(
             stage.rename(final)
 
             input_dir = final / "input"
+            unreadable: list[str] = []
             for pdf in input_pdfs(cfg):
                 try:
                     data = pdf.read_bytes()
                 except OSError:
+                    # An unreadable input file might hold these bytes. Skipping it would let
+                    # the rows go and the file re-form a set on the next sync (review 1).
+                    unreadable.append(pdf.name)
                     continue
                 if hashlib.sha256(data).hexdigest() not in shas:
                     continue
@@ -1513,20 +1517,22 @@ def remove_set_to_quarantine(
                     raise OSError(f"copy verification failed for input file {pdf.name}")
                 pdf.unlink(missing_ok=True)
                 moved.append((copy, pdf))
-        except Exception:
+            if unreadable:
+                raise OSError(f"input files could not be read: {', '.join(unreadable)}")
+        except Exception as exc:
+            # Any failure in step 1: put the moved inputs back, keep the folder and say
+            # why (review 2). Nothing has been deleted from the database yet.
             failed = _restore_input_copies(moved)
             shutil.rmtree(stage, ignore_errors=True)
+            reasons = ["The removal failed and nothing was deleted."]
             if failed:
-                # Keep the folder: it holds the only copy of the files not put back (M2).
-                message = (
-                    "The removal failed and nothing was deleted. Files could not be put back "
-                    f"in the input folder ({', '.join(failed)}); they are in "
-                    f"{REMOVED_SETS_FOLDER}/{final.name}."
-                )
+                reasons.append(f"Input files not put back: {', '.join(failed)}.")
+            if final.is_dir():
+                reasons.append(f"The copies are in {REMOVED_SETS_FOLDER}/{final.name}.")
+            message = " ".join(reasons)
+            if final.is_dir():
                 _mark_removal_failed(final, message)
-                raise SetRemovalRefused(500, message) from None
-            shutil.rmtree(final, ignore_errors=True)
-            raise
+            raise SetRemovalRefused(500, message) from exc
 
         try:
             with Session(eng) as s:
@@ -1582,10 +1588,11 @@ def remove_set_to_quarantine(
                 s.commit()
         except SetRemovalRefused as exc:
             failed = _restore_input_copies(moved)
-            _mark_removal_failed(final, exc.message)
+            message = exc.message
             if failed:
-                _mark_removal_failed(final, f"Input files not put back: {', '.join(failed)}.")
-            raise
+                message += f" Input files not put back: {', '.join(failed)}."
+            _mark_removal_failed(final, message)
+            raise SetRemovalRefused(exc.status_code, message) from None
         except Exception as exc:
             # The transaction rolled back, so no row changed. Put the input files back
             # and keep the folder, so the operator can see where the copies are (A2).
