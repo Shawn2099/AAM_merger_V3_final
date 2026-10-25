@@ -19,16 +19,20 @@ Below the form, a **Fixed by IT** table shows (read only) the folders, database 
 midnight-sweep switch and zone, packet page order, number locale and the API-key variable name. It also
 says whether the API key is set; the key itself is never shown, stored or posted.
 
-## What can be changed (28 settings)
+## What can be changed (25 settings)
 
 | Group | Keys |
 |---|---|
 | Watching the input folder | `schedule.poll_enabled`, `poll_interval_seconds`, `merge_settle_minutes`; `ingestion.stability_poll_interval_seconds`, `stability_poll_count` |
-| Reading documents (AI) | `vlm.model`, `request_timeout_seconds`, `raster_dpi`, `reasoning_effort`, `max_pages`; `extraction.max_retries`, `stale_processing_seconds`, `split_combined` |
-| Matching and merging rules | `reconciliation.single_po_document`; `matching.fuzzy_description_threshold`; the four `matching.line_number_fallback.*` switches |
+| Reading documents (AI) | `vlm.model`, `request_timeout_seconds`, `raster_dpi`, `reasoning_effort`, `max_pages`; `extraction.max_retries`, `stale_processing_seconds` |
+| Matching and merging rules | `matching.fuzzy_description_threshold` (page minimum 80, model 0-100); the four `matching.line_number_fallback.*` switches |
 | Locks | `concurrency.po_set_lock_timeout_seconds` |
 | Merge PDFs tool | `manual_merge.max_files`, `max_pages`, `max_total_mb`, `sweep_after_hours`, `sweep_on_startup` |
-| Log file | `logging.level`, `max_file_size_mb`, `backup_count` |
+| Log file | `logging.level`, `max_file_size_mb` |
+
+Shown read only under **Fixed by IT** (removed from the editable list): `reconciliation.single_po_document`
+(turning it off is not supported), `extraction.split_combined` (outside the current scope) and
+`logging.backup_count` (two services write the log; needs IT).
 
 Deliberately **not** editable here (decision, deviates from the earlier Q1 answer that listed paths as
 "restart-needed"): all `paths.*`, `server.*` and `allowed_hosts`, `vlm.api_key_env_var`, `merge.legal_order`,
@@ -65,8 +69,12 @@ not act. They stay in `config.yaml`, changed by IT.
 `load_config` keeps the last config that loaded and validated, per file. If the file later becomes unreadable or
 invalid, the service logs one error per edit and **keeps running on the last good settings**; the dashboard and every
 other page keep working. The Settings page shows a red banner with the reason, and refuses saves until IT repairs the
-file or restores a copy from `config_backups`. A service **started** on a broken file still refuses to start
-(SPEC 13.1 fail-fast is unchanged: there is no earlier good copy to trust).
+file or restores a copy from `config_backups`. A service **started** on a broken file (a restart, or a fresh
+Prefect nightly process) has no in-memory copy, so `load_config` runs on the **newest valid file in
+`config_backups`** (newest first, an invalid one is skipped), logs one loud error naming the backup, and remembers
+it as the last good copy. Relative paths in that backup resolve against the real config directory, not
+`config_backups`. The Settings page then shows the same red banner. Only when no backup validates does the service
+still refuse to start (SPEC 13.1 fail-fast: nothing trustworthy exists).
 
 ## How a change reaches the running service
 

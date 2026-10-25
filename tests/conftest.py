@@ -43,6 +43,7 @@ import tempfile
 from pathlib import Path
 
 import dotenv
+import pytest
 import yaml
 
 from app.core import config as config_module
@@ -142,6 +143,35 @@ def _load_config(path=None):
 
 
 config_module.load_config = _load_config
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_minimum_file_age():
+    """Tests write a file and ingest it at once; the 30 s copy-safety age would hold every one.
+
+    Session scope so module-scoped fixtures that run a sync are covered too.
+    tests/test_s2_copy_safety.py monkeypatches the real value back to exercise the rule.
+    """
+    from app.services import ingestion
+
+    saved = ingestion.MIN_FILE_AGE_SECONDS
+    ingestion.MIN_FILE_AGE_SECONDS = 0
+    yield
+    ingestion.MIN_FILE_AGE_SECONDS = saved
+
+
+@pytest.fixture(autouse=True)
+def _no_minimum_file_age_per_test(monkeypatch):
+    """Re-apply the zero age on the module object that is live NOW.
+
+    A test that reloads app modules leaves the session fixture holding a stale module object,
+    which made `test_is_file_stable_*` fail once in a full run. monkeypatch undoes this after
+    each test; the S2 tests patch the real value on top of it.
+    """
+    import importlib
+
+    ingestion = importlib.import_module("app.services.ingestion")
+    monkeypatch.setattr(ingestion, "MIN_FILE_AGE_SECONDS", 0)
 
 
 def _ensure_a_config_file() -> None:

@@ -238,7 +238,9 @@ def test_b_05_a_text_setting_cannot_carry_structure(client, cfg_file, raw):
 @pytest.mark.parametrize("raw", ["True", "1", "yes", "ON", ""])
 def test_b_06_a_boolean_is_only_on_or_off(client, cfg_file, raw):
     before = cfg_file.read_bytes()
-    r = client.post("/settings", data=_form(client, cfg_file, extraction__split_combined=raw))
+    r = client.post(
+        "/settings", data=_form(client, cfg_file, matching__line_number_fallback__step10=raw)
+    )
     assert r.status_code == 422, (raw, r.status_code)
     assert "Choose on or off" in r.text
     assert cfg_file.read_bytes() == before

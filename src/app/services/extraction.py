@@ -867,8 +867,9 @@ class ProviderRequestRejected(RuntimeError):
 
 def reset_provider_breaker() -> None:
     """Forget earlier rejections and start counting. Called at the start of every sync."""
-    global _breaker_tripped, _breaker_counting
+    global _breaker_tripped, _breaker_counting, _breaker_reason
     with _breaker_lock:
+        _breaker_reason = None
         _rejected_400.clear()
         _deferred_400.clear()
         _breaker_tripped = False
@@ -877,8 +878,9 @@ def reset_provider_breaker() -> None:
 
 def end_provider_breaker() -> None:
     """Stop counting and clear the trip, so nothing outside a sync is affected."""
-    global _breaker_tripped, _breaker_counting
+    global _breaker_tripped, _breaker_counting, _breaker_reason
     with _breaker_lock:
+        _breaker_reason = None
         _rejected_400.clear()
         _deferred_400.clear()
         _breaker_tripped = False
@@ -893,6 +895,68 @@ def rejected_400_ids() -> set[int]:
 
 def provider_breaker_tripped() -> bool:
     return _breaker_tripped
+
+
+def provider_breaker_reason() -> str | None:
+    """Operator-facing text when the breaker tripped for a key/credit/config fault, else None."""
+    return _breaker_reason if _breaker_tripped else None
+
+
+#: Set when the breaker was tripped by a fault that cannot clear within this run.
+_breaker_reason: str | None = None
+
+_FATAL_REASON_TEXT = (
+    "Reading stopped: the AI provider rejected the key or has no credit. "
+    "Fix it in .env / the provider account, then press Scan."
+)
+_CONFIG_REASON_TEXT = (
+    "Reading stopped: the AI key or model is not configured. "
+    "Fix it in .env / config.yaml, then press Scan."
+)
+
+
+def _fatal_provider_fault(exc: BaseException | None) -> str | None:
+    """Operator text if `exc` is a fault no later document can get past, else None.
+
+    HTTP 401/402/403 (key invalid, no credit, forbidden) and the fail-closed "not configured"
+    error (no API key or model). Retrying them, or reading the next document, only wastes
+    paid passes. 404 and timeouts are deliberately not included.
+    """
+    import openai
+
+    frontier: list[tuple[BaseException, int]] = [(exc, 0)] if exc is not None else []
+    seen: set[int] = set()
+    while frontier:
+        current, depth = frontier.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if (
+            isinstance(current, openai.APIStatusError)
+            and getattr(current, "status_code", None) in _FATAL_STATUS_CODES
+        ):
+            return _FATAL_REASON_TEXT
+        if isinstance(current, RuntimeError) and "not configured" in str(current):
+            return _CONFIG_REASON_TEXT
+        if depth + 1 < _INFRA_CHAIN_DEPTH:
+            for nxt in (current.__cause__, current.__context__):
+                if nxt is not None:
+                    frontier.append((nxt, depth + 1))
+    return None
+
+
+_FATAL_STATUS_CODES = (401, 402, 403)
+
+
+def _trip_provider_fatal(reason: str) -> bool:
+    """Trip the breaker for a fault that cannot clear this run. False outside a sync."""
+    global _breaker_tripped, _breaker_reason
+    with _breaker_lock:
+        if not _breaker_counting:
+            return False
+        _breaker_tripped = True
+        _breaker_reason = reason
+        return True
 
 
 def _is_http_400(exc: BaseException | None) -> bool:
@@ -1163,6 +1227,12 @@ def extract_document(doc_id: int, cfg) -> Document:
                     doc.original_filename,
                     type(e).__name__,
                 )
+                fatal = _fatal_provider_fault(e)
+                if fatal is not None and _trip_provider_fatal(fatal):
+                    # Cannot succeed on the next document either: stop the pass, and raise
+                    # the type Prefect's retry condition treats as final.
+                    logger.error("%s (cause: %s: %s)", fatal, type(e).__name__, e)
+                    raise ProviderRequestRejected(fatal) from e
                 raise e
             already_refunded = "provider_400_refund" in (doc.raw_extraction_json or "")
             is_400 = _is_http_400(e)

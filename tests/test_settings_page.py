@@ -167,7 +167,7 @@ def test_several_kinds_of_value_round_trip(client, cfg_file):
             cfg_file,
             vlm__reasoning_effort="medium",
             vlm__model="openai/gpt-6-mini",
-            extraction__split_combined=True,
+            matching__fuzzy_description_threshold=90,
             matching__line_number_fallback__step10=False,
             logging__level="DEBUG",
         ),
@@ -176,11 +176,44 @@ def test_several_kinds_of_value_round_trip(client, cfg_file):
     saved = config_module.load_config_file(cfg_file, remember=False)
     assert saved.vlm.reasoning_effort == "medium"
     assert saved.vlm.model == "openai/gpt-6-mini"
-    assert saved.extraction.split_combined is True
+    assert saved.matching.fuzzy_description_threshold == 90
     assert saved.matching.line_number_fallback.step10 is False
     assert saved.matching.line_number_fallback.step10_reverse is True
     assert saved.logging.level == "DEBUG"
     assert 'level: "DEBUG"' in cfg_file.read_text(encoding="utf-8")
+
+
+def test_the_risky_keys_are_read_only_and_their_values_shown(client, cfg_file):
+    """single_po_document, split_combined and backup_count are Fixed by IT, not editable."""
+    editable = {s.key for g in svc.GROUPS for s in g.settings}
+    read_only = {key: note for key, _label, note in svc.READ_ONLY}
+    for key in (
+        "reconciliation.single_po_document",
+        "extraction.split_combined",
+        "logging.backup_count",
+    ):
+        assert key not in editable
+        assert read_only[key]
+    html = client.get("/settings").text
+    assert 'data-key="extraction.split_combined"' not in html
+    assert 'data-key="logging.backup_count"' not in html
+    assert "Turning it off is not supported" in html
+    assert "outside the current scope" in html
+    assert "needs IT" in html
+
+
+def test_the_fuzzy_threshold_page_floor_is_80_and_the_model_still_takes_0_to_100(cfg_file):
+    setting = svc._BY_KEY["matching.fuzzy_description_threshold"]
+    assert svc._model_bounds(setting) == (80, 100)
+    assert svc._parse(setting, "80")[1] is None
+    assert svc._parse(setting, "100")[1] is None
+    _, err = svc._parse(setting, "79")
+    assert err == "Must be at least 80."
+    cfg = config_module.load_config_file(cfg_file, remember=False)
+    assert "not go below 80" in svc.describe(setting, cfg)["help"]
+    # The config model itself is unchanged: it still accepts 0 (the page floor is only a page rule).
+    model_field = config_module.MatchingConfig.model_fields["fuzzy_description_threshold"]
+    assert any(getattr(m, "ge", None) == 0 for m in model_field.metadata)
 
 
 @pytest.mark.parametrize(
@@ -195,7 +228,9 @@ def test_several_kinds_of_value_round_trip(client, cfg_file):
         ({"vlm__reasoning_effort": "extreme"}, "Choose one of"),
         ({"vlm__model": "gpt"}, "provider/name"),
         ({"vlm__model": ""}, "cannot be empty"),
-        ({"extraction__split_combined": "maybe"}, "on or off"),
+        ({"matching__fuzzy_description_threshold": 79}, "at least 80"),
+        ({"matching__fuzzy_description_threshold": 101}, "at most 100"),
+        ({"matching__line_number_fallback__step10": "maybe"}, "on or off"),
         ({"extraction__max_retries": 9}, "at most 5"),
         ({"logging__max_file_size_mb": 0}, "at least 1"),
     ],
@@ -422,6 +457,9 @@ def test_only_the_listed_settings_can_be_posted(client, cfg_file):
     data["paths.input_folder"] = "C:/Windows"
     data["vlm.api_key_env_var"] = "SOMETHING_ELSE"
     data["server.allowed_hosts"] = "evil"
+    data["extraction.split_combined"] = "true"
+    data["reconciliation.single_po_document"] = "false"
+    data["logging.backup_count"] = "5"
     r = client.post("/settings", data=data)
     assert r.status_code == 200
     assert cfg_file.read_bytes() == before

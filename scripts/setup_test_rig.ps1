@@ -111,13 +111,45 @@ Set-Location $ProjectRoot
 Write-Host "[1/8] Verifying Project Root and Python Environment..." -ForegroundColor Cyan
 Write-Host "  Project Root: $ProjectRoot"
 
+# Re-run safety: a running service keeps the SQLite file and the .pyd files of .venv open, so the
+# sync and the migration below must not run beside it. Stop them first. The installer's start step
+# starts them again; with -SkipServices they are started again before step 7.
+$stoppedServices = @()
+if ($isAdmin) {
+    foreach ($svcName in @("AAMMerger-Web", "AAMMerger-Worker", "AAMMerger-PrefectServer")) {
+        $svcObj = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+        if ($svcObj -and $svcObj.Status -ne "Stopped") {
+            try {
+                Stop-Service -Name $svcName -Force -ErrorAction Stop
+                $stoppedServices += $svcName
+                Write-Host "  Stopped $svcName for the update." -ForegroundColor Yellow
+            } catch {
+                Write-Warning "Could not stop $svcName ($($_.Exception.Message)). Stop it by hand before the update."
+            }
+        }
+    }
+}
+
 # Find uv or python
 $hasUv = [bool](Get-Command uv -ErrorAction SilentlyContinue)
 $venvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 
-if (-not $hasUv -and -not (Get-Command python -ErrorAction SilentlyContinue)) {
-    Write-Error "Neither 'uv' nor 'python' is on PATH. Install Python 3.11+ (and optionally uv) from python.org, then re-run."
-    exit 1
+if (-not $hasUv) {
+    if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+        Write-Error "Neither 'uv' nor 'python' is on PATH. Install Python 3.11+ (and optionally uv) from python.org, then re-run."
+        exit 1
+    }
+    # The Microsoft Store alias passes Get-Command but is not Python: it exits non-zero here.
+    # Native stderr must not become a terminating error while we probe.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & python -c "import sys" > $null 2>&1
+    $pythonWorks = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prevEap
+    if (-not $pythonWorks) {
+        Write-Error "Python is the Microsoft Store placeholder; install Python 3.11+ from python.org or install uv."
+        exit 1
+    }
 }
 
 if ($hasUv) {
@@ -150,6 +182,21 @@ if ($hasUv) {
 if (-not (Test-Path $venvPython)) {
     Write-Error "Python environment missing at $venvPython."
     exit 1
+}
+# PyMuPDF is a compiled wheel that loads the Visual C++ runtime. Fail here, with the fix,
+# rather than on the first PDF. Native stderr is kept out of the terminating-error path.
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& $venvPython -c "import pymupdf" > $null 2>&1
+$pymupdfWorks = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = $prevEap
+if (-not $pymupdfWorks) {
+    Write-Error "PyMuPDF will not load (the PDF reader). Install the Microsoft Visual C++ 2015-2022 x64 runtime from https://aka.ms/vs/17/release/vc_redist.x64.exe, then re-run."
+    exit 1
+}
+& $venvPython -c "import sys; sys.exit(0 if sys.version_info >= (3,12) else 1)"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "WARNING: Python older than 3.12: the copy-safety check cannot see file creation times, so files being extracted may be read early. Use Python 3.12 or newer (uv installs it automatically)." -ForegroundColor Yellow
 }
 Write-Host "  Python: $venvPython" -ForegroundColor Green
 
@@ -223,6 +270,15 @@ Write-Host "  Database schema up to date." -ForegroundColor Green
 # 4. Optional Firewall Rule
 if ($OpenFirewall) {
     Write-Host "[4/8] Configuring Windows Firewall..." -ForegroundColor Cyan
+    # The rule below allows the Domain and Private profiles only. On a Public network other PCs
+    # cannot connect, so say so now.
+    $netProfiles = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue)
+    foreach ($netProfile in $netProfiles) {
+        Write-Host "  Network '$($netProfile.Name)' profile: $($netProfile.NetworkCategory)"
+    }
+    if ($netProfiles | Where-Object { $_.NetworkCategory -eq "Public" }) {
+        Write-Host "  WARNING: the network is Public. Other PCs cannot connect to the dashboard until it is set to Private (Settings > Network & Internet > the network > Private network)." -ForegroundColor Yellow
+    }
     $ruleName = "AAM Merger V3 Web ($Port)"
     $existingRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
     if (-not $existingRule) {
@@ -329,6 +385,18 @@ if (-not $SkipServices) {
     Write-Host "[6/8] Skipping NSSM service installation (-SkipServices specified)." -ForegroundColor Gray
 }
 
+# Services stopped for the update come back here when no install ran (-SkipServices), Prefect first.
+if ($SkipServices) {
+    for ($k = $stoppedServices.Count - 1; $k -ge 0; $k--) {
+        try {
+            Start-Service -Name $stoppedServices[$k] -ErrorAction Stop
+            Write-Host "  Started $($stoppedServices[$k]) again." -ForegroundColor Green
+        } catch {
+            Write-Warning "Could not start $($stoppedServices[$k]) ($($_.Exception.Message)). Start it by hand."
+        }
+    }
+}
+
 # 7. Prefect: create the work pool and register the midnight deployment.
 #    The worker command names a pool, but nothing created it: on a fresh host
 #    `deploy_prefect.py` failed with "Work pool not found" and the nightly sync
@@ -348,7 +416,8 @@ if (-not [string]::IsNullOrWhiteSpace($prefectApi)) {
     $env:PREFECT_API_URL = $prefectApi
     Write-Host "  Prefect API: $prefectApi"
     $healthUrl = $prefectApi.TrimEnd('/') + "/health"
-    for ($i = 1; $i -le 30; $i++) {
+    # A first Prefect start (database migrations) on a slow PC can take well over 30 s.
+    for ($i = 1; $i -le 120; $i++) {
         try {
             $r = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 2
             if ($r.StatusCode -eq 200) { $apiUp = $true; break }
@@ -357,13 +426,15 @@ if (-not [string]::IsNullOrWhiteSpace($prefectApi)) {
         }
     }
     if (-not $apiUp) {
-        Write-Warning "Prefect API at $prefectApi did not answer within 30s."
+        Write-Host "Prefect API at $prefectApi did not answer within 120s." -ForegroundColor Red
     }
 }
 
+$prefectRegistered = $false
 if ($apiUp) {
     & $venvPython -m prefect work-pool create $poolName --type process --overwrite
-    if ($LASTEXITCODE -ne 0) {
+    $poolOk = ($LASTEXITCODE -eq 0)
+    if (-not $poolOk) {
         Write-Warning "Could not create work pool '$poolName'. Check the Prefect server log."
     } else {
         Write-Host "  Work pool '$poolName' ready." -ForegroundColor Green
@@ -371,9 +442,11 @@ if ($apiUp) {
 
     $deployScript = Join-Path $ProjectRoot "scripts\deploy_prefect.py"
     & $venvPython $deployScript
-    if ($LASTEXITCODE -ne 0) {
+    $deployOk = ($LASTEXITCODE -eq 0)
+    if (-not $deployOk) {
         Write-Warning "Prefect deployment registration failed. The scheduled sync will not run until this succeeds."
     }
+    $prefectRegistered = $poolOk -and $deployOk
 
     # The worker may have started before the pool existed; restart it so it
     # picks up the pool and the deployment.
@@ -386,6 +459,13 @@ if ($apiUp) {
     }
 } elseif ([string]::IsNullOrWhiteSpace($prefectApi)) {
     Write-Warning "No Prefect API configured, so the midnight sync was not scheduled. Manual 'Scan Input Folder' still works. Re-run with -WithPrefectServer (single host) or set PREFECT_API_URL."
+}
+
+# A Prefect API was configured but the pool or the midnight deployment is not registered: the
+# nightly sync would silently never run. Do not report success.
+if (-not [string]::IsNullOrWhiteSpace($prefectApi) -and -not $prefectRegistered) {
+    Write-Host "ERROR: the Prefect work pool and the midnight sync were not registered (API: $prefectApi). Fix the Prefect server (its service logs are in data\logs), then re-run this script." -ForegroundColor Red
+    exit 1
 }
 
 # 8. Smoke Check & Verification
@@ -426,7 +506,10 @@ if ($HostAddress -eq "0.0.0.0") {
         Select-Object -First 1).IPAddress
     if ($lanIp) { $displayHost = $lanIp }
 }
-Write-Host "Web Dashboard URL : http://${displayHost}:${Port}/dashboard"
+$hostName = $env:COMPUTERNAME.ToLower()
+Write-Host "Web Dashboard (by name): http://${hostName}:${Port}/dashboard"
+Write-Host "Web Dashboard (by IP)  : http://${displayHost}:${Port}/dashboard"
+Write-Host "If this PC gets a new IP address (DHCP), open it by name, or add the new address to allowed_hosts in config.yaml."
 Write-Host "Service Status    : .\scripts\manage_services.ps1 -Action status"
 Write-Host "Backup DB         : .\scripts\backup_db.ps1"
 Write-Host "Logs Directory    : $ProjectRoot\data\logs\"

@@ -445,6 +445,7 @@ def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
         doc_id_out = doc.id
         attempts = doc.extraction_attempt_count or 0
         sha = doc.sha256_hash
+        reject_reason = doc.ingest_reject_reason
         doc_rows = _document_rows([doc], {})
         s.expunge(doc)
 
@@ -495,20 +496,45 @@ def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
                     other.unlink(missing_ok=True)
             except OSError:
                 logger.warning("Could not remove duplicate input copy %s", other, exc_info=True)
+    # The text must match the case: a rejected-on-arrival file was never read,
+    # a combined file WAS read but holds several documents, and only a real
+    # extraction failure has an attempt count against the configured cap.
+    from app.services.extraction import _attempt_cap
+
+    attempts_line: list[str] = []
+    if reject_reason:
+        what_happened = (
+            f"This file was rejected on arrival ({reject_reason}) and was never read.",
+            "It has been removed from the input folder so it is not retried nightly.",
+        )
+    elif reason.startswith(("combined_document", "child_recombined", "split_failed")):
+        what_happened = (
+            "This file was read, but it holds several documents in one PDF and was not split,",
+            "so none of its content was used. A person must separate it into single documents.",
+            "It has been removed from the input folder so it is not retried nightly.",
+        )
+    else:
+        attempts_line = [
+            f"Attempts    : {attempts}/{_attempt_cap(cfg)} "
+            "(cap reached, no further automatic attempts)"
+        ]
+        what_happened = (
+            "This file could not be read, so nothing about it could be verified.",
+            "It has been removed from the input folder so it is not retried nightly.",
+        )
     text = "\n".join(
         [
             "QUARANTINED DOCUMENT",
             "=" * 60,
             f"File        : {original}",
             f"Document id : {doc_id_out}",
-            f"Attempts    : {attempts}/3 (cap reached, no further automatic attempts)",
+            *attempts_line,
             f"Reason      : {reason}",
             f"Detected    : {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}",
             "",
             "What happened",
             "-" * 60,
-            "This file could not be read, so nothing about it could be verified.",
-            "It has been removed from the input folder so it is not retried nightly.",
+            *what_happened,
             "",
             "Documents in this set",
             "-" * 60,

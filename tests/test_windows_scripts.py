@@ -143,8 +143,9 @@ def test_installer_dry_run_orders_web_after_prefect(tmp_path: Path) -> None:
     assert r.returncode == 0, out
     install_prefect = out.index("nssm install AAMMerger-PrefectServer")
     dep_worker = out.index("nssm set AAMMerger-Worker DependOnService AAMMerger-PrefectServer")
-    dep_web = out.index("nssm set AAMMerger-Web DependOnService AAMMerger-PrefectServer")
-    assert install_prefect < dep_worker < dep_web
+    assert install_prefect < dep_worker
+    # The web service must start even when Prefect fails at boot: it has no Prefect dependency.
+    assert "nssm set AAMMerger-Web DependOnService" not in out
     assert "Dry run complete" in out
     assert "[DRY-RUN] ensure log directory" in out
 
@@ -200,6 +201,23 @@ def test_setup_test_rig_declares_allow_any_host() -> None:
     assert "[switch]$AllowAnyHost" in text
     assert '$installParams["AllowAnyHost"] = $true' in text
     assert "$LASTEXITCODE -ne 0" in text
+
+
+def test_setup_test_rig_install_checks_are_in_place() -> None:
+    text = (SCRIPTS / "setup_test_rig.ps1").read_text(encoding="utf-8")
+    assert '-c "import pymupdf"' in text and "vc_redist.x64.exe" in text
+    assert "Microsoft Store placeholder" in text
+    assert "Get-NetConnectionProfile" in text
+    assert "for ($i = 1; $i -le 120; $i++)" in text
+    assert "Stop-Service -Name $svcName -Force" in text
+    assert "Prefect work pool and the midnight sync were not registered" in text
+    assert "If this PC gets a new IP address (DHCP)" in text
+
+
+def test_nssm_download_failure_says_how_to_bundle_it() -> None:
+    text = (SCRIPTS / "install_nssm_services.ps1").read_text(encoding="utf-8")
+    assert "Download nssm-2.24.zip from https://nssm.cc/release/nssm-2.24.zip" in text
+    assert "extract win64\\nssm.exe to" in text
 
 
 def test_no_control_bytes_in_deployment_files() -> None:

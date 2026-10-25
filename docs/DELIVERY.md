@@ -73,7 +73,11 @@ What it does, in order:
 
 1. syncs the Python environment (`uv sync --no-dev`, or `pip install -e .`); this installs PyMuPDF
    (`pymupdf==1.28.2`, a binary wheel used to rasterise PDF pages for the VLM; it needs the
-   Microsoft Visual C++ 2015-2022 x64 redistributable, which a fresh Windows Server 2016 may lack);
+   Microsoft Visual C++ 2015-2022 x64 redistributable, which a fresh Windows Server 2016 may lack).
+   The script then checks that `import pymupdf` works and stops with the download link
+   (https://aka.ms/vs/17/release/vc_redist.x64.exe) and exit code 1 if it does not. Python must be
+   a real install: the Microsoft Store `python` alias is refused with a message (install Python 3.11+
+   from python.org, or install uv);
 2. creates `config.yaml` if missing and the data folders;
 3. applies the database schema (`python scripts/migrate_db.py` — handles both a
    fresh database and the existing `create_all`-era database, which has no
@@ -83,18 +87,26 @@ What it does, in order:
    without it every line-item insert fails);
    After upgrading an existing rig, run `python scripts/review_merged_sets.py` (read-only) to list
    already-merged packets that need manual review.
-4. adds the inbound firewall rule for TCP 8000 (`-OpenFirewall`);
+4. adds the inbound firewall rule for TCP 8000 (`-OpenFirewall`). The rule allows the Domain and
+   Private network profiles only. If the network is Public the script prints the profile and a warning:
+   set the network to Private (Settings > Network & Internet), or other PCs cannot connect;
 5. registers the daily 01:00 database backup (`-ScheduleBackup`, no pruning,
    into `data\development\snapshots\db`) and the 01:30 copy-only development
    snapshot task for logs and PDFs;
 6. installs and starts three Windows services (NSSM log rotation is disabled;
    `PREFECT_HOME` is pinned to `data\prefect`):
    `AAMMerger-PrefectServer`, `AAMMerger-Worker`, `AAMMerger-Web`;
-7. waits for the Prefect API, creates the `aam-merger-process-pool` work pool,
-   registers the **midnight sync** deployment, and restarts the worker;
+7. waits up to 2 minutes for the Prefect API, creates the `aam-merger-process-pool` work pool,
+   registers the **midnight sync** deployment, and restarts the worker. If the API does not answer,
+   or the pool or the deployment is not registered, the script prints a red error and stops with exit
+   code 1 instead of reporting success;
 8. performs an HTTP health check.
 
-It prints the dashboard URL using this machine's LAN IP. Services start on boot.
+Before anything else it stops `AAMMerger-Web`, `AAMMerger-Worker` and `AAMMerger-PrefectServer` (if
+they exist), so a re-run never migrates a live database; the installer starts them again.
+
+It prints the dashboard URL by PC name and by this machine's LAN IP. Services start on boot. If this PC
+gets a new IP address (DHCP), open it by name, or add the new address to `allowed_hosts` in `config.yaml`.
 
 > **Licence check: PyMuPDF (2026-10-24).** `pymupdf==1.28.2` is dual-licensed
 > **GNU AGPL-3.0 or an Artifex commercial licence** (installed package metadata
@@ -121,11 +133,11 @@ It prints the dashboard URL using this machine's LAN IP. Services start on boot.
   `.\scripts\install_nssm_services.ps1 -WithPrefectServer -DryRun`.
 - `-ConfigPath` exists only to validate or dry-run another config file. A real install refuses it unless it
   is `<project>\config.yaml`, because the deployment script and the backup task read that file.
-- With `-WithPrefectServer`, `AAMMerger-Web` and `AAMMerger-Worker` declare `DependOnService
-  AAMMerger-PrefectServer`: Windows starts Prefect first and stops web first. Consequences: the web
-  service does not start at boot if the Prefect server fails to start, and restarting the Prefect service
-  by hand needs `Restart-Service -Force` (it stops the dependents); `manage_services.ps1 -Action restart`
-  handles the order for you.
+- With `-WithPrefectServer`, `AAMMerger-Worker` declares `DependOnService AAMMerger-PrefectServer`:
+  Windows starts Prefect first and stops the worker first. `AAMMerger-Web` does **not** depend on Prefect,
+  so the dashboard starts at boot even when the Prefect server fails (the poller backs off while Prefect
+  is down). Restarting the Prefect service by hand needs `Restart-Service -Force` (it stops the worker);
+  `manage_services.ps1 -Action restart` handles the order for you.
 
 **Re-running the installer is safe** — it updates the environment, services and
 scheduled sync without touching data. That is also the upgrade path (section 8).
@@ -180,6 +192,8 @@ Users then copy PDFs to `\\<server-name>\AAM-Input`, and anyone can press
 **Scan Input Folder**. Share **only `data\input`** — not `data\`, which contains
 the database, the quarantine and the merged packets.
 
+Hand-over rule: users extract ZIPs and copy PDFs into the input folder; files are read once they have been untouched for 30 seconds.
+
 Keep the input folder local-disk backed. A mapped SMB path in `config.yaml`
 would put the document reads on the network; sharing the folder to clients is
 fine, pointing the app at a UNC path is not required and adds failure modes.
@@ -188,7 +202,7 @@ fine, pointing the app at a UNC path is not required and adds failure modes.
 
 ## 6. Daily operation
 
-- **Input poller** (inside the web service): `schedule.poll_enabled`, `poll_interval_seconds` (60), `merge_settle_minutes` (5). Restart the web service after changing them. A new file is read within about a minute; its set merges after the settle time.
+- **Input poller** (inside the web service): `schedule.poll_enabled`, `poll_interval_seconds` (60), `merge_settle_minutes` (5). They are Live on the Settings page: a change applies within seconds, with no restart. A new file is read within about a minute; its set merges after the settle time.
 - **Nightly sync** runs at 00:00 (Prefect deployment `aam-midnight-sync`); switch off with `schedule.nightly_enabled: false` and re-run `scripts/deploy_prefect.py`.
   `config.example.yaml` sets `prefect.schedule_timezone: "Asia/Kolkata"`, so
   this is **IST midnight**. Change it to the office's IANA zone if the client
@@ -235,8 +249,9 @@ Do this once before hand-over and after any change to the backup task.
 4. Open the dashboard and confirm the counts and one merged packet. Keep `data\stored`, `data\output`,
    `data\combined` and `data\quarantine`: the restored rows point at those files.
 
-Documents ingested after the backup was taken lose their database rows, and their copies in the input
-folder are already gone (the sync moves them to `stored`), so re-submit those PDFs from their source.
+Documents ingested after the backup was taken lose their database rows. The sync copies each new file into
+`stored`; the original stays in the input folder until its set merges. Re-submit those PDFs from their
+source (or from the input folder, if they are still there).
 Power loss alone is normally recovered by SQLite from the `-wal` file on the next start; restore only if
 the dashboard then shows database errors.
 
@@ -272,6 +287,9 @@ this test-rig script — use `scripts\backup_db.py` and a manual cleanup there.
 git pull
 .\scripts\setup_test_rig.ps1 -OpenFirewall -ScheduleBackup -WithPrefectServer
 ```
+
+The setup script stops the three services itself before it touches the environment or the database, so
+the first line is a safe habit rather than a requirement.
 
 Set `server.allowed_hosts` first (section 2), or the installer refuses. The installer re-applies migrations and re-registers the deployment. If you
 skipped `git pull` because the client has no git, copy the new files over and

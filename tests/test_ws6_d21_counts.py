@@ -33,7 +33,10 @@ from app.services import grouping, ingestion, reconciliation
 from app.services.poller import SyncPoller
 
 SOAK = os.getenv("RUN_SOAK") == "1"
-NO_DN_REASON = "No delivery note attached to this set yet (not received, or still being read)"
+NO_DN_REASON = (
+    "No delivery note attached to this set yet "
+    "(not received, still being read, or waiting on the Unclassified page)"
+)
 
 
 @pytest.fixture()

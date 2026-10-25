@@ -38,18 +38,37 @@ The run should not start until these are dealt with:
 
 ### B1. The suite is red because of the uncommitted `_oldest_first` change
 
-- **Where:** `tests/test_best_case_pipeline.py:280` asserts `found == sorted(found)` (path order).
-  `src/app/services/ingestion.py:280-327` now returns files oldest first.
-- **Evidence:** `pytest --ignore=tests/ui -x` failed with
-  `FAILED tests/test_best_case_pipeline.py::test_input_pdfs_are_discovered_exactly_once`
-  ("order must be stable"). The full non-UI run result is in section 5.
-- **Why it matters:** the commit rule (HANDOFF section 8.5) is a green suite first. The tree would be
-  committed red.
-- **Minimal fix:** change that assertion to the new contract: oldest mtime first, with the path as the
-  tie-break, which is what `test_ws6_input_order_is_oldest_first` pins. This is a test-only change.
-- **Also note:** with an Explorer or robocopy copy, mtime is the *source's* last-write time. "Oldest
-  first" therefore means "oldest original document", not "first to arrive". That is harmless, but
-  PRODUCT and D5 should say so.
+`src/app/services/ingestion.py:280-327` now returns files oldest mtime first, and three tests still
+assume path order.
+
+**Evidence** (full non-UI run: `3 failed, 6505 passed, 8 skipped, 43 xfailed`, 9 min 36 s):
+
+- **Deterministic failures.** Both fail again when their file is run on its own:
+  - `tests/test_robustness_batch_sync.py::test_good_set_still_merges_beside_seventy_bad_neighbours`
+    (`:393`)
+  - `tests/test_robustness_batch_sync.py::test_byte_identical_copy_with_long_unicode_name_is_deduplicated_and_cleared`
+    (`:384`)
+  - What changed: the test expects the byte-identical copy that sorts first by path
+    (`Bestellung…`) to become the document, with `good_PO.pdf` de-duplicated. Oldest-first now ingests
+    `good_PO.pdf` first.
+- **Flaky.** `tests/test_best_case_pipeline.py:280` (`found == sorted(found)`) failed in the first run
+  and passed in the second. Whether it fails depends on mtime ties.
+- **Order-dependent.** `tests/test_settings_page_more.py:291` (`test_b_08_…`, file modified in the
+  working tree) failed in the full run and passes on its own. The likely cause is global
+  `_REPORTED_BAD` / `_LAST_GOOD` state left in `config.py:473-474` by an earlier test.
+
+**Why it matters:** the commit rule (HANDOFF section 8.5) is a green suite first.
+
+**Minimal fix (tests only, no product change):**
+
+- Assert the new contract in the two batch tests and in `test_best_case_pipeline`: oldest mtime
+  first, path as the tie-break (as `test_ws6_input_order_is_oldest_first` already does). Set explicit
+  mtimes with `os.utime`.
+- Give `test_b_08` an autouse fixture that clears `_LAST_GOOD`, `_REPORTED_BAD` and `_CONFIG_CACHE`.
+
+**Product note:** which filename a byte-identical pair keeps now depends on mtime. With an Explorer or
+robocopy copy, mtime is the *source's* last-write time, so "oldest first" means "oldest original
+document", not "first to arrive". That is harmless, but PRODUCT and D5 should say so.
 
 ### B2. The duplicate-document guard misses a rescan whose number is unreadable or confusable (wrong-merge class) *(read)*
 
@@ -317,7 +336,9 @@ The run should not start until these are dealt with:
 
 - **Lint and type checks:** `ruff check .` and `ruff format --check .` are clean (180 files), and
   `ty check src` is clean.
-- **Test suite (non-UI):** <!-- FILLED BELOW --> see the "Suite result" line at the end of this file.
+- **Test suite (non-UI):** `pytest --ignore=tests/ui` gave 6505 passed, 3 failed (all tests that
+  assumed path order or shared global state, see B1), 8 skipped and 43 xfailed. I did not run
+  `tests/ui` (Playwright, needs `RUN_E2E=1`).
 - **The rule** (`reconciliation.py:415-926`, `matching.py`):
   - Exact integer ×1000 comparison per normalised line key, with the DN and SI pools independent.
   - Orphan vendor lines quarantine, and zero or unreadable quantities quarantine

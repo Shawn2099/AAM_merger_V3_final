@@ -213,8 +213,10 @@ class SyncPoller:
             return "ran"
         if result.get("vlm_halted"):
             logger.error(
-                "The provider rejected the request itself (HTTP 400); extraction is paused "
-                "for %d s. Fix vlm.model / the request options, or press Scan input folder.",
+                "%s Extraction is paused for %d s; press Scan input folder after fixing it.",
+                result.get("vlm_halt_reason")
+                or "The provider rejected the request itself (HTTP 400): fix vlm.model or "
+                "the request options.",
                 HALT_BACKOFF_SECONDS,
             )
             self._backoff_until = self._clock() + HALT_BACKOFF_SECONDS

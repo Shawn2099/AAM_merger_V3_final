@@ -231,7 +231,8 @@ REASON_TEXT: dict[str, str] = {
     "non_positive_quantity": "A quantity is zero, negative, or unreadable",
     "missing_po_document": "No purchase order document in this set yet",
     "missing_dn_document": (
-        "No delivery note attached to this set yet (not received, or still being read)"
+        "No delivery note attached to this set yet "
+        "(not received, still being read, or waiting on the Unclassified page)"
     ),
     "missing_si_document": "No invoice in this set yet",
     "partial_fulfillment": "Waiting on more deliveries or invoices",

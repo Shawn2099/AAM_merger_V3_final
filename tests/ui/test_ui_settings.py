@@ -497,7 +497,7 @@ def test_st_09_select_fields_and_comments(page: Page, settings_env):
 
     page.goto(_url(settings_env, "/settings"))
     page.select_option(_field("vlm.reasoning_effort"), "medium")
-    page.select_option(_field("extraction.split_combined"), "true")
+    page.select_option(_field("matching.line_number_fallback.release_suffix"), "false")
     page.select_option(_field("matching.line_number_fallback.step10"), "false")
     with page.expect_navigation() as nav:
         page.click(SAVE)
@@ -506,14 +506,14 @@ def test_st_09_select_fields_and_comments(page: Page, settings_env):
 
     text = cfg_path.read_text(encoding="utf-8")
     assert 'reasoning_effort: "medium"' in text
-    assert "split_combined: true" in text
+    assert "release_suffix: false" in text
     assert "step10: false" in text
     new_comments = [line for line in text.splitlines() if line.startswith("#")]
     assert new_comments == old_comments
 
     saved = _effective(settings_env)
     assert saved.vlm.reasoning_effort == "medium"
-    assert saved.extraction.split_combined is True
+    assert saved.matching.line_number_fallback.release_suffix is False
     assert saved.matching.line_number_fallback.step10 is False
 
 
@@ -786,8 +786,17 @@ def test_st_19_restart_keeps_the_value(page: Page, settings_env):
     good = cfg_path.read_bytes()
     cfg_path.write_text("paths: nonsense\n", encoding="utf-8")
     _bump_mtime(cfg_path)
-    with pytest.raises(RuntimeError):
-        settings_env.module.serve(settings_env.root)
+    # S3: a service started on a broken file runs on the newest valid backup and says so
+    # on the Settings page (it used to refuse to start).
+    _stop(settings_env.proc)
+    proc, base = settings_env.module.serve(settings_env.root)
+    _drain(proc)
+    settings_env.proc, settings_env.base = proc, base
+    response = page.goto(_url(settings_env, "/dashboard"))
+    assert response is not None and response.status == 200
+    page.goto(_url(settings_env, "/settings"))
+    expect(page.locator('[data-testid="settings-disk-problem"]')).to_be_visible()
+    _stop(settings_env.proc)
 
     cfg_path.write_bytes(good)
     _bump_mtime(cfg_path)

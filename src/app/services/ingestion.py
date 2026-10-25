@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import logging
+import os
 import shutil
 import time
 import uuid
@@ -21,17 +22,67 @@ from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus
 logger = logging.getLogger(__name__)
 
 
+#: A file must have been left alone for at least this long before it is read. Explorer, robocopy
+#: and SMB copies pre-size the destination, so the size alone can look final while the tail is
+#: still zeros; a file written to within this window may still be copying. Deliberately a
+#: constant, not a setting. Tests that create files and ingest at once set it to 0.
+MIN_FILE_AGE_SECONDS = 30
+
+
+def file_signature(p: Path) -> tuple[int, int]:
+    """(size, mtime in ns) of a file. Raises OSError if it cannot be read."""
+    st = p.stat()
+    return (st.st_size, st.st_mtime_ns)
+
+
+def _last_touched(st: os.stat_result) -> float:
+    """When the file last changed OR was created here, whichever is later.
+
+    A copy, a ZIP extraction or a robocopy keeps the SOURCE's modified time (often days old)
+    but gets a new creation time on Windows, so the modified time alone would call a file that
+    is still being written "old". Python 3.12 exposes the creation time as `st_birthtime` on
+    Windows; where it is missing (Linux development) the modified time is used.
+    """
+    return max(st.st_mtime, getattr(st, "st_birthtime", 0.0))
+
+
+def _old_enough(p: Path) -> bool:
+    try:
+        return (time.time() - _last_touched(p.stat())) >= MIN_FILE_AGE_SECONDS
+    except OSError:
+        return False
+
+
 def is_file_stable(p: Path, interval: int, count: int) -> bool:
+    """True when size AND mtime are unchanged across all samples and the file is old enough."""
     if not p.exists():
         return False
-    sizes = []
+    sigs = []
     for _ in range(count):
         if not p.exists():
             return False
-        sizes.append(p.stat().st_size)
+        sigs.append(file_signature(p))
         time.sleep(interval)
     # A zero-byte file is never a finished upload, so it must not pass as stable.
-    return len(set(sizes)) == 1 and sizes[0] > 0
+    if len(set(sigs)) != 1 or sigs[0][0] <= 0:
+        return False
+    return _old_enough(p)
+
+
+def unchanged_since(p: Path, signature: tuple[int, int] | None) -> bool:
+    """Re-check a file immediately before it is read: same (size, mtime) and old enough.
+
+    `signature` is the one taken by the stability poll. None (no poll signature) only checks
+    the age. Any doubt, including an unreadable file, returns False so the file is left alone.
+    """
+    if not p.exists():
+        return True  # nothing to read; ingest_file reports the missing file as an error
+    try:
+        if signature is not None and file_signature(p) != signature:
+            return False
+    except OSError:
+        return False
+    return _old_enough(p)
 
 
 _INCOMPLETE_PDF_REASON = (

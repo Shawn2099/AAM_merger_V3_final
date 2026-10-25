@@ -100,7 +100,8 @@
   </div>
 
   <div style="display:flex; gap:20px; flex-wrap:wrap; font-size:0.85rem; color:var(--text-muted); border-top:1px solid var(--border); padding-top:12px; align-items:center;">
-    <div><strong>Last Updated:</strong> {{ po_set.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC') if po_set.updated_at else '—' }}</div>
+    <div><strong>Created:</strong> {{ po_set.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') if po_set.created_at else '—' }}</div>
+    <div title="The system touches a set on every check, so this is not when the documents changed."><strong>Last checked:</strong> {{ po_set.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC') if po_set.updated_at else '—' }}</div>
     <div><strong>Customs Requirement:</strong> <span style="font-weight:600; color:{{ 'var(--primary)' if po_set.has_customs_toggle else 'var(--text-muted)' }};">{{ 'ENABLED (CUSTOMS + SHIPPING Required)' if po_set.has_customs_toggle else 'DISABLED' }}</span></div>
     {% if po_set.has_customs_toggle %}
       <div><strong>Customs Clearance:</strong> <span style="font-weight:600;">{% if 'CUSTOMS' in documents|map(attribute='doc_type')|map(attribute='value')|list %}✅ Attached{% else %}❌ Missing{% endif %}</span></div>
@@ -253,6 +254,9 @@
 
   <!-- 3-Way Comparison Table -->
   {% if matrix_rows %}
+  {% if matrix_pinned %}
+  <div class="muted" style="font-size:0.8rem; margin-bottom:6px;" data-testid="matrix-pinned-note">Line-number rules shown as at merge time. Description matching (lines with no number) uses the current setting.</div>
+  {% endif %}
   <div class="table-container">
     <table class="reconcile-matrix">
       <thead>

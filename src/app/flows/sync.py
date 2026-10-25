@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -27,6 +28,10 @@ _ANCHOR_TYPES = ("PO",)
 #: waiting (sample a size, sleep, sample again), so the threads spend their
 #: time asleep and the host's two cores are free.
 _STABILITY_POLL_WORKERS = 8
+
+#: (size, mtime_ns) of each file as the last stability poll saw it. Written by the poll
+#: threads (one key per file), read by the sync loop just before it ingests that file.
+_POLL_SIGNATURES: dict[Path, tuple[int, int]] = {}
 
 
 def _doc_type_val(doc) -> str:
@@ -67,8 +72,9 @@ def _poll_stability(files, cfg) -> dict:
     Only the sampling is parallel; the ingest itself stays on one thread,
     because SQLite is a single-writer database.
     """
-    from app.services.ingestion import is_file_stable
+    from app.services.ingestion import file_signature, is_file_stable
 
+    _POLL_SIGNATURES.clear()
     if not files:
         return {}
     interval = cfg.ingestion.stability_poll_interval_seconds
@@ -78,7 +84,13 @@ def _poll_stability(files, cfg) -> dict:
     def _safe_stable(f) -> bool:
         # One unstat-able file must not abort the sync: skip it this run.
         try:
-            return is_file_stable(f, interval=interval, count=count)
+            if not is_file_stable(f, interval=interval, count=count):
+                return False
+            # Remembered so the file is re-checked against it right before it is ingested.
+            # A file that vanished since the poll is reported by the ingest step as before.
+            with contextlib.suppress(FileNotFoundError):
+                _POLL_SIGNATURES[f] = file_signature(f)
+            return True
         except OSError:
             logger.warning("Stability check failed for %s; skipping this run", f, exc_info=True)
             return False
@@ -321,6 +333,7 @@ def recovery_flow(
     cfg_path: str | None = None,
     held_lock=None,
     initial_touched_po_set_ids: list[int] | None = None,
+    already_tried_ids: list[int] | None = None,
 ) -> dict:
     """Dedicated flow for pending document recovery, unattached document resolution, and open-set reconciliation sweep.
 
@@ -345,7 +358,9 @@ def recovery_flow(
             }
     try:
         return _recovery_flow_locked(
-            cfg_path=cfg_path, initial_touched_po_set_ids=initial_touched_po_set_ids
+            cfg_path=cfg_path,
+            initial_touched_po_set_ids=initial_touched_po_set_ids,
+            already_tried_ids=already_tried_ids,
         )
     finally:
         if own_lock is not None:
@@ -355,6 +370,7 @@ def recovery_flow(
 def _recovery_flow_locked(
     cfg_path: str | None = None,
     initial_touched_po_set_ids: list[int] | None = None,
+    already_tried_ids: list[int] | None = None,
 ) -> dict:
     cfg = load_config(cfg_path) if cfg_path else load_config()
     from app.core.logging_setup import setup_logging
@@ -462,11 +478,17 @@ def _recovery_flow_locked(
         ]
 
     deferred_400: list[tuple[int, Path | None]] = []
+    tried_this_pass = set(already_tried_ids or [])
     for doc_id in pending_ids:
         heartbeat_sync_lock(cfg_path)
         if provider_breaker_tripped():
             logger.error("Provider breaker tripped: leaving the remaining pending documents unread")
             break
+        if doc_id in tried_this_pass:
+            # The main loop already called the provider for this document in this pass and
+            # it is still pending (a transient fault). It is read again on the next scan.
+            logger.info("Document %s was already tried in this pass; not read again", doc_id)
+            continue
         recovered_processed += 1
         try:
             _extract_task_for(cfg)(doc_id, cfg_path=cfg_path)
@@ -687,6 +709,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     Base.metadata.create_all(eng)
     from app.models import Document as _Doc
     from app.services.extraction import (
+        provider_breaker_reason,
         provider_breaker_tripped,
         reclaim_stale_processing,
         rejected_400_ids,
@@ -696,6 +719,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     from app.services.ingestion import (
         ingest_file,
         input_pdfs,
+        unchanged_since,
     )
 
     reset_provider_breaker()
@@ -748,6 +772,8 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
                 unstable += 1
 
     vlm_halted = False
+    #: Documents the VLM was called for in THIS pass; recovery must not read them again.
+    tried_ids: list[int] = []
     deferred_400: list[tuple[int, Path | None]] = []
     for f in files:
         heartbeat_sync_lock(cfg_path)
@@ -761,6 +787,18 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
             if not stable_map.get(f, False):
                 continue
 
+            # The poll may have been taken long before this file's turn. Re-check right
+            # before reading: a file that changed since, or was written to within the
+            # minimum age, may still be copying. Leave it in input; the poller retries.
+            if not unchanged_since(f, _POLL_SIGNATURES.get(f)):
+                logger.warning(
+                    "Input %s changed or is too recent since the stability check; "
+                    "left in input for the next scan",
+                    f,
+                )
+                unstable += 1
+                continue
+
             doc = ingest_file(f, cfg)
             processed += 1
 
@@ -772,6 +810,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
                 logger.debug("Document %s was read already; not scheduled again", doc.id)
                 extracted += 1
             else:
+                tried_ids.append(doc.id)
                 try:
                     _extract_task_for(cfg)(doc.id, cfg_path=cfg_path)
                 except Exception:
@@ -852,6 +891,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
             cfg_path=cfg_path,
             held_lock=True,
             initial_touched_po_set_ids=list(touched_po_set_ids),
+            already_tried_ids=tried_ids,
         )
     else:
         run_recovery_fn = getattr(recovery_flow, "fn", recovery_flow)
@@ -859,6 +899,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
             cfg_path=cfg_path,
             held_lock=True,
             initial_touched_po_set_ids=list(touched_po_set_ids),
+            already_tried_ids=tried_ids,
         )
 
     total_processed = processed + rec_res.get("processed", 0)
@@ -871,5 +912,6 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
         "touched_po_sets": rec_res.get("touched_po_sets", len(touched_po_set_ids)),
         "reconciled_count": rec_res.get("reconciled_count", 0),
         "vlm_halted": vlm_halted or provider_breaker_tripped(),
+        "vlm_halt_reason": provider_breaker_reason(),
         "unstable": unstable,
     }

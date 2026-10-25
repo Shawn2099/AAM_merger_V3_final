@@ -136,7 +136,10 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
                 "doc_count": doc_counts.get(ps.id, 0),
                 "has_merged_file": has_merged_file,
                 "updated_at": ps.updated_at,
-                "age_seconds": _age_seconds(ps.updated_at),
+                # Age is the set's age (created_at). updated_at is bumped by every
+                # lock/unlock in every sweep, so it would read "just now" forever.
+                "created_at": ps.created_at,
+                "age_seconds": _age_seconds(ps.created_at),
                 "reconcile_reason": ps.reconcile_reason,
                 "locked_by_action": ps.locked_by_action,
                 "is_locked": is_locked(ps, cfg),
@@ -149,7 +152,7 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
         )
 
     def _sort_key(x: dict) -> tuple[datetime, int]:
-        dt = x.get("updated_at")
+        dt = x.get("created_at")
         if dt is None:
             return (datetime.min, x.get("id") or 0)
         if dt.tzinfo is not None:
@@ -402,6 +405,25 @@ def dashboard_table(request: Request, status: str | None = None):
 # ---------------------------------------------------------------------------
 
 
+def _fallback_from_stored_label(label: str | None):
+    """Rebuild the line-number rules a set used from its stored `line_mapping_rule`.
+
+    The label names every rule that re-keyed a pool ("x10", or "DN x10, SI as
+    printed"); no label means exact matching only. Only those rules are
+    switched on, which reproduces the mapping the engine used at merge time.
+    """
+    from app.core.config import LineNumberFallbackConfig
+    from app.services.matching import LINE_MAPPING_RULES
+
+    used = {r for r in LINE_MAPPING_RULES if label and r in label.replace(",", " ").split()}
+    return LineNumberFallbackConfig(
+        step10="x10" in used,
+        step10_reverse="div10" in used,
+        release_suffix="add_rel" in used,
+        release_suffix_reverse="strip_rel" in used,
+    )
+
+
 @router.get("/po_sets/{po_set_id}/view", response_class=HTMLResponse)
 def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = None):
     cfg = load_config()
@@ -440,6 +462,7 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
         matrix_rows = []
         has_any_lines = False
         has_po_lines = False
+        matrix_pinned = False
         if doc_ids:
             items = s.query(LineItem).filter(LineItem.document_id.in_(doc_ids)).all()
             doc_type_map = {
@@ -469,14 +492,22 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
             has_po_lines = bool(po_lines)
             thr = getattr(cfg.matching, "fuzzy_description_threshold", 85)
 
+            set_status_value = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
+            # A merged set keeps the line-number rules it merged under (stored
+            # label); a Settings change must not make it read as a mismatch.
+            # The description threshold is NOT stored, so it stays live.
+            line_fallback = cfg.matching.line_number_fallback
+            if set_status_value == "merged":
+                line_fallback = _fallback_from_stored_label(ps.line_mapping_rule)
+                matrix_pinned = True
+
             comparison = compare_po_set_lines(
                 po_lines,
                 dn_lines,
                 si_lines,
                 thr,
-                line_fallback=cfg.matching.line_number_fallback,
+                line_fallback=line_fallback,
             )
-            set_status_value = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
 
             # A pending set is waiting, not failing. Comparing a set whose DN
             # has not arrived yet produces vendor-line "identifications" that
@@ -607,6 +638,7 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
                 "matrix_rows": matrix_rows,
                 "has_any_lines": has_any_lines,
                 "has_po_lines": has_po_lines,
+                "matrix_pinned": matrix_pinned,
                 "attempt_cap": int(getattr(cfg.extraction, "max_retries", 3) or 3),
                 "flags": flags,
                 "is_locked": locked,

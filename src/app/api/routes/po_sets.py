@@ -531,15 +531,20 @@ def merge_now(po_set_id: int):
     cfg = load_config()
     _acquire_lock(po_set_id, "merge", cfg)
     try:
-        from app.services.reconciliation import reconcile_po_set
+        from app.services.reconciliation import explain, reconcile_po_set
 
         res = reconcile_po_set(po_set_id, cfg)
+        detail = res.get("detail")
+        if not detail and res.get("status") == "mismatched":
+            # A mismatch carries no reason code, only quantity flags; say what
+            # disagrees ("delivered 8 of 10") instead of returning nothing.
+            detail = explain(res.get("reason"), res.get("flags"))
         return {
             "status": res.get("status"),
             "po_set_id": po_set_id,
             "merged_output_path": res.get("merged_output_path"),
             "reason": res.get("reason"),
-            "detail": res.get("detail"),
+            "detail": detail,
             "flags": res.get("flags", []),
         }
     except HTTPException:

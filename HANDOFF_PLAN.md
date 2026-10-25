@@ -288,7 +288,7 @@ whether POs printed "1 of 6" supplied as page 1 only should be held, and I-1 (on
 |---|---|---|
 | WS6-01 / O-1 | Input read in path order, docs (D5/PRODUCT) say oldest first | one-line sort by mtime, or correct the docs (owner) |
 | WS6-02 | possible `database is locked` between a sync write and Force Merge; not reproduced, sync side was unchecked | fix list adds the check; report, never retry |
-| WS6-03 | DN stuck mid-read after a crash gives reason "No delivery note in this set yet" (misleading) | FIXED 2026-10-25 (text only): now "No delivery note attached to this set yet (not received, or still being read)"; reason code unchanged; `test_ws6_03_stuck_document_message_says_it_may_still_be_read` |
+| WS6-03 | DN stuck mid-read after a crash gives reason "No delivery note in this set yet" (misleading) | FIXED 2026-10-25 (text only): now "No delivery note attached to this set yet (not received, still being read, or waiting on the Unclassified page)"; reason code unchanged; `test_ws6_03_stuck_document_message_says_it_may_still_be_read` |
 | O-2 | Force Merge on an already merged set returns 200 + a 2nd audit row (UI_TEST_PLAN 4.3 expects 409) | decide |
 | O-3 | nightly worker crash leaves a live-looking sync marker; actions refused up to 20 min unless Scan | runbook line, or a worker check |
 | O-4 | doc left mid-read is reclaimed only after 15 min; poller does not wake for it | accept, runbook |

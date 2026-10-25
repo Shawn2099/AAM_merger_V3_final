@@ -62,7 +62,10 @@ class Setting:
     apply: str
     unit: str = ""
     choices: tuple[str, ...] = ()
-    minimum: int | None = None  # None: taken from the config model
+    # None: the bound comes from the config model. A number here is a page-only bound that
+    # replaces the model's (fuzzy_description_threshold: the page floor of 80). The model
+    # still checks every saved value, and `_model_bounds` reports this bound to the page.
+    minimum: int | None = None
     maximum: int | None = None
 
     @property
@@ -193,14 +196,6 @@ GROUPS: tuple[Group, ...] = (
                 unit="seconds",
                 maximum=86400,
             ),
-            Setting(
-                "extraction.split_combined",
-                "Split combined PDFs",
-                "Off (recommended): a PDF holding several documents is quarantined for a "
-                "person to look at. On: it is cut into one file per document.",
-                "bool",
-                NEXT_SYNC,
-            ),
         ),
     ),
     Group(
@@ -208,21 +203,15 @@ GROUPS: tuple[Group, ...] = (
         "How a PO is compared with its delivery notes and invoices.",
         (
             Setting(
-                "reconciliation.single_po_document",
-                "Hold a set that has two PO documents",
-                "On (recommended): a set with more than one PO document waits for a person "
-                "and is never merged on its own.",
-                "bool",
-                NEXT_SYNC,
-            ),
-            Setting(
                 "matching.fuzzy_description_threshold",
                 "Description match strictness",
                 "Used only for lines that carry no line number. Higher is stricter; 85 is "
-                "the tested value.",
+                "the tested value. This page will not go below 80: a lower value lets a line "
+                "with no line number attach to the wrong PO line.",
                 "int",
                 NEXT_SYNC,
                 unit="%",
+                minimum=80,  # a page-only floor; the config model still accepts 0-100
             ),
             Setting(
                 "matching.line_number_fallback.step10",
@@ -334,19 +323,27 @@ GROUPS: tuple[Group, ...] = (
                 RESTART,
                 unit="MB",
             ),
-            Setting(
-                "logging.backup_count",
-                "Old log files kept",
-                "0 keeps one growing file and never deletes.",
-                "int",
-                RESTART,
-            ),
         ),
     ),
 )
 
 #: Shown on the page but changed only in config.yaml (by IT) or by a deploy script.
 READ_ONLY: tuple[tuple[str, str, str], ...] = (
+    (
+        "reconciliation.single_po_document",
+        "Hold a set that has two PO documents",
+        "Turning it off is not supported: the merger still refuses more than one PO document.",
+    ),
+    (
+        "extraction.split_combined",
+        "Split combined PDFs",
+        "The combined-document splitter is outside the current scope.",
+    ),
+    (
+        "logging.backup_count",
+        "Old log files kept",
+        "Two services write the log; changing the number of kept log files needs IT.",
+    ),
     ("paths.input_folder", "Input folder", "Where new PDFs are dropped."),
     ("paths.output_folder", "Output folder", "Where merged packets are written."),
     ("paths.quarantine_folder", "Quarantine folder", "Where held documents are copied."),

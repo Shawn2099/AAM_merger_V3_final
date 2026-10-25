@@ -3,7 +3,6 @@
 import re
 from pathlib import Path
 
-import pytest
 from playwright.sync_api import Page, expect
 
 
@@ -394,13 +393,6 @@ def test_ui_s_14_merge_now_on_a_mismatch_does_not_merge(page: Page, manifest, db
     expect(page.get_by_test_id("reason-card")).to_contain_text(reason[:40])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "SUSPECTED PRODUCT BUG UI-S14: Merge Now on a mismatched set returns reason=None, "
-        "so the toast does not say what disagrees (known WS1b finding)"
-    ),
-)
 def test_ui_s_14b_merge_now_toast_states_the_quantity_difference(page: Page, manifest):
     """S-14b: the toast should repeat the quantity difference the page shows."""
     sc = _open(page, manifest, "merge_now_reason_target")

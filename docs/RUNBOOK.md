@@ -239,6 +239,7 @@ The first week is supervised. **Nobody runs the system unattended.** A one-digit
 | A document was placed under the wrong PO | The Unclassified placement cannot be undone in the app. | If the set is quarantined, archive it and add the files again. If it only sits Pending, tell the on-site contact. |
 | HTTP 400 from the AI provider, and the log says the batch halted | The provider refused the requests, often because of a settings or model problem, not the files. Nightly processing pauses for an hour. | Tell the on-site contact. Do not re-send the files again and again. |
 | Settings page shows a red "settings file on disk is not valid" banner | `config.yaml` was edited by hand (or restored) and no longer passes the checks. The service keeps running on the last good settings. | Tell IT. They fix the line named in the banner, or copy the newest file from `config_backups` over `config.yaml`. Do not restart the service until it is fixed: a restart on a broken file will not start. |
+| Service restarted but the log says "STARTED on the newest valid backup" (and Settings shows the red banner) | `config.yaml` was broken when the service started, so it is running on the newest good copy in `config_backups`. Recent settings changes made after that backup are not active. | Tell IT. They repair `config.yaml` (or copy the newest `config_backups` file over it) and restart. If no backup is valid the service will not start at all. |
 | Settings page says "changed by someone else" | Two people had the page open. | Nothing was lost: open Settings again and redo your change. |
 | Dashboard reachable under an unexpected host name | The app accepts any host name unless `server.allowed_hosts` is set. | Tell the on-site contact to set it (DELIVERY section 4). |
 
@@ -253,6 +254,15 @@ The first week is supervised. **Nobody runs the system unattended.** A one-digit
 - **Switch off the folder watcher while reviewing.** If the watcher is on, turn it off on the Settings page while you review.
 - **Files are read oldest first.** The app reads each PDF in order of its own last-modified time, oldest first. A copy that keeps the source's time is read in the source's place in that order.
 
+### How files should arrive (email downloads)
+
+- Save the PDFs from the email, or extract the ZIP first. A `.zip` file placed in the input folder is **not** read: only `.pdf` files are. Extract it and copy the PDFs.
+- Then copy or move the PDFs into the input folder. Moving within the same disk is instant and safe.
+- A copy or an extraction is picked up only after the file has been left alone for at least 30 seconds. The program looks at both the modified time and the creation time, so an extracted old file still waits.
+- Copy the whole batch in one go, then wait about a minute before pressing **Scan Input Folder**.
+- Do not press Scan or expect a result while files are still being copied.
+- A file skipped as "still copying" is picked up on the next scan. Nothing is lost.
+
 ---
 
 ## 10. Known open items
@@ -263,6 +273,7 @@ These are known and not yet fixed.
 - **An orphan sync marker** can block operator actions for up to 20 minutes unless **Scan Input Folder** is pressed.
 - **A document left mid-read** waits up to 15 minutes before it is read again.
 - **A stray `.tmp` file** can remain in the output folder after a killed write. It is harmless; delete it.
+- **A ZIP file in the input folder is ignored; extract it first.**
 
 ---
 

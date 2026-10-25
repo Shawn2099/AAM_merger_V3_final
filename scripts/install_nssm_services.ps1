@@ -46,8 +46,10 @@
     allowed_hosts gate is a plain read of the YAML (no config validation, no folders
     created); a real install also validates the whole file with the application's loader.
 
-Service order: the web service and the worker DEPEND on AAMMerger-PrefectServer
-(nssm DependOnService), so Windows starts Prefect first and stops web first.
+Service order: the worker DEPENDS on AAMMerger-PrefectServer (nssm DependOnService), so
+Windows starts Prefect first and stops the worker first. The web service does NOT depend on
+Prefect: the dashboard must start even when Prefect fails at boot (the poller backs off while
+Prefect is down).
 Re-running the script removes and re-creates each service, so every setting is
 refreshed (idempotent).
 
@@ -228,7 +230,8 @@ if ([string]::IsNullOrWhiteSpace($NssmPath)) {
                 }
             } catch {
                 Write-Warning "Direct download from nssm.cc failed ($($_.Exception.Message))."
-                Write-Error "Please download nssm.exe manually, place it in '$toolsDir' or on PATH, and re-run."
+                $targetNssm = Join-Path $toolsDir "nssm.exe"
+                Write-Error "Download nssm-2.24.zip from https://nssm.cc/release/nssm-2.24.zip on a PC with internet, extract win64\nssm.exe to $targetNssm, and re-run."
                 exit 1
             }
         }
@@ -384,9 +387,8 @@ Install-Or-Update-NssmService `
     -Description "AAM Merger V3 Prefect Process Pool Worker (Sync and VLM Extraction)" `
     -DependsOn $prefectDep
 
-# 7. Service: AAMMerger-Web (depends on the Prefect server when installed here)
-$prefectDep = @()
-if ($WithPrefectServer) { $prefectDep = @("AAMMerger-PrefectServer") }
+# 7. Service: AAMMerger-Web. No DependOnService here, on purpose: the dashboard starts even
+#    when the Prefect server fails at boot. Only the worker waits for Prefect.
 $webStdout = Join-Path $logsDir "nssm-web-stdout.log"
 $webStderr = Join-Path $logsDir "nssm-web-stderr.log"
 $webArgs = "-m uvicorn app.main:app --host $HostAddress --port $Port"
@@ -397,8 +399,7 @@ Install-Or-Update-NssmService `
     -AppDir $ProjectDir `
     -StdoutLog $webStdout `
     -StderrLog $webStderr `
-    -Description "AAM Merger V3 FastAPI Web Application and Operator Dashboard" `
-    -DependsOn $prefectDep
+    -Description "AAM Merger V3 FastAPI Web Application and Operator Dashboard"
 
 # 8. Start Services if requested
 if ($StartServices) {

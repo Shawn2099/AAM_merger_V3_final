@@ -64,7 +64,6 @@ SINGLES: dict[float, tuple[str, object]] = {
     ),
     138.0: ("prose.pdf", ("prose", "I'm sorry, I cannot read this document.")),
     141.0: ("truncated_args.pdf", ("args", '{"document_type": "PO", "document_number": "77')),
-    144.0: ("http402.pdf", ("status", 402)),
     147.0: ("http500.pdf", ("status", 500)),
     150.0: ("timeout.pdf", ("raise", httpx.ReadTimeout("read timed out"))),
     153.0: ("http400.pdf", ("status", 400)),
@@ -460,7 +459,7 @@ def test_oversized_pdf_is_refused_without_any_request(batch):
     assert batch["vlm"].calls[TOO_MANY_PAGES_W] == 0
 
 
-@pytest.mark.parametrize("name", ["http402.pdf", "http500.pdf", "timeout.pdf"])
+@pytest.mark.parametrize("name", ["http500.pdf", "timeout.pdf"])
 def test_provider_fault_leaves_document_pending_in_input(batch, name):
     d = _doc(batch, name)
     assert d.extraction_status == ExtractionStatus.pending
@@ -468,16 +467,15 @@ def test_provider_fault_leaves_document_pending_in_input(batch, name):
     assert name in batch["input"]
 
 
-def test_provider_fault_amplification_per_document(batch):
-    """Observed: one document on a dead provider costs 8 HTTP calls per sync.
+def test_provider_fault_is_not_amplified_by_recovery(batch):
+    """A document on a hung provider costs one Prefect retry envelope per sync.
 
-    4 Prefect tries in the ingest loop, then the recovery step re-extracts the
-    same still-pending document with another 4. With a 60 s timeout that is
-    ~8 minutes of a nightly window per document when the provider hangs; a
-    200-document night on a hung endpoint is ~27 hours. Pinned as observed.
+    Recovery used to re-read the still-pending document with another envelope (8 calls). A
+    document the main loop tried in this pass is now skipped there (S1). HTTP 401/402/403 trip
+    the breaker instead (tests/test_s1_provider_breaker.py), so they are not in this batch.
     """
     w = next(w for w, (n, _s) in SINGLES.items() if n == "timeout.pdf")
-    assert batch["vlm"].calls[w] == 8
+    assert batch["vlm"].calls[w] == batch["cfg"].extraction.max_retries + 1
 
 
 def test_unknown_with_good_po_number_is_not_attached(batch):

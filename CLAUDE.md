@@ -56,11 +56,13 @@ Use a subagent only when it earns its cost. Each one starts cold and re-reads th
 
 Pick the model by the size of the task, and pass `model` explicitly on every Agent call:
 
-- **Haiku:** small mechanical edits (scripts, docs and table rows, moving tests, test-factory defaults, a one-line UI tweak).
+- **Haiku:** the default worker for small fixes, not only mechanical edits: scripts, docs and table rows, moving tests, test-factory defaults, UI tweaks, and small bounded code changes. Give it a written plan (from Sonnet or Opus: files it may touch, exact behaviour, tests to add or fix, commands to run) and have it implement and test the change itself. Then verify the result with Sonnet or Opus, scaled to risk: Sonnet for ordinary code and UI, Opus for reconciliation, merge, grouping, migrations or Prefect. Larger or correctness-critical changes still go to Sonnet.
 - **Sonnet:** mid-level implementation (a new guard or route with its tests, deploy and migration work, UI plus route changes).
 - **Opus:** review of every commit that touches reconciliation, merge, grouping, migrations or the Prefect deployment, and any plan.
 
 The fix plan in `docs/MVP_FIX_PLAN.md` follows this split.
+
+**OpenCode delegation (DeepSeek):** always pin the model to `deepseek-v4.1-flash`. Naming DeepSeek in the prompt text does not select it, and the default can route to Kimi or another model. Use `opencode run -m opencode/deepseek-v4.1-flash ...` (the `opencode-go/deepseek-v4.1-flash` route also exists), and when going through `opencode:opencode-rescue` pass the model explicitly. Check `opencode models` if the id changes.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

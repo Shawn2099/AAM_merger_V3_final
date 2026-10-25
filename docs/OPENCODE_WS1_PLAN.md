@@ -329,7 +329,7 @@ and in each `docs` entry add `"po_no_source": d.po_no_source,`.
 | settling_merge_now_target | pending | same prefix | 3 docs |
 | placed_by_number_only | pending | `DN-7000021-b.pdf was placed in this set only because its DN number matches` | 4 docs; exactly one doc has `po_no_source == "dn_number"` and it is `DN-7000021-b.pdf` |
 | confirm_placement_target | pending | `DN-7000022-b.pdf was placed in this set only` | 4 docs; one `dn_number` doc |
-| rematch_target | pending | `No delivery note attached to this set yet (not received, or still being read)` | |
+| rematch_target | pending | `No delivery note attached to this set yet (not received, still being read, or waiting on the Unclassified page)` | |
 | merge_now_mismatch_target | mismatched | `delivered 8 of 10` | |
 | audit_force_merge_target | mismatched | `delivered 9 of 10` | |
 | audit_archive_target | quarantined | `could not be matched` | |

@@ -485,13 +485,20 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         return load_config_file(cfg_path)
     except Exception as exc:
         good = _LAST_GOOD.get(str(cfg_path.resolve()))
-        if good is None:
-            raise
         try:
             stat = cfg_path.stat()
             marker = (str(cfg_path.resolve()), stat.st_mtime_ns, stat.st_size)
         except OSError:
             marker = (str(cfg_path.resolve()), 0, 0)
+        if good is None:
+            # A process that STARTS on a broken file (service restart, a fresh Prefect
+            # run) has no in-memory copy. Run on the newest valid backup instead of
+            # crash-looping; with no valid backup, fail fast as before.
+            fallback = _load_newest_valid_backup(cfg_path, exc)
+            if fallback is None:
+                raise
+            _REPORTED_BAD.add(marker)
+            return fallback
         if marker not in _REPORTED_BAD:
             _REPORTED_BAD.add(marker)
             logger.error(
@@ -503,11 +510,44 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         return good.model_copy(deep=True)
 
 
-def load_config_file(path: Path, *, remember: bool = True) -> AppConfig:
+def _load_newest_valid_backup(cfg_path: Path, cause: Exception) -> AppConfig | None:
+    """Newest-first search of `config_backups/` beside `cfg_path` for a file that validates.
+
+    The winner is remembered as the last-good copy (so the Settings page shows its red
+    banner, because the file on disk still fails) and one loud error says why. Returns
+    None when no backup validates. Relative paths in a backup resolve against the real
+    config directory, not `config_backups`.
+    """
+    backups = cfg_path.resolve().parent / "config_backups"
+    try:
+        candidates = sorted(backups.glob("config-*.yaml"), key=lambda p: p.name, reverse=True)
+    except OSError:
+        return None
+    for backup in candidates:
+        try:
+            cfg = load_config_file(backup, remember=False, base_dir=cfg_path.resolve().parent)
+        except Exception:
+            continue
+        _LAST_GOOD[str(cfg_path.resolve())] = cfg.model_copy(deep=True)
+        logger.error(
+            "%s is not valid (%s); STARTED on the newest valid backup %s instead. "
+            "Fix the file or restore a copy from config_backups.",
+            cfg_path,
+            cause,
+            backup.name,
+        )
+        return cfg
+    return None
+
+
+def load_config_file(
+    path: Path, *, remember: bool = True, base_dir: Path | None = None
+) -> AppConfig:
     """The validating loader behind `load_config`; raises on any problem.
 
     `remember=False` validates a candidate file (the settings page) without making it the
-    last-good copy.
+    last-good copy. `base_dir` (backup fallback only) resolves relative paths and `.env`
+    against the original config directory instead of the file's own folder; it skips the cache.
 
     The dashboard polls every 2 s and each route used to re-read the YAML and
     re-run six `mkdir`s (audit P2-24). Parsed configs are cached by the config
@@ -542,10 +582,16 @@ def load_config_file(path: Path, *, remember: bool = True) -> AppConfig:
         )
     except OSError:
         cache_key = None
+    if base_dir is not None:
+        cache_key = None
     if cache_key is not None and cache_key in _CONFIG_CACHE:
         return _CONFIG_CACHE[cache_key].model_copy(deep=True)
     paths_raw = data.get("paths")
-    base_dir = cfg_path.resolve().parent
+    env_anchor = cfg_path
+    if base_dir is None:
+        base_dir = cfg_path.resolve().parent
+    else:
+        env_anchor = base_dir / cfg_path.name
     if isinstance(paths_raw, dict):
         # Relative paths are relative to the CONFIG FILE, not the process
         # working directory. Under NSSM that cwd is C:\Windows\System32, so a
@@ -575,7 +621,7 @@ def load_config_file(path: Path, *, remember: bool = True) -> AppConfig:
     # announced "extraction will fail closed" on every single config load
     # while extraction was in fact working — a false statement to the
     # operator, printed once per file per sync.
-    load_env(cfg_path)
+    load_env(env_anchor)
     api_key = os.getenv(cfg.vlm.api_key_env_var)
     if not api_key:
         logger.warning(
