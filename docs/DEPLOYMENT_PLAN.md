@@ -109,10 +109,8 @@ Order (Opus review 2026-10-25): packets that share files run SERIALLY: **WS1b ->
 ### WS1c. Customs replace (D19): Claude specs, DeepSeek builds, Opus reviews
 Spec: `docs/SPEC_CUSTOMS_REPLACE.md` (rev 2, Opus-approved with changes, all applied). BUILT and pushed in `d41deb8`: route `POST /po_sets/{id}/documents/{doc_id}/remove_supporting` plus `tests/test_customs_replace.py` (10 tests), PRODUCT section 8 limitation pinned. STILL TO DO after WS1b is reviewed and committed (same template files): the Remove button in `templates/po_set_detail.html` (CUSTOMS/SHIPPING rows, not merged, not archived, disabled when locked, `hx-confirm`, reload), the upload help sentence, `ui_test_env.py` scenario and a UI case.
 
-### WS3. Settings page (D11): build only after Q1 to Q4 are answered
-- Spec first (Claude): list of keys with live/restart class, validation, atomic write of `config.yaml` with a backup copy, rollback on invalid, audit row, re-register the Prefect deployment when the nightly switch or cron changes, secrets excluded.
-- Build (DeepSeek): route `src/app/api/routes/settings.py`, template `templates/settings.html`, tests `tests/test_settings_page.py`, UI cases in `tests/ui/test_ui_settings.py`.
-- Acceptance: a bad value never leaves the app unable to start; every edit audited; round-trip test (edit, restart, value kept).
+### WS3. Settings page (D11)
+> **BUILT 2026-10-25** (written directly by Claude at the owner's request, ahead of the pilot; not yet Opus-reviewed or committed). Spec and behaviour: `docs/SETTINGS_SPEC.md`. Code: `src/app/services/settings_admin.py`, `src/app/api/routes/settings.py`, `templates/settings.html`; `load_config` now keeps the last good config so a file broken while running cannot take the service down. Tests: `tests/test_settings_page.py`. 28 settings are editable; paths, hosts, API key, nightly switch and Prefect keys are shown read-only (deviation from Q1, which listed paths as restart-needed: a wrong path shows an empty system). Still open: `tests/ui/test_ui_settings.py` browser cases, Opus review.
 
 ### WS4. Windows installation and operations (DeepSeek drafts scripts and checks; Claude reviews; user runs on the target)
 > **BUILT 2026-10-25** (Sonnet worker, Opus review with 9 required fixes applied): web and worker depend on the Prefect server, installer refuses `["*"]` unless `-AllowAnyHost`, `-DryRun`, `verify_backup.ps1`, restore drill and real-restore sections in DELIVERY, 21 script tests. Real NSSM behaviour is a WS9 check.

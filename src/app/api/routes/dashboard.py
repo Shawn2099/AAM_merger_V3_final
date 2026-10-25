@@ -1053,6 +1053,7 @@ _AUDIT_ACTION_LABELS = {
     "customs_append": "Customs Appended",
     "line_mapping_applied": "Line Mapping Applied",
     "quarantined": "Quarantined",
+    "settings_changed": "Settings Changed",
 }
 
 
@@ -1104,6 +1105,15 @@ def _audit_summary(action: str, detail: dict) -> str:
             if isinstance(detail.get(pool), dict) and detail[pool].get("rule")
         ]
         return "Line numbers mapped: " + ", ".join(rules) if rules else "Line numbers mapped"
+    if action == "settings_changed":
+        changes = detail.get("changes")
+        if isinstance(changes, dict) and changes:
+            return "; ".join(
+                f"{key}: {value.get('old')} → {value.get('new')}"
+                for key, value in changes.items()
+                if isinstance(value, dict)
+            )
+        return ""
     if action == "manual_status_change":
         note = detail.get("note")
         if note:

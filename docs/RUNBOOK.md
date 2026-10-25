@@ -169,6 +169,13 @@ Write the real reason, tell the on-site contact the same day [TO CONFIRM: who ap
 
 **Re-Extract:** the AI may read a document type differently and replace the type you set by hand. A failed re-read leaves the set **Pending**, not unchanged.
 
+**Settings (⚙️ Settings):** shows how the service is set up and lets you change the safe settings (folder watching, wait time before merging,
+the AI model and its limits, matching rules, lock time, log file). Each row says when a change takes effect: **Live**, **Next sync**
+or **Needs restart**. Every value is checked before it is saved; a wrong value is refused with a message beside it and nothing changes.
+A copy of the previous file is kept in the `config_backups` folder next to `config.yaml` (newest 20), and each save is in the Audit Log.
+Folders, the database, allowed host names and the midnight schedule are shown under **Fixed by IT** and are not changed here.
+Details: `docs/SETTINGS_SPEC.md`.
+
 **Manual Merger (Merge PDFs):** builds a packet by hand, with no AI and nothing saved to the database or output folder.
 It gives a **browser download** only [TO CONFIRM: where the file is saved and how it is recorded]. It refuses locked or password-protected PDFs.
 
@@ -231,6 +238,8 @@ The first week is supervised. **Nobody runs the system unattended.** A one-digit
 | A set reads "Merged" but the PO is right and lines look wrong | Two rows with the same line number and quantity can describe different items. The app cannot see that. | Compare the descriptions by eye against the printed PO. |
 | A document was placed under the wrong PO | The Unclassified placement cannot be undone in the app. | If the set is quarantined, archive it and add the files again. If it only sits Pending, tell the on-site contact. |
 | HTTP 400 from the AI provider, and the log says the batch halted | The provider refused the requests, often because of a settings or model problem, not the files. Nightly processing pauses for an hour. | Tell the on-site contact. Do not re-send the files again and again. |
+| Settings page shows a red "settings file on disk is not valid" banner | `config.yaml` was edited by hand (or restored) and no longer passes the checks. The service keeps running on the last good settings. | Tell IT. They fix the line named in the banner, or copy the newest file from `config_backups` over `config.yaml`. Do not restart the service until it is fixed: a restart on a broken file will not start. |
+| Settings page says "changed by someone else" | Two people had the page open. | Nothing was lost: open Settings again and redo your change. |
 | Dashboard reachable under an unexpected host name | The app accepts any host name unless `server.allowed_hosts` is set. | Tell the on-site contact to set it (DELIVERY section 4). |
 
 ---

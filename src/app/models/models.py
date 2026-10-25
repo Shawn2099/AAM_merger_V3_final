@@ -59,6 +59,9 @@ class AuditAction(enum.StrEnum):
     # An automatic quarantine (set or single document). The detail holds the
     # exact QUARANTINE.txt text so the audit trail outlives the folder.
     quarantined = "quarantined"
+    # An operator changed settings on the Settings page. The detail holds each key's
+    # old and new value and the name of the config backup that was kept.
+    settings_changed = "settings_changed"
 
 
 class Document(Base):

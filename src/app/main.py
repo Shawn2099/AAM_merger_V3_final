@@ -36,6 +36,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.manual_merger import router as manual_router
 from app.api.routes.po_sets import router as po_sets_router
+from app.api.routes.settings import router as settings_router
 from app.api.routes.sync import router as sync_router
 from app.core.config import load_config
 from app.core.http_errors import BodyTooLarge, error_response
@@ -392,6 +393,7 @@ def create_app(allowed_hosts: list[str] | None = None) -> FastAPI:
     app.include_router(sync_router)
     app.include_router(po_sets_router)
     app.include_router(manual_router)
+    app.include_router(settings_router)
     app.include_router(dashboard_router)
 
     @app.get("/health")

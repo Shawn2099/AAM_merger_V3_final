@@ -266,3 +266,41 @@ whether POs printed "1 of 6" supplied as page 1 only should be held, and I-1 (on
 - Today only the pydantic shape (all value fields are `str | None`), the strict quantity parser, and cross-document agreement protect against a bad extraction. Nothing checks a value against the document itself.
 - **The user does not trust embedded PDF text, at least for DN documents.** Do NOT use the text layer as ground truth or as a hard check. Evidence: of 200 docs, 111 have a text layer and 89 are scans; doc 1 (DN2182.pdf) text layer says `LPO2612360`, the image says `LPO26/2360` (model was right); doc 199 text layer `GDN'RH0'26-796` vs printed `GDN-RHO-26-796` (model right). No hallucination was found on the text-layer half of the corpus.
 - Candidates to discuss later: format invariants in one validator; replay audit script over stored extractions (read-only); second independent read for scans/held docs (adds an API call, needs the user's decision, would catch I-1); image-based verification only. Nothing here is approved.
+
+## 8. SESSION LOG 2026-10-25 (late): finish WS1 + WS6, then full end-to-end run on `data/real_samples`
+
+### 8.1 User instructions this session (binding)
+- Finish **WS1** (UI tests) and **WS6** (soak/concurrency/recovery tests) after a full review, then run the **full end-to-end run**.
+- `data/real_samples/` (695 PDFs + Thumbs.db, 177 MB, flat) REPLACES the current input: remove the current DB and use these PDFs as input. Use the API key in `.env` (paid provider authorised for this run).
+- **OpenCode rule:** use the *Go* subscription and ONLY `opencode-go/deepseek-v4.1-flash`; the `-m` flag must be passed on EVERY call (`opencode run -m opencode-go/deepseek-v4.1-flash --auto ...`).
+- **Operating model:** Opus = architect, planner, reviewer (writes the detailed plans, reviews every diff); DeepSeek = worker. Never give a worker a thin brief.
+- **Copy safety:** never read a file while it is being copied. **Correctness:** every figure the UI shows must be true; merged results must be correct. **No new features / no over-building**; a "1s tweak" round may come after the release.
+
+### 8.2 What was done
+- Opus agent wrote `docs/OPENCODE_WS1_PLAN.md` (35 UI cases, 21 data-testid template insertions T1-T21) and `docs/OPENCODE_WS6_PLAN.md` (shared `tests/_ws6_helpers.py`, soak, concurrency, restart recovery, D2, D21); `docs/OPENCODE_WS6_BRIEF.md` is now a pointer.
+- **WS1 pass 1 (DeepSeek):** 63 UI tests green, templates diff T1-T21 APPROVED (attribute-only, 21 lines). **Opus review: REJECT as complete**: 6 plan cases missing (D-13, D-14, S-14b xfail, S-23, S-24, G-01b xfail), 5 scenarios never seeded, weakened assertions (S-09 floats, G-03 innerWidth, etc.), U-01 silently rewritten. Fix list = `docs/OPENCODE_WS1_FIXES.md`; worker re-launched (running at time of writing).
+- **WS6 pass 1 (DeepSeek):** 18 passed, 1 skipped (RUN_SOAK=1 200-file case), 1 xfailed (WS6-01), 3 identical runs, ruff clean; D21 timing ~104 s stability polling at 200 pending files (`ceil((n+1)/8)*4 s`). **Opus review: approve with fixes** (6.2 can pass by luck because the lifespan starts a real poller; 6.2 must reuse the same poller; 7.3 changed an expected value; no sync-error checks; gate timeout 30->120 s; soak script must chdir). Fix list = `docs/OPENCODE_WS6_FIXES.md`; worker re-launched.
+- Killed 24 leaked Prefect temp servers (dead parents, pattern `uvicorn.*--factory`, never `app.main:app`). Baseline `ty` / ruff / full suite (excluding tests/ui and test_ws6_*) launched on the unchanged `src/`.
+- NOTHING IS COMMITTED YET. Commit by naming files; test a `git checkout-index` copy first.
+
+### 8.3 Findings and owner decisions (none is a hard release blocker; supervised first week)
+| Id | Finding | Proposed action |
+|---|---|---|
+| WS6-01 / O-1 | Input read in path order, docs (D5/PRODUCT) say oldest first | one-line sort by mtime, or correct the docs (owner) |
+| WS6-02 | possible `database is locked` between a sync write and Force Merge; not reproduced, sync side was unchecked | fix list adds the check; report, never retry |
+| WS6-03 | DN stuck mid-read after a crash gives reason "No delivery note in this set yet" (misleading) | fix the message or document before unattended running; strict xfail `test_ws6_03_...` |
+| O-2 | Force Merge on an already merged set returns 200 + a 2nd audit row (UI_TEST_PLAN 4.3 expects 409) | decide |
+| O-3 | nightly worker crash leaves a live-looking sync marker; actions refused up to 20 min unless Scan | runbook line, or a worker check |
+| O-4 | doc left mid-read is reclaimed only after 15 min; poller does not wake for it | accept, runbook |
+| O-5 | stray `.<name>.<hex>.tmp` in the output folder after a killed write (visible in Explorer) | startup sweep or runbook line |
+Known not covered: browser-side Alpine/HTMX beyond tests/ui, Windows services (NSSM, reboot order) = WS9 on the target PC, misread hold skipped (D18; first-week supervision + manual merger).
+
+### 8.4 Copy-safety facts (verified in code, no change needed)
+`ingestion.is_file_stable` (size sampled `stability_poll_count`=2 times every 2 s, zero bytes never stable) -> pypdf must open the bytes -> if it fails and mtime < 300 s (`_RECENT_WRITE_SECONDS`) the file gets NO row and stays for retry; older broken files are quarantined with a reason. A paused copy passes the size check but fails pypdf. To be PROVEN in the e2e run by a slow-copy test (copy a big file in slowly while a sync runs), not by new code.
+
+### 8.5 Next steps (in order)
+1. WS1 fixes and WS6 fixes finish -> Opus re-review of both -> `ruff`, `ty check src`, full `pytest`, `make business-logic` -> commit by named files + push branch (no force).
+2. Owner answers 8.3 (fix vs document).
+3. **E2E run:** archive (do not delete) the old `data/aam_merger.db*`, `data/input`, `data/output`, `data/stored`, `data/quarantine` into `data/prev_run_<date>/`; fresh DB via `uv run python scripts/migrate_db.py`; copy `real_samples/*.pdf` into `data/input`; run the sync with the API key; guard the cost (695 PDFs ~3.5x the 200-file run; HTTP-400 halt stays on). Add a slow-copy check.
+4. Verify: every merged packet vs its source PDFs; every non-merged set has a visible reason; UI figures vs DB; write `REAL_RUN_2026-10-25_*.md`.
+5. WS7 docs/runbook, WS8 licence, WS9 on the target PC.

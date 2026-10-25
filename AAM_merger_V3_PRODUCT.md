@@ -708,6 +708,16 @@ re-checks the input once, which is cheap because ingest de-duplicates by SHA); a
 fails every retry waits for the nightly sweep or a manual Scan; zero-byte files never trigger.
 Pinned by `tests/test_poller.py`.
 
+### L — settings page: what it will not change (WS3)
+
+The Settings page edits 28 operating settings (watcher, AI model and limits, matching switches, lock time,
+merge-tool limits, log file). It does not edit folders, the database path, allowed hosts, the API key, the midnight
+schedule or the packet page order: those stay in `config.yaml` (IT). A value is validated by the service's own
+config models on a candidate copy before the file is replaced, a backup is kept, and a failed read-back restores
+the previous file. A config file broken by a hand edit while the service runs is logged and the service continues on
+the last good settings; a service started on a broken file still refuses to start. The page cannot tell a
+well-formed but wrong model id from a right one. See `docs/SETTINGS_SPEC.md`.
+
 ### L — subfolders of the input folder are read; zero-byte files are skipped (R-17)
 
 The scan reads the input folder AND its subfolders (a folder per supplier or per

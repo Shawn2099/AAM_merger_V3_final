@@ -273,8 +273,8 @@ class ReconciliationConfig(_StrictConfigModel):
 
 class LoggingConfig(_StrictConfigModel):
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
-    max_file_size_mb: int = 10
-    backup_count: int = 5
+    max_file_size_mb: int = Field(default=10, ge=1, le=1024)
+    backup_count: int = Field(default=5, ge=0, le=100)
 
 
 class AppConfig(BaseSettings):
@@ -466,8 +466,48 @@ def load_env(cfg_path: Path | None = None) -> None:
 _CONFIG_CACHE: dict[tuple[str, int, int, int, str], AppConfig] = {}
 
 
+#: The last config that loaded and validated, per resolved config file. A later edit that
+#: breaks the file must not take every page down (the dashboard re-reads the config every
+#: 2 s): the service keeps running on this copy and the settings page says so. A start with
+#: no earlier good copy still fails fast (SPEC §13.1).
+_LAST_GOOD: dict[str, AppConfig] = {}
+_REPORTED_BAD: set[tuple[str, int, int]] = set()
+
+
 def load_config(path: str | Path | None = None) -> AppConfig:
     """Load YAML config + .env. SPEC §13.1 — validated at startup, fail fast.
+
+    After a successful load, a file that later becomes unreadable or invalid is logged
+    (once per edit) and the last good config keeps serving; see `_LAST_GOOD`.
+    """
+    cfg_path = Path(path or os.getenv("AAM_CONFIG_PATH", "config.yaml"))
+    try:
+        return load_config_file(cfg_path)
+    except Exception as exc:
+        good = _LAST_GOOD.get(str(cfg_path.resolve()))
+        if good is None:
+            raise
+        try:
+            stat = cfg_path.stat()
+            marker = (str(cfg_path.resolve()), stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            marker = (str(cfg_path.resolve()), 0, 0)
+        if marker not in _REPORTED_BAD:
+            _REPORTED_BAD.add(marker)
+            logger.error(
+                "%s is not valid (%s); the service keeps running on the last good settings. "
+                "Fix the file or restore a copy from config_backups.",
+                cfg_path,
+                exc,
+            )
+        return good.model_copy(deep=True)
+
+
+def load_config_file(path: Path, *, remember: bool = True) -> AppConfig:
+    """The validating loader behind `load_config`; raises on any problem.
+
+    `remember=False` validates a candidate file (the settings page) without making it the
+    last-good copy.
 
     The dashboard polls every 2 s and each route used to re-read the YAML and
     re-run six `mkdir`s (audit P2-24). Parsed configs are cached by the config
@@ -480,7 +520,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     The Windows service starts in `C:\\Windows\\System32`, so a CWD-relative
     `./data/output` parked real output in a system folder (audit P2-16).
     """
-    cfg_path = Path(path or os.getenv("AAM_CONFIG_PATH", "config.yaml"))
+    cfg_path = Path(path)
     if not cfg_path.exists():
         # SPEC §13.1: refuse to start — never silently fall back to the
         # committed example (dev paths/credentials would run in prod).
@@ -542,7 +582,9 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             "%s not set — VLM extraction will fail closed; set it in .env or env var",
             cfg.vlm.api_key_env_var,
         )
-    if cache_key is not None:
+    if cache_key is not None and remember:
         _CONFIG_CACHE.clear()
         _CONFIG_CACHE[cache_key] = cfg
+    if remember:
+        _LAST_GOOD[str(cfg_path.resolve())] = cfg.model_copy(deep=True)
     return cfg.model_copy(deep=True)
