@@ -40,7 +40,7 @@ def test_pending_set_shows_a_remove_button_for_customs_and_shipping_only(cfg, cl
     html = _page(client, pid)
     assert _testid(cid) in html and _testid(sid) in html
     assert f"/po_sets/{pid}/documents/{cid}/remove_supporting" in html
-    assert "Remove customs.pdf? You can upload the right one afterwards." in html
+    assert "Delete customs.pdf? You can upload the right one afterwards." in html
     with Session(get_engine(cfg)) as s:
         others = [
             d.id

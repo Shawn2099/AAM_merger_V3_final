@@ -367,9 +367,13 @@ def toggle_customs(po_set_id: int):
     cfg = load_config()
     _acquire_lock(po_set_id, "toggle_customs", cfg)
     try:
+        from app.services.customs import CustomsToggleRefused
         from app.services.customs import toggle_customs as svc_toggle
 
-        updated = svc_toggle(po_set_id, cfg)
+        try:
+            updated = svc_toggle(po_set_id, cfg)
+        except CustomsToggleRefused as exc:
+            raise HTTPException(status_code=409, detail=exc.message) from exc
         rebuilt = None
         append_error: str | None = None
         # A merged set whose customs requirement has just been switched on,

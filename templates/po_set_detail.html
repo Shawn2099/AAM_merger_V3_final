@@ -117,6 +117,11 @@
 
   <!-- Quick Action Controls (hidden for archived sets) -->
   {% if not is_archived %}
+  <p class="muted" data-testid="merge-instruction" style="width:100%; margin:0 0 4px; font-size:0.85rem;">
+    To merge: press <strong>Merge Now</strong>. If a check blocks it, the reason is shown on this page.
+    <strong>Force Merge</strong> merges without the checks and needs a written reason.
+    If customs files are attached, turn the customs requirement off by deleting them first.
+  </p>
   <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border); display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
     {% if sync_running %}
     <div class="muted" data-testid="sync-running-note" style="width:100%; font-size:0.85rem;">
@@ -430,13 +435,13 @@
               class="btn btn-secondary btn-sm"
               data-filename="{{ d.original_filename }}"
               hx-post="/po_sets/{{ po_set.id }}/documents/{{ d.id }}/remove_supporting"
-              hx-confirm="Remove {{ d.original_filename }}? You can upload the right one afterwards."
+              hx-confirm="Delete {{ d.original_filename }}? You can upload the right one afterwards."
               hx-swap="none"
               hx-on::after-request="if (event.detail.successful) { Alpine.store('toasts').success('Removed ' + this.dataset.filename + '.', true); location.reload() }"
               title="Take this file out of the packet. Upload the right one afterwards, then press Merge Now."
               {% if is_locked or sync_running %}disabled{% endif %}
             >
-              <span>🗑 Remove</span>
+              <span>🗑 Delete</span>
             </button>
             {% endif %}
           </td>
