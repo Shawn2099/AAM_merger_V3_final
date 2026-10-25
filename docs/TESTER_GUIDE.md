@@ -191,3 +191,22 @@ wrong.
 
 **Can two people merge different sets at the same time?** Yes. The lock is per
 PO set, not global.
+
+## Operator guide: merging, customs, moves and removals (2026-10-25)
+
+- **How to merge:** open the set and press **Merge Now**. If a check blocks it, the reason is
+  shown on the page. **Force Merge** merges without the checks and needs a written reason.
+- **Customs files:** attach a CUSTOMS and a SHIPPING file to add their pages. To delete one, use
+  its **Delete** button (before merge only). You cannot turn the customs requirement off while
+  one of these files is attached on an unmerged set: delete the files first, then switch it off.
+  On a merged set the switch can be turned off; the packet is kept and a note says so.
+- **A file on the holding page that cannot be placed:** press **Move to quarantine**. The file is
+  copied to the quarantine folder and leaves the list. Fix or split it there, then put the copy
+  back in the input folder.
+- **Unsplit multi-document PDFs** (several documents in one file) go to **Files set aside** on the
+  Quarantine page. Split them outside the app and put the parts in the input folder.
+- **Removing a set:** at the bottom of an open set's page, **Move to quarantine and remove set**.
+  The files are copied first to `quarantine/_removed_sets/`; the folder path is shown. Read
+  `REMOVED.txt` in that folder to restore. Merged and archived sets cannot be removed this way.
+- **While a scan is running** the actions on sets, moves and removals are paused. They resume
+  when the scan finishes; a large batch can take an hour or more.

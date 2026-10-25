@@ -495,6 +495,25 @@ and 4 test files deleted.
 
 ---
 
+## 7b. Operator rules added on 2026-10-25
+
+Full list with commits: `docs/BATCH1_CHANGES_2026-10-25.md`.
+
+- **Times** are shown in IST with the zone. The database and JSON APIs stay UTC.
+- **Worklists** name what is needed: "Needs a decision" (several PO files, or a document
+  placed by its DN number only), "Waiting (part delivered)" (every disagreeing quantity is
+  below the PO), "Matched by description - needs a second check", and "Force-merged - needs a
+  second check". Status and the engine verdict do not change.
+- **Holding list:** "Move to quarantine" copies a document to the quarantine folder and takes
+  it off the list. Unsplit multi-document PDFs are set aside automatically and are listed under
+  "Files set aside" on the Quarantine page; they cannot be reclassified (D17).
+- **Customs:** the requirement can be turned on at any time. Turning it off on an unmerged
+  set is refused while a CUSTOMS or SHIPPING file is attached; delete the file first. Merged
+  sets keep the switch rule (D5, D18). Per-file Delete is offered before merge only (D1).
+- **Merging:** press Merge Now. Force Merge merges without the checks and needs a reason.
+- **Removing a set:** "Move to quarantine and remove set" at the bottom of an open set (see
+  section 8, N). Archive is the softer action for quarantined sets; it keeps every row.
+
 ## 8. Accepted limitations
 
 These are real. They are the price of §7, stated plainly so nobody discovers
