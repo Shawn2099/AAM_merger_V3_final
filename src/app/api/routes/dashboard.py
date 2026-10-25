@@ -121,6 +121,33 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
     )
     doc_counts = {r[0]: r[1] for r in doc_count_rows if r[0] is not None}
 
+    from app.services.grouping import PLACED_BY_NUMBER
+
+    po_doc_rows = (
+        session.query(Document.po_set_id, func.count(Document.id))
+        .filter(
+            Document.po_set_id.in_(po_set_ids),
+            Document.archived_at.is_(None),
+            Document.doc_type == DocType.PO,
+        )
+        .group_by(Document.po_set_id)
+        .all()
+    )
+    po_doc_counts = {r[0]: r[1] for r in po_doc_rows if r[0] is not None}
+    dn_number_sets = {
+        r[0]
+        for r in session.query(Document.po_set_id)
+        .filter(
+            Document.po_set_id.in_(po_set_ids),
+            Document.archived_at.is_(None),
+            Document.po_no_source == PLACED_BY_NUMBER,
+        )
+        .distinct()
+        .all()
+        if r[0] is not None
+    }
+    single_po = bool(getattr(cfg.reconciliation, "single_po_document", False))
+
     out = []
     for ps in pools:
         status_val = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
@@ -128,6 +155,7 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
             ps.merged_output_path
             and _resolve_db_path(ps.merged_output_path, cfg.paths.output_folder)
         )
+        po_docs = po_doc_counts.get(ps.id, 0)
         out.append(
             {
                 "id": ps.id,
@@ -136,6 +164,13 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
                 "status_val": status_val,
                 "doc_count": doc_counts.get(ps.id, 0),
                 "has_merged_file": has_merged_file,
+                # Display-only worklist facts (Batch 1 step 8). Nothing is written.
+                "shortfall": _shortfall_shape(session, ps, cfg)
+                if status_val == "mismatched"
+                else "",
+                "po_doc_count": po_docs,
+                "multi_po_decision": single_po and po_docs > 1,
+                "dn_number_only": ps.id in dn_number_sets,
                 "updated_at": ps.updated_at,
                 # Age is the set's age (created_at). updated_at is bumped by every
                 # lock/unlock in every sweep, so it would read "just now" forever.
@@ -627,6 +662,7 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
         )
         unclassified_count = _holding_area_query(s).count()
         packet_has_customs = _packet_has_customs(s, ps, docs)
+        set_shortfall = _shortfall_shape(s, ps, cfg) if ps.status == POSetStatus.mismatched else ""
 
         return _templates.TemplateResponse(
             request,
@@ -649,10 +685,60 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
                 "notice": notice,
                 "is_archived": ps.archived_at is not None,
                 "is_merged": ps.status == POSetStatus.merged,
+                "set_shortfall": set_shortfall,
                 "packet_has_customs": packet_has_customs,
                 "archive_folder": str(cfg.paths.archive_folder),
             },
         )
+
+
+def _shortfall_shape(s: Session, ps: POSet, cfg) -> str:
+    """For a mismatched set: "under" when every disagreeing quantity is below the PO.
+
+    "under" means the delivery or the invoice is short, so the set is waiting for
+    the rest. Anything else (over-delivery, a line not on the PO) is "review".
+    Display only: the same comparison the detail page shows; the engine verdict
+    and the status do not change (D16).
+    """
+    from app.services.reconciliation import compare_po_set_lines
+
+    doc_type_map = {
+        d.id: (d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type))
+        for d in s.query(Document)
+        .filter(Document.po_set_id == ps.id, Document.archived_at.is_(None))
+        .all()
+    }
+    if not doc_type_map:
+        return "review"
+    items = s.query(LineItem).filter(LineItem.document_id.in_(list(doc_type_map))).all()
+    enriched = [
+        {
+            "line_item_no": li.line_item_no,
+            "description": li.description,
+            "quantity": li.quantity,
+            "doc_type": doc_type_map.get(li.document_id, ""),
+            "document_id": li.document_id,
+        }
+        for li in items
+    ]
+    comparison = compare_po_set_lines(
+        [li for li in enriched if li["doc_type"] == "PO"],
+        [li for li in enriched if li["doc_type"] == "DN"],
+        [li for li in enriched if li["doc_type"] == "SI"],
+        getattr(cfg.matching, "fuzzy_description_threshold", 85),
+        line_fallback=cfg.matching.line_number_fallback,
+    )
+    flags = comparison["flags"]
+    if any(f.get("type") == "identification" for f in flags):
+        return "review"
+    quantity_flags = [f for f in flags if f.get("type") == "quantity"]
+    if not quantity_flags:
+        return "review"
+    short = all(
+        f.get("po_quantity") is not None and (f.get("vendor_quantity") or 0) < f["po_quantity"]
+        for f in quantity_flags
+    )
+    return "under" if short else "review"
 
 
 def _packet_has_customs(s: Session, ps: POSet, docs: list[Document]) -> bool:

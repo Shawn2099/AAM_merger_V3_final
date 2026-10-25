@@ -43,7 +43,7 @@
               {% if (ps.description_match_count or 0) > 0 %}
               <span class="badge badge-desc" style="font-size:0.72rem; margin-left:4px;"
                     title="Number of vendor lines linked by the description fallback.">
-                description match ×{{ ps.description_match_count }}
+                Matched by description - needs a second check ({{ ps.description_match_count }} lines)
               </span>
               {% endif %}
               {% if ps.line_mapping_rule %}<span class="badge badge-desc" style="font-size:0.72rem; margin-left:4px;" title="Line numbers were paired by a numbering rule, not as printed.">lines mapped ({{ ps.line_mapping_rule }})</span>{% endif %}
@@ -52,16 +52,26 @@
             {% endif %}
             {% if ps.reconcile_reason and ps.reconcile_reason.startswith('Force-merged') %}
               <span class="badge badge-mismatched" style="font-size:0.72rem; margin-left:4px;"
-                    title="Reconciliation and customs gates were bypassed by an operator.">Force-merged</span>
+                    title="Reconciliation and customs gates were bypassed by an operator.">Force-merged - needs a second check</span>
             {% endif %}
           {% elif status_str == 'mismatched' %}
+            {% if ps.shortfall == 'under' %}
+            <span class="badge badge-pending" title="Every disagreeing quantity is below the PO: the delivery or the invoice is short. The set stays counted under Needs Review until the rest arrives.">Waiting (part delivered)</span>
+            {% else %}
             <span class="badge badge-mismatched">Needs Review</span>
+            {% endif %}
           {% elif status_str == 'blocked_customs' %}
             <span class="badge badge-blocked">🔒 Awaiting Customs</span>
           {% elif status_str == 'quarantined' %}
             <span class="badge badge-quarantined">🚨 Quarantined</span>
           {% elif status_str == 'pending' %}
             <span class="badge badge-pending">Pending / Waiting</span>
+            {% if ps.multi_po_decision %}
+            <span class="badge badge-mismatched" style="font-size:0.72rem; margin-left:4px;" title="The PO arrived as several files. Reconciliation will not choose between them.">Needs a decision: {{ ps.po_doc_count }} PO files - choose the right one (Force Merge if both are needed)</span>
+            {% endif %}
+            {% if ps.dn_number_only %}
+            <span class="badge badge-mismatched" style="font-size:0.72rem; margin-left:4px;" title="A document was placed by its DN number only. Confirm it belongs to this PO.">Needs a decision: matched by DN number only</span>
+            {% endif %}
           {% else %}
             <span class="badge badge-gray">{{ status_str }}</span>
           {% endif %}

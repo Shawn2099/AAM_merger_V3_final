@@ -49,7 +49,7 @@
           {% if (po_set.description_match_count or 0) > 0 %}
           <span class="badge badge-desc" style="font-size:0.8rem;"
                 title="Vendor lines linked by the description fallback, not a printed line number.">
-            description match ×{{ po_set.description_match_count }}
+            Matched by description - needs a second check ({{ po_set.description_match_count }} lines)
           </span>
           {% endif %}
           {% if po_set.line_mapping_rule %}<span class="badge badge-desc" style="font-size:0.8rem;" title="Line numbers were paired by a numbering rule, not as printed.">lines mapped ({{ po_set.line_mapping_rule }})</span>{% endif %}
@@ -217,6 +217,7 @@
        an operator force-merged it. Hiding it behind "not merged" left a green
        "Merged & Ready" header over a ❌ matrix with no explanation. #}
     {% if status_str == 'quarantined' %}Why this set is quarantined
+    {% elif status_str == 'mismatched' and set_shortfall == 'under' %}Why this set is waiting
     {% elif status_str == 'mismatched' %}Why this set needs review
     {% elif status_str == 'blocked_customs' %}Why this set is blocked
     {% elif status_str == 'merged' %}Packet note

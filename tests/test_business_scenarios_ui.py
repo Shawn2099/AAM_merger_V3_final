@@ -1368,13 +1368,14 @@ def test_failed_document_is_in_the_holding_area_not_the_quarantine_page(cfg, cli
 def test_needs_review_detail_page_shows_the_numbers(cfg, client):
     pid = _set(cfg, "PO-REVIEW2")
     _doc(cfg, pid, DocType.PO, "rev2-po.pdf", [("1", "BOLT", 100)], po_no="PO-REVIEW2")
-    _doc(cfg, pid, DocType.DN, "rev2-dn.pdf", [("1", "BOLT", 60)], po_no="PO-REVIEW2")
+    # Over-delivery: a short delivery now reads "Why this set is waiting" (step 8).
+    _doc(cfg, pid, DocType.DN, "rev2-dn.pdf", [("1", "BOLT", 120)], po_no="PO-REVIEW2")
     _doc(
         cfg,
         pid,
         DocType.SI,
         "rev2-si.pdf",
-        [("1", "BOLT", 60)],
+        [("1", "BOLT", 120)],
         si_no="INV-REV2",
         po_no="PO-REVIEW2",
     )
@@ -1382,7 +1383,7 @@ def test_needs_review_detail_page_shows_the_numbers(cfg, client):
 
     detail = client.get(f"/po_sets/{pid}/view").text
     assert "Why this set needs review" in detail
-    assert "60 of 100" in detail
+    assert "120 of 100" in detail
 
 
 def test_holding_area_count_is_the_same_everywhere(cfg, client):

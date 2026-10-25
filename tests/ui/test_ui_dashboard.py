@@ -46,7 +46,11 @@ def test_ui_d_01_every_active_set_row_is_listed_with_its_status_and_doc_count(pa
         text = row.inner_text()
         if ps["po"] not in text:
             problems.append(f"set {set_id}: PO {ps['po']} not shown")
-        if STATUS_TEXT[ps["status"]] not in text:
+        # A short delivery is still `mismatched`, shown as "Waiting (part delivered)" (step 8).
+        status_words = [STATUS_TEXT[ps["status"]]]
+        if ps["status"] == "mismatched":
+            status_words.append("Waiting (part delivered)")
+        if not any(word in text for word in status_words):
             problems.append(f"set {set_id}: status {ps['status']} not shown in {text[:80]!r}")
         if row.get_attribute("data-status") != ps["status"]:
             problems.append(f"set {set_id}: data-status is {row.get_attribute('data-status')}")

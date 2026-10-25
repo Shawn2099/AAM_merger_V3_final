@@ -230,7 +230,7 @@ def test_dashboard_shows_an_amber_review_tag_for_a_merged_description_match(cfg,
     page = client.get("/dashboard")
     assert page.status_code == 200
     assert "Merged • review" in page.text
-    assert "description match ×2" in page.text  # noqa: RUF001 - the UI badge text
+    assert "Matched by description - needs a second check (2 lines)" in page.text
 
     detail = client.get(f"/po_sets/{set_id}/view")
     assert detail.status_code == 200
