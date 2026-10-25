@@ -277,6 +277,17 @@ def ingest_file(src: Path, cfg: AppConfig) -> Document:
         return doc
 
 
+def _oldest_first(path: Path) -> tuple[float, str]:
+    """Sort key: oldest file first (D5), path as the tie-break so the order is stable.
+
+    A file that cannot be stat'd (vanished, locked) sorts last; the stability check deals
+    with it later."""
+    try:
+        return (path.stat().st_mtime, str(path))
+    except OSError:
+        return (float("inf"), str(path))
+
+
 def find_input_pdfs(
     input_folder: Path | str, exclude: tuple[Path | str, ...] | list[Path | str] = ()
 ) -> list[Path]:
@@ -313,7 +324,7 @@ def find_input_pdfs(
             d for d in dirs if not d.startswith(".") and (root_path / d).resolve() not in skip
         )
         found.extend(root_path / f for f in files if (root_path / f).suffix.lower() == ".pdf")
-    return sorted(found)
+    return sorted(found, key=_oldest_first)
 
 
 def input_pdfs(cfg: AppConfig) -> list[Path]:

@@ -41,7 +41,7 @@ then open the printed URL (`data/ui_test` is gitignored and wiped on every build
 |---|---|---|
 | `merged_basic` | merged | 2 lines, PO = DN = SI, real packet PDF |
 | `merged_mapped_x10` | merged | PO 10,20 vs DN/SI 1,2: "lines mapped (x10)" |
-| `pending_no_dn` | pending | "No delivery note in this set yet" |
+| `pending_no_dn` | pending | "No delivery note attached to this set yet (not received, or still being read)" |
 | `pending_partial_delivery` | pending | line 1 not delivered: "Awaiting" verdict |
 | `pending_vendor_line_not_on_po` | pending | SI line 2 matches no PO line: "Not on the PO" note |
 | `pending_two_po_documents` | pending | "holds 2 PO documents" |
