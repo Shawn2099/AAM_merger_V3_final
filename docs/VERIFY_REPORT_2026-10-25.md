@@ -336,3 +336,74 @@ No change in any of the three during the run. `git status --short` at the end is
 - Run window: 2026-10-25 14:08:29 → 14:53:22 local.
 - `.env` was not read or printed.
 
+
+---
+
+# Follow-up run — 2026-10-25 15:00-15:55 (requested separately, same worker)
+
+## A. Test #1 — real Force-Merge 409 race over HTTP (live uvicorn, WAL, isolated temp env)
+
+Harness lives outside the repo (`%TEMP%\aam_conc`); app code loaded from `src` unchanged. Isolated env: copy of `config.example.yaml` in `%TEMP%\aam_conc\config.yaml`, all `paths` relative to it, so the real `data/` and real `config.yaml` were never touched. Server: `uvicorn app.main:app --host 127.0.0.1 --port 8899`; DB confirmed `journal_mode=wal`.
+
+| Check | Result |
+|---|---|
+| 12 clients POST `/po_sets/1/force_merge` released together by a `threading.Barrier` | **1 x 200, 11 x 409** (`action already in progress on this PO Set: force_merge`), 0 other |
+| Packet written | exactly one file, `data/output/910001.pdf` (671 B) |
+| Audit rows | exactly 1 `force_merge` |
+| Lock after the race | `is_locked=false`, `locked_by_action=null`, status `merged` |
+| Stale lock (set locked 20 min ago, timeout 900 s) then POST | **200**, merged, lock cleared — stale auto-release works over real HTTP |
+| Fresh lock (5 s old) then POST | **409**, lock preserved (`is_locked=true`) |
+
+Verdict: the per-PO 409 path holds under real concurrency, and the lock is released even on the winning request. No double merge, no double audit row.
+
+## B. Test #3 — real NSSM service install: NOT RUN
+
+This shell is **not elevated** (`IsInRole(Administrator)` = `False`). Creating Windows services needs admin, and a real install would download NSSM and create three services on this machine, so it was not attempted. Still unverified: real install, service restart, Worker `DependOnService` at the SCM level, NSSM log rotation.
+
+## C. Coverage of all tests (single process: backend + `tests/ui`, `RUN_E2E=1`)
+
+Command: `$env:RUN_E2E='1'; uv run pytest --cov-report=json:%TEMP%\cov.json` (addopts already carry `--cov=src --cov-report=term-missing`; `[tool.coverage.run] branch = true`).
+
+- **Result: 7 failed, 6633 passed, 2 skipped, 46 xfailed, 787.80 s**
+- **Total coverage: 90.3 % (branch)** — 5643 statements, 503 missed lines, 192 partial branches
+- 38 of 38 `src/*.py` files measured (none unmeasured); **0 files below 70 %**; 16 files at 100 % (most are empty `__init__.py`)
+
+Worst modules:
+
+| Coverage | Missed | Statements | File |
+|---|---|---|---|
+| 82.6 % | 4 | 19 | `src/app/core/http_errors.py` |
+| 83.5 % | 53 | 247 | `src/app/services/ingestion.py` |
+| 83.7 % | 137 | 643 | `src/app/api/routes/dashboard.py` |
+| 84.8 % | 80 | 453 | `src/app/services/quarantine.py` |
+| 85.7 % | 5 | 33 | `src/app/api/routes/sync.py` |
+| 86.1 % | 72 | 423 | `src/app/flows/sync.py` |
+| 86.9 % | 16 | 113 | `src/app/api/routes/manual_merger.py` |
+| 88.5 % | 24 | 166 | `src/app/services/poller.py` |
+| 88.8 % | 42 | 334 | `src/app/api/routes/po_sets.py` |
+| 89.5 % | 79 | 578 | `src/app/services/extraction.py` |
+
+Business-logic core is well covered: `matching.py` 99.1 %, `reconciliation.py` 97.1 %, `grouping.py` 96.9 %, `merge.py` 90.8 %.
+
+Not measured by this number: Jinja templates / HTMX / Alpine JS, `scripts/*.ps1`, `alembic/`, and the `tests/ui` server code (the UI suite drives a subprocess server, so its requests do not add coverage).
+
+### The 7 failures in that combined run
+
+| Test | Error (first line) | Passes alone |
+|---|---|---|
+| `tests/test_ingestion.py::test_is_file_stable` | `assert False is True` — `is_file_stable(p, interval=0, count=2)` | yes (exit 0) |
+| `tests/test_prefect_schedule.py::test_to_deployment_accepts_the_schedule_object` | `AttributeError: 'coroutine' object has no attribute 'schedules'` | yes (exit 0) |
+| `tests/test_upload_body_limit.py::test_an_oversized_content_length_is_refused_before_the_app_runs` | `RuntimeError: Runner.run() cannot be called from a running event loop` | yes (exit 0) |
+| `tests/test_upload_body_limit.py::test_a_chunked_body_over_the_cap_is_a_413_even_when_the_app_answers_400` | same | yes |
+| `tests/test_upload_body_limit.py::test_an_app_that_answers_413_itself_keeps_its_own_message` | same | yes |
+| `tests/test_upload_body_limit.py::test_other_paths_and_methods_are_not_limited` | same | yes |
+| `tests/test_upload_body_limit.py::test_the_browser_page_names_the_limit_and_links_back_to_the_set` | same | yes |
+
+Observations (facts only):
+- All five `test_upload_body_limit.py` tests are `async def`; the whole file passes alone, and passes when run together with all of `tests/ui` under `RUN_E2E=1`. So the trigger is not `RUN_E2E=1` or the UI conftest alone — it is something earlier in the **full** suite that leaves an event loop running in the main thread. Cause unknown.
+- `tests/test_s3_startup_fallback.py` (the three `caplog` failures from the 14:08 run) **passed** in this run; that file was edited at 14:55:07, after the first report was written.
+- This combined single-process mode is not the documented way to run the suites; backend-only (Step 2) and `tests/ui` separately (Step 4) were both run in this report and behave differently.
+
+## D. Files written
+
+Only `docs/VERIFY_REPORT_2026-10-25.md`. Harness scripts and scratch data are outside the repo in `%TEMP%\aam_conc`; the temporary uvicorn on port 8899 was stopped. No source, test, config or `.env` file was modified.
