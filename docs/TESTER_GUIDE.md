@@ -115,7 +115,13 @@ that could not be read at all. Each row states the reason in plain language.
 
 **Delete is an archive action.** It moves the set to
 `data/development/archived_sets`, keeps every database record and every stored
-PDF, and writes an audit entry. The set disappears from the quarantine and
+PDF, and writes an audit entry.
+
+**Move to quarantine and remove set** is the one action that deletes rows. It is
+at the bottom of an open set's page. It copies every PDF of the set (and the
+input-folder copies) to `quarantine/_removed_sets/<PO>_<stamp>_<id>/`, writes a
+JSON export and REMOVED.txt, and only then deletes the set's rows. The folder path
+is shown on screen. Merged and archived sets cannot be removed this way. The set disappears from the quarantine and
 dashboard lists, but nothing is destroyed. If you need the documents again, they
 are still on disk — ask the server operator. The same PDF can be uploaded again
 after a set is archived; the new upload becomes a fresh active document.

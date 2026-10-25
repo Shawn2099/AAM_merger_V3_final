@@ -138,6 +138,7 @@ and the Force Merge modal. Archived sets are hidden from worklists, not deleted.
 
 ### 3.5 UI
 
+- Update 2026-10-25: a second action, **Move to quarantine and remove set**, deletes a set's rows after copying its files to `quarantine/_removed_sets/` (decision 2026-10-25). It is not an archive; see PRODUCT section 8, N.
 - Keep the button labelled **Delete**. The confirmation text states: “This moves the set to `data/development/archived_sets` and keeps the database records. Nothing is destroyed.” The behaviour is archive, not deletion.
 - Show a notice after success: the archive folder path.
 - Add an “Archived” count or filter if cheap; not required for the pilot.

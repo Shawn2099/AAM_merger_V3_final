@@ -212,7 +212,9 @@ class POSet(Base):
     # strip_rel, or "DN <rule|as printed>, SI <rule|as printed>"); NULL when lines
     # were compared as printed. Advisory; never decides a verdict.
     line_mapping_rule: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Archive, not delete. The row, its documents and its line items remain
+    # Archive, not delete (the one exception is Move to quarantine and remove set,
+    # which copies the files out first and then deletes the rows; decision 2026-10-25).
+    # The row, its documents and its line items remain
     # queryable for audit/analysis; worklists and grouping ignore archived
     # sets. Keeping the row is why the open-set unique index and the document
     # hash unique index are partial.

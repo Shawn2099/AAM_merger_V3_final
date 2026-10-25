@@ -133,7 +133,7 @@ NPM_CONFIG_CACHE=/tmp/npm-cache npx --yes skills add <owner/repo@skill> -y
 2. **TDD:** one test per behaviour, Given/When/Then with static expected
    values. Examples that hold today: PO 100 = DN 40+60 and SI 70+30 →
    `merged`; an orphan vendor line → `quarantined`; a set with no SI number →
-   auto-merge refuses; Delete archives rows/files to `data/development/archived_sets` and writes an audit row; second
+   auto-merge refuses; Delete (archive) moves the set to `data/development/archived_sets` and writes an audit row. Move to quarantine and remove set copies the files to `quarantine/_removed_sets/` and deletes the rows (decision 2026-10-25); second
    Force Merge on a locked set → 409.
 3. **If you remove a guard, add the limitation to PRODUCT §8 and pin it with a
    test named `test_limitation_*` or `test_known_limitation_*`.** A removed

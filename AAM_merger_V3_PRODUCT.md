@@ -812,8 +812,10 @@ is no longer held, and moving it would leave the old set's status stale. Re-Extr
 returns a document to Unclassified only when no PO number is printed on it; a
 manually placed document keeps its manual PO through every re-read. If the
 wrong placement makes the set quarantine, the operator Deletes (archives) the
-set and adds the files again; a set that only sits `pending` needs the
-administrator.
+set and adds the files again. A set that only sits `pending` (or is
+`mismatched`, `quarantined` or `blocked_customs`) can now be moved out with
+**Move to quarantine and remove set** (section 8, N), so the administrator is
+no longer needed for it.
 
 **Real-world consequence.** A typo can strand one document in a stray set until an
 administrator fixes it. It cannot cause a wrong merge: the stray set has nothing
@@ -1237,7 +1239,7 @@ detection; UOM conversion; price reconciliation.
 
 ## 10. Operating notes
 
-**No authentication.** Anyone with LAN access can force-merge or delete. This is
+**No authentication.** Anyone with LAN access can force-merge, archive or remove a set (the removal copies the files to the quarantine folder first). This is
 a documented accepted risk, not an oversight. The audit log is the
 accountability record, not access control.
 
