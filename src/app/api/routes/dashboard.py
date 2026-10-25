@@ -21,6 +21,7 @@ from app.api.templating import templates
 from app.core.config import load_config
 from app.core.database import get_engine
 from app.models import (
+    AuditAction,
     AuditLog,
     DocType,
     Document,
@@ -1566,6 +1567,8 @@ def reclassify_document(
                 )
             doc.is_split_parent = False
             doc.split_completed_at = None
+        old_doc_type = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
+        old_po_raw = doc.po_no_raw
         doc.doc_type = new_doc_type
         if po_no and po_no.strip():
             from app.services.grouping import normalize_po_no
@@ -1681,6 +1684,36 @@ def reclassify_document(
                     and cnt == 2
                 ):
                     ps_target.customs_append_pending = True
+        # Every manual type or PO change leaves a trace (I-38). Refusals raise
+        # before this point, so they write nothing.
+        new_type_value = new_doc_type.value
+        note = (
+            f"Reclassified {doc.original_filename} (document #{doc.id}) "
+            f"from {old_doc_type} to {new_type_value}"
+        )
+        if doc.po_no_raw and doc.po_no_raw != old_po_raw:
+            note += f", PO {doc.po_no_raw}"
+        if doc.po_set_id is not None:
+            note += f", placed in PO Set #{doc.po_set_id}"
+        s.add(
+            AuditLog(
+                po_set_id=doc.po_set_id,
+                action=AuditAction.manual_status_change,
+                detail=json.dumps(
+                    {
+                        "reclassified": True,
+                        "document_id": doc.id,
+                        "filename": doc.original_filename,
+                        "old_doc_type": old_doc_type,
+                        "new_doc_type": new_type_value,
+                        "po_no_raw": doc.po_no_raw,
+                        "po_set_id": doc.po_set_id,
+                        "note": note,
+                    }
+                ),
+                source="operator",
+            )
+        )
         s.commit()
 
     # A document the operator has just placed must not wait for the next
