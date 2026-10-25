@@ -672,7 +672,13 @@ def remove_to_quarantine(po_set_id: int, request: Request, note: str = Form(""))
         content=(
             '<div class="card" data-testid="remove-set-result">'
             f"<p>Removed PO Set #{po_set_id}. {result['document_count']} document(s) were copied to "
-            f"<code>{_html.escape(result['folder'])}</code>.</p></div>"
+            f"<code>{_html.escape(result['folder'])}</code>."
+            + (
+                f" {len(result['missing_files'])} stored file(s) were missing (see REMOVED.txt)."
+                if result["missing_files"]
+                else ""
+            )
+            + "</p></div>"
         )
     )
 

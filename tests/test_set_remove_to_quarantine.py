@@ -377,3 +377,148 @@ def test_a_browser_success_gets_the_result_page(cfg, client):
     assert resp.status_code == 200
     assert "Removed PO Set #" in resp.text
     assert "Back to dashboard" in resp.text
+
+
+def test_a_real_restore_failure_keeps_the_only_copy_and_says_so(cfg, monkeypatch):
+    """Review M3: the restore itself fails (a real write error), not a stub.
+
+    Two input copies. The first moves into the folder; the second fails its check. The
+    first must then be put back, and the write fails, so the folder keeps its only copy.
+    """
+    set_id, doc_ids, _input_copy, _unrelated = _set_with_files(cfg, po="PO8350")
+    input_dir = Path(cfg.paths.input_folder)
+    with Session(get_engine(cfg)) as s:
+        dn_bytes = Path(s.get(Document, doc_ids[1]).stored_path).read_bytes()
+    (input_dir / "dn.pdf").write_bytes(dn_bytes)
+    real_write = Path.write_bytes
+
+    def failing_write(self, data):
+        if self.parent == input_dir and self.name.endswith(".restoring"):
+            raise OSError("disk refused the restore")
+        return real_write(self, data)
+
+    calls = {"n": 0}
+
+    def second_input_fails(path, data):
+        if path.parent.name != "input":
+            return True
+        calls["n"] += 1
+        return calls["n"] == 1
+
+    monkeypatch.setattr(Path, "write_bytes", failing_write)
+    monkeypatch.setattr(q, "_same_bytes", second_input_fails)
+    with pytest.raises(q.SetRemovalRefused) as exc:
+        q.remove_set_to_quarantine(set_id, cfg)
+    assert exc.value.status_code == 500
+    assert "could not be put back" in exc.value.message
+    folder = _removed_folders(cfg)[0]
+    moved = [p for p in (folder / "input").iterdir() if p.suffix == ".pdf"]
+    assert moved, "the moved copy stays in the folder when it cannot be restored"
+    assert (folder / "REMOVAL_FAILED.txt").is_file()
+    assert not (folder / "REMOVED.txt").exists()
+
+
+def test_a_failed_removal_says_it_did_not_finish(cfg):
+    """Review L1: a removal that fails keeps its folder, reported as failed."""
+    from sqlalchemy import text
+
+    set_id, _doc_ids, _input, _unrelated = _set_with_files(cfg)
+    with get_engine(cfg).begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TRIGGER block_again BEFORE DELETE ON po_sets BEGIN SELECT RAISE(ABORT, 'blocked'); END;"
+            )
+        )
+    with pytest.raises(q.SetRemovalRefused):
+        q.remove_set_to_quarantine(set_id, cfg)
+    folder = _removed_folders(cfg)[0]
+    assert (folder / "REMOVAL_FAILED.txt").is_file()
+    assert not (folder / "REMOVED.txt").exists()
+    with get_engine(cfg).begin() as conn:
+        conn.execute(text("DROP TRIGGER block_again"))
+
+
+def test_a_document_attached_between_the_two_steps_stops_the_delete(cfg, monkeypatch):
+    """Review M2: a document that arrives after the copy is refused at the delete step."""
+    from app.services import ingestion
+
+    set_id, _doc_ids, _input, _unrelated = _set_with_files(cfg)
+
+    def attach_then_list(cfg_arg):
+        with Session(get_engine(cfg)) as s:
+            s.add(
+                Document(
+                    sha256_hash="arrived".ljust(64, "a"),
+                    original_filename="late.pdf",
+                    stored_path=str(Path(cfg.paths.stored_documents_folder) / "late.pdf"),
+                    doc_type=DocType.DN,
+                    extraction_status=ExtractionStatus.valid,
+                    po_set_id=set_id,
+                )
+            )
+            s.commit()
+        return []
+
+    monkeypatch.setattr(ingestion, "input_pdfs", attach_then_list)
+    with pytest.raises(q.SetRemovalRefused) as exc:
+        q.remove_set_to_quarantine(set_id, cfg)
+    assert exc.value.status_code == 409
+    with Session(get_engine(cfg)) as s:
+        assert s.get(POSet, set_id) is not None
+
+
+def test_a_removed_id_can_be_reused_and_the_old_folder_is_not_adopted(cfg):
+    """Review M2: after removal the id is reused (no AUTOINCREMENT). The old folder keeps a
+    `removed:` marker, so the new set gets its own folder (PRODUCT section 8, O)."""
+    set_id, _doc_ids, _input, _unrelated = _set_with_files(cfg, po="PO8400")
+    with Session(get_engine(cfg)) as s:
+        old = s.get(POSet, set_id)
+        old_folder = q._quarantine_set_folder(old, cfg)
+    q.remove_set_to_quarantine(set_id, cfg)
+    assert (old_folder / ".po_set_id").read_text(encoding="utf-8") == f"removed:{set_id}:" + (
+        (old_folder / ".po_set_id").read_text(encoding="utf-8").split(":")[-1]
+    )
+    with Session(get_engine(cfg)) as s:
+        new = POSet(po_no_normalized="PO8401", status=POSetStatus.pending)
+        s.add(new)
+        s.commit()
+        s.refresh(new)
+        new_id = new.id
+        new_folder = q._quarantine_set_folder(new, cfg)
+    assert new_folder != old_folder
+    assert (new_folder / ".po_set_id").read_text(encoding="utf-8") == str(new_id)
+
+
+def test_the_api_response_names_the_missing_files(cfg, client):
+    """Review L5: API clients still see the missing-file count and the folder."""
+    set_id, doc_ids, _input, _unrelated = _set_with_files(cfg, po="PO8500")
+    with Session(get_engine(cfg)) as s:
+        Path(s.get(Document, doc_ids[0]).stored_path).unlink()
+    resp = client.post(
+        f"/po_sets/{set_id}/remove_to_quarantine", data={}, headers={"Accept": "application/json"}
+    )
+    assert resp.status_code == 200
+    assert "stored file(s) were missing" in resp.text
+    assert "_removed_sets" in resp.text
+
+
+def test_the_same_bytes_can_be_added_again_after_removal(cfg):
+    """Review M2 (re-ingest): once the removed rows are gone, the same file gets a fresh row.
+    The database check is the one that decides; ingest uses the same hash rule."""
+    set_id, doc_ids, _input, _unrelated = _set_with_files(cfg, po="PO8600")
+    with Session(get_engine(cfg)) as s:
+        sha = s.get(Document, doc_ids[0]).sha256_hash
+    q.remove_set_to_quarantine(set_id, cfg)
+    with Session(get_engine(cfg)) as s:
+        s.add(
+            Document(
+                sha256_hash=sha,
+                original_filename="po.pdf",
+                stored_path=str(Path(cfg.paths.stored_documents_folder) / "again.pdf"),
+                doc_type=DocType.PO,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=None,
+            )
+        )
+        s.commit()
+        assert s.query(Document).filter(Document.sha256_hash == sha).count() == 1

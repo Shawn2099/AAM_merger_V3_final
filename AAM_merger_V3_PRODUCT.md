@@ -515,8 +515,8 @@ on the new set's page.
 A future set that reuses the old id does not adopt the old folder: the marker is
 rewritten to `removed:<id>:<stamp>`.
 
-> Not yet covered by a test: a set that is removed and then re-ingested from the same
-> bytes (the new row is expected, and it should be tested before relying on it).
+> The same bytes can be added again after a removal: the removed rows are gone, so the
+> hash is free (test_the_same_bytes_can_be_added_again_after_removal).
 
 ### O — a removed set's id can be reused (review L1, 2026-10-25)
 
@@ -526,6 +526,11 @@ the new set, and document ids in old audit JSON can point at new rows. The remov
 keeps the audit row and the export, and the marker in the old quarantine folder is
 rewritten (`removed:<id>:<stamp>`) so the new set does not adopt that folder. A
 migration to AUTOINCREMENT is not made in this batch.
+
+### Known exceptions recorded in review (2026-10-25)
+- The label "Waiting (part delivered)" reads quantity flags only. A future non-quantity mismatch reason must be checked in `_shortfall_shapes`.
+- The COMBINED type is named only in models.py and extraction.py. The holding and quarantine lists use the helper `unsplit_bundle_clause()` in extraction.py, so Layer 2 never names the type.
+- A removal or a move from the holding page holds the sync sidecar for a few seconds; a scheduled sync that starts then is skipped until the next run.
 
 ### L — a PO document cannot be removed from a set
 

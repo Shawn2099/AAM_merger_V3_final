@@ -117,11 +117,15 @@
 
   <!-- Quick Action Controls (hidden for archived sets) -->
   {% if not is_archived %}
+  {% if not is_merged %}
   <p class="muted" data-testid="merge-instruction" style="width:100%; margin:0 0 4px; font-size:0.85rem;">
     To merge: press <strong>Merge Now</strong>. If a check blocks it, the reason is shown on this page.
     <strong>Force Merge</strong> merges without the checks and needs a written reason.
-    If customs files are attached, turn the customs requirement off by deleting them first.
+    {% if po_set.has_customs_toggle %}
+    While the customs requirement is on, its files stay attached; to turn the requirement off, delete them first.
+    {% endif %}
   </p>
+  {% endif %}
   <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border); display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
     {% if sync_running %}
     <div class="muted" data-testid="sync-running-note" style="width:100%; font-size:0.85rem;">

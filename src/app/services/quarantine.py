@@ -254,7 +254,7 @@ def _write_quarantine_report(
         f"PO number   : {po_no or '(none)'}",
         f"Status      : {status}",
         f"Reason      : {reason or '(none recorded)'}",
-        f"Detected    : {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        f"Detected    : {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')} ({_ist_stamp()} IST)",
         "",
         "What happened",
         "-" * 60,
@@ -567,7 +567,7 @@ def quarantine_document(doc_id: int, cfg, reason: str, *, source: str = "system"
             f"Document id : {doc_id_out}",
             *attempts_line,
             f"Reason      : {reason}",
-            f"Detected    : {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+            f"Detected    : {_utc_and_ist()}",
             "",
             "What happened",
             "-" * 60,
@@ -959,7 +959,7 @@ def _write_archive_manifest(
         f"PO Set id      : {ps.id}",
         f"Status         : {status}",
         f"Reason         : {reason}",
-        f"Archived at    : {archived_at.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        f"Archived at    : {_utc_and_ist(archived_at)}",
         f"Archived by    : {source}",
         f"Justification  : {note or '(none)'}",
         f"Documents      : {len(docs)}",
@@ -1284,7 +1284,11 @@ def _restore_input_copies(moved: list[tuple[Path, Path]]) -> list[str]:
     failed: list[str] = []
     for copy, original in moved:
         try:
-            original.write_bytes(copy.read_bytes())
+            # Write beside the target and rename, so a crash cannot leave a truncated PDF
+            # in the input folder (review L3).
+            partial = original.with_name(original.name + ".restoring")
+            partial.write_bytes(copy.read_bytes())
+            partial.replace(original)
             copy.unlink(missing_ok=True)
         except OSError:
             failed.append(original.name)
@@ -1292,9 +1296,38 @@ def _restore_input_copies(moved: list[tuple[Path, Path]]) -> list[str]:
     return failed
 
 
+def _utc_and_ist(moment: datetime | None = None) -> str:
+    """A time shown as UTC and as IST, for the operator-facing text reports (decision 12)."""
+    moment = moment or datetime.now(UTC)
+    aware = moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment
+    ist = aware.astimezone(timezone(timedelta(hours=5, minutes=30)))
+    return f"{aware.strftime('%Y-%m-%d %H:%M:%S')} UTC ({ist.strftime('%Y-%m-%d %H:%M:%S')} IST)"
+
+
 def _ist_stamp() -> str:
     """The current time in IST, for operator-facing text (decision 12)."""
     return datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _mark_removal_failed(folder: Path, reason: str) -> None:
+    """A removal that did not finish keeps its folder, and the folder says so (review L1).
+
+    The report that says the set was removed is replaced, because the set still exists.
+    """
+    lines = [
+        "THE REMOVAL DID NOT FINISH",
+        "=" * 60,
+        reason,
+        "",
+        "The PO Set is still in the database and nothing was deleted.",
+        "Check the files in this folder before trying again.",
+        "",
+    ]
+    try:
+        (folder / "REMOVED.txt").unlink(missing_ok=True)
+        (folder / "REMOVAL_FAILED.txt").write_text(chr(10).join(lines), encoding="utf-8")
+    except OSError:
+        logger.warning("Could not write the removal failure report in %s", folder, exc_info=True)
 
 
 def _set_row_export(ps: POSet) -> dict:
@@ -1485,12 +1518,13 @@ def remove_set_to_quarantine(
             shutil.rmtree(stage, ignore_errors=True)
             if failed:
                 # Keep the folder: it holds the only copy of the files not put back (M2).
-                raise SetRemovalRefused(
-                    500,
+                message = (
                     "The removal failed and nothing was deleted. Files could not be put back "
                     f"in the input folder ({', '.join(failed)}); they are in "
-                    f"{REMOVED_SETS_FOLDER}/{final.name}.",
-                ) from None
+                    f"{REMOVED_SETS_FOLDER}/{final.name}."
+                )
+                _mark_removal_failed(final, message)
+                raise SetRemovalRefused(500, message) from None
             shutil.rmtree(final, ignore_errors=True)
             raise
 
@@ -1546,8 +1580,11 @@ def remove_set_to_quarantine(
                     s.execute(delete(Document).where(Document.id.in_(doc_ids)))
                 s.execute(delete(POSet).where(POSet.id == po_set_id))
                 s.commit()
-        except SetRemovalRefused:
-            _restore_input_copies(moved)
+        except SetRemovalRefused as exc:
+            failed = _restore_input_copies(moved)
+            _mark_removal_failed(final, exc.message)
+            if failed:
+                _mark_removal_failed(final, f"Input files not put back: {', '.join(failed)}.")
             raise
         except Exception as exc:
             # The transaction rolled back, so no row changed. Put the input files back
@@ -1559,6 +1596,7 @@ def remove_set_to_quarantine(
             )
             if failed:
                 detail += f" These input files could not be put back: {', '.join(failed)}."
+            _mark_removal_failed(final, detail)
             raise SetRemovalRefused(500, detail) from exc
 
         # A future set with this id must not adopt the old quarantine folder (id reuse).
