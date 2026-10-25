@@ -18,12 +18,15 @@ dependencies = [
     "alembic>=1.16.0",
     "rapidfuzz>=3.14.0",
     "pypdf>=5.9.0",
+    "pymupdf==1.28.2",
     "jinja2>=3.1.6",
     "python-multipart>=0.0.20",
     "python-dotenv>=1.1.0",
     "pyyaml>=6.0.2",
     "httpx>=0.28.0",
     "tenacity>=9.1.0",
+    "filelock>=3.16.0",
+    "babel>=2.17.0",
 ]
 
 [dependency-groups]
@@ -34,6 +37,9 @@ dev = [
     "ruff>=0.13.0",
     "ty>=0.0.1a20",
     "pip-audit>=2.9.0",
+    "hypothesis>=6.100.0",
+    "playwright>=1.64.1",
+    "pytest-playwright>=0.10.0",
 ]
 # keep sync with [tool.*] below
 
@@ -50,12 +56,15 @@ managed = true
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Reports and docs contain code samples that are not meant to be formatted.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
 ignore = ["D", "COM812", "ISC001"]
 
 [tool.ruff.lint.per-file-ignores]
+"scripts/dump_extraction.py" = ["E501"]
 "alembic/versions/*.py" = ["E501", "UP035", "UP007", "I001"]
 "alembic/env.py" = ["E501", "I001", "F401"]
 "tests/*.py" = ["E501"]
@@ -63,6 +72,7 @@ ignore = ["D", "COM812", "ISC001"]
 "src/app/core/config.py" = ["E501"]
 "src/app/models/models.py" = ["E501"]
 "src/app/services/customs.py" = ["E501"]
+"src/app/flows/sync.py" = ["E501"]
 "src/app/services/extraction.py" = ["E501", "RUF001"]
 
 [tool.ruff.lint.isort]
@@ -73,6 +83,7 @@ testpaths = ["tests"]
 addopts = "-q --tb=short --strict-markers --cov=src --cov-fail-under=0 --cov-report=term-missing"
 markers = [
     "slow: marks tests as slow",
+    "e2e: browser end-to-end tests (opt-in via RUN_E2E=1)",
 ]
 
 [tool.ty.environment]

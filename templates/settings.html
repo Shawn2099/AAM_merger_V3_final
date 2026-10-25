@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Settings — AAM Merger V3{% endblock %}
+
+{% block content %}
+{% macro apply_badge(kind, text) %}
+  <span class="badge {% if kind == 'restart' %}badge-mismatched{% elif kind == 'live' %}badge-merged{% else %}badge-pending{% endif %}"
+        data-testid="apply-{{ kind }}" style="font-size:0.72rem;">
+    {% if kind == 'live' %}Live{% elif kind == 'next_sync' %}Next sync{% else %}Needs restart{% endif %}
+  </span>
+{% endmacro %}
+
+<div class="card" x-data="{ dirty: false }" @input="dirty = true" @change="dirty = true">
+  <div class="card-header">
+    <div>
+      <h2 class="card-title"><span>⚙️ Settings</span></h2>
+      <p class="card-subtitle">
+        Change how the service runs. Every value is checked before it is saved, a copy of the
+        previous file is kept, and each change is written to the
+        <a href="/audit" class="po-link">Audit Log</a>.
+      </p>
+    </div>
+  </div>
+
+  {% if disk_problem %}
+  <div data-testid="settings-disk-problem" role="alert"
+       style="margin:0 0 16px; padding:12px 14px; border-radius:8px; background:var(--clr-quarantined-bg); color:var(--clr-quarantined-text); border:1px solid var(--clr-quarantined-border);">
+    <strong>The settings file on disk is not valid.</strong>
+    The service keeps running on the last good settings shown below. Changes cannot be saved
+    until IT fixes <code>config.yaml</code> or restores a copy from the
+    <code>config_backups</code> folder next to it.
+    <div style="margin-top:4px; font-size:0.85rem;">{{ disk_problem }}</div>
+  </div>
+  {% endif %}
+
+  {% if result and result.ok and result.changed %}
+  <div data-testid="settings-saved" role="status"
+       style="margin:0 0 16px; padding:12px 14px; border-radius:8px; background:var(--clr-merged-bg); color:var(--clr-merged-text); border:1px solid var(--clr-merged-border);">
+    <strong>Saved.</strong>
+    <ul style="margin:6px 0 0 18px; padding:0;">
+      {% for c in result.changed %}
+      <li data-testid="saved-row">{{ c.label }}: {{ c.old }} → <strong>{{ c.new }}</strong>
+        <span class="muted">— {{ c.apply_text }}</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% elif result and result.ok %}
+  <div data-testid="settings-nochange" role="status"
+       style="margin:0 0 16px; padding:12px 14px; border-radius:8px; background:var(--clr-pending-bg); color:var(--clr-pending-text); border:1px solid var(--clr-pending-border);">
+    Nothing was changed.
+  </div>
+  {% endif %}
+
+  {% if result and result.general %}
+  <div data-testid="settings-error" role="alert"
+       style="margin:0 0 16px; padding:12px 14px; border-radius:8px; background:var(--clr-quarantined-bg); color:var(--clr-quarantined-text); border:1px solid var(--clr-quarantined-border);">
+    <strong>Not saved.</strong> {{ result.general }}
+  </div>
+  {% elif result and result.errors %}
+  <div data-testid="settings-error" role="alert"
+       style="margin:0 0 16px; padding:12px 14px; border-radius:8px; background:var(--clr-quarantined-bg); color:var(--clr-quarantined-text); border:1px solid var(--clr-quarantined-border);">
+    <strong>Not saved.</strong> Fix the {{ result.errors|length }} highlighted
+    value{{ '' if result.errors|length == 1 else 's' }} below. Nothing was changed.
+  </div>
+  {% endif %}
+
+  <p class="muted" style="margin:0 0 12px; font-size:0.85rem;">
+    Folder watching is currently
+    <strong data-testid="poller-state">{{ 'running' if poller_running else 'off' }}</strong>.
+    {% if api_key_set %}
+      The API key (<code>{{ api_key_name }}</code>) is set.
+    {% else %}
+      <strong style="color:var(--clr-quarantined-text);" data-testid="api-key-missing">The API key
+      (<code>{{ api_key_name }}</code>) is not set</strong>, so documents cannot be read.
+    {% endif %}
+  </p>
+
+  <form method="post" action="/settings" data-testid="settings-form" autocomplete="off">
+    <input type="hidden" name="config_version" value="{{ version }}">
+
+    {% for g in groups %}
+    <section style="margin:0 0 22px;" data-testid="settings-group">
+      <h3 style="margin:0 0 2px; font-size:1.02rem;">{{ g.title }}</h3>
+      <p class="muted" style="margin:0 0 8px; font-size:0.85rem;">{{ g.blurb }}</p>
+      <div class="table-container">
+        <table class="data-table">
+          <tbody>
+            {% for s in g.settings %}
+            {% set err = errors.get(s.key) %}
+            {% set shown = submitted.get(s.key, s.value) %}
+            <tr data-testid="setting-row" data-key="{{ s.key }}"{% if err %} style="background:var(--clr-quarantined-bg);"{% endif %}>
+              <td style="width:36%; vertical-align:top;">
+                <label for="f-{{ s.key }}" style="font-weight:600;">{{ s.label }}</label>
+                <div style="margin-top:4px;">{{ apply_badge(s.apply, s.apply_text) }}</div>
+              </td>
+              <td style="width:24%; vertical-align:top;">
+                {% if s.kind == 'bool' %}
+                  <select id="f-{{ s.key }}" name="{{ s.key }}" data-testid="field-{{ s.key }}">
+                    <option value="true" {% if shown|string|lower == 'true' %}selected{% endif %}>On</option>
+                    <option value="false" {% if shown|string|lower == 'false' %}selected{% endif %}>Off</option>
+                  </select>
+                {% elif s.kind == 'choice' %}
+                  <select id="f-{{ s.key }}" name="{{ s.key }}" data-testid="field-{{ s.key }}">
+                    {% for c in s.choices %}
+                    <option value="{{ c }}" {% if shown|string == c %}selected{% endif %}>{{ c }}</option>
+                    {% endfor %}
+                  </select>
+                {% elif s.kind == 'int' %}
+                  <input id="f-{{ s.key }}" name="{{ s.key }}" data-testid="field-{{ s.key }}"
+                         type="number" step="1" required value="{{ shown }}"
+                         {% if s.min is not none %}min="{{ s.min }}"{% endif %}
+                         {% if s.max is not none %}max="{{ s.max }}"{% endif %}
+                         style="width:7.5em;">
+                {% else %}
+                  <input id="f-{{ s.key }}" name="{{ s.key }}" data-testid="field-{{ s.key }}"
+                         type="text" required value="{{ shown }}" maxlength="200" style="width:100%;">
+                {% endif %}
+                {% if s.unit %}<span class="muted" style="margin-left:4px;">{{ s.unit }}</span>{% endif %}
+                {% if s.kind == 'int' and (s.min is not none or s.max is not none) %}
+                  <div class="muted" style="font-size:0.75rem;">
+                    {% if s.min is not none and s.max is not none %}{{ s.min }} to {{ s.max }}
+                    {% elif s.min is not none %}at least {{ s.min }}
+                    {% else %}at most {{ s.max }}{% endif %}
+                  </div>
+                {% endif %}
+                {% if err %}
+                  <div data-testid="field-error" role="alert"
+                       style="color:var(--clr-quarantined-text); font-size:0.85rem; font-weight:600; margin-top:4px;">{{ err }}</div>
+                {% endif %}
+              </td>
+              <td class="muted" style="font-size:0.85rem; vertical-align:top;">{{ s.help }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endfor %}
+
+    <div style="display:flex; gap:10px; align-items:center; position:sticky; bottom:0; padding:10px 0; background:var(--bg);">
+      <button type="submit" class="btn btn-primary" data-testid="settings-save" :disabled="!dirty">Save changes</button>
+      <a href="/settings" class="btn btn-secondary" data-testid="settings-reset">Discard changes</a>
+      <span class="muted" style="font-size:0.85rem;" x-show="dirty" x-cloak>You have unsaved changes.</span>
+    </div>
+  </form>
+
+  <section style="margin:26px 0 0;" data-testid="settings-readonly">
+    <h3 style="margin:0 0 2px; font-size:1.02rem;">Fixed by IT</h3>
+    <p class="muted" style="margin:0 0 8px; font-size:0.85rem;">
+      These are shown so you can see what the service is using. They are not changed on this
+      page because a wrong value can hide your data or lock people out. IT changes them in
+      <code>config.yaml</code>.
+    </p>
+    <div class="table-container">
+      <table class="data-table">
+        <tbody>
+          {% for r in read_only %}
+          <tr data-testid="readonly-row">
+            <td style="width:30%; font-weight:600;">{{ r.label }}</td>
+            <td class="text-mono" style="word-break:break-all;">{{ r.value }}</td>
+            <td class="muted" style="font-size:0.85rem;">{{ r.note }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

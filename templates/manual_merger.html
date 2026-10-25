@@ -1,330 +1,161 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Manual PDF Merger — Isolated Tool</title>
-  
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  
-  <style>
-    :root {
-      --amber-bg: #fffbf5;
-      --amber-primary: #b45309;
-      --amber-hover: #92400e;
-      --amber-border: #fde68a;
-      --amber-card: #ffffff;
-      --text: #1c1917;
-      --muted: #78716c;
-      --radius: 8px;
-    }
+{% extends "base.html" %}
+{% block title %}Merge PDF files — AAM Merger V3{% endblock %}
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Inter', system-ui, sans-serif; background: var(--amber-bg); color: var(--text); line-height: 1.5; font-size: 14px; }
-    
-    .banner {
-      background: #78350f;
-      color: #fff;
-      padding: 12px 24px;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
+{% block head %}
+<link rel="stylesheet" href="/static/css/manual_merger.css">
+{% endblock %}
 
-    .nav-isolated {
-      background: #fef3c7;
-      border-bottom: 1px solid var(--amber-border);
-      padding: 10px 24px;
-      display: flex;
-      gap: 16px;
-      align-items: center;
-      font-size: 0.9rem;
-    }
-
-    .nav-isolated a { text-decoration: none; color: #92400e; font-weight: 600; }
-    .nav-isolated a:hover { text-decoration: underline; }
-
-    .container { max-width: 860px; margin: 28px auto; padding: 0 20px; }
-    
-    .card {
-      background: var(--amber-card);
-      border: 1px solid #fed7aa;
-      border-radius: 12px;
-      padding: 24px;
-      margin-bottom: 24px;
-      box-shadow: 0 4px 12px rgba(180, 83, 9, 0.06);
-    }
-
-    h2 { font-size: 1.3rem; color: #78350f; font-weight: 700; margin-bottom: 8px; }
-    .muted { color: var(--muted); font-size: 0.88rem; }
-
-    .notice {
-      background: #fffbeb;
-      border-left: 4px solid #f59e0b;
-      padding: 12px 16px;
-      border-radius: 4px;
-      margin-bottom: 20px;
-      font-size: 0.88rem;
-    }
-
-    #dropzone {
-      border: 2px dashed #f59e0b;
-      border-radius: var(--radius);
-      padding: 36px 20px;
-      text-align: center;
-      background: #fffdfa;
-      cursor: pointer;
-      transition: all 150ms ease;
-    }
-
-    #dropzone:hover, #dropzone.dragover {
-      background: #fef3c7;
-      border-color: #d97706;
-    }
-
-    #file-list { list-style: none; margin: 16px 0; display: flex; flex-direction: column; gap: 8px; }
-    
-    .file-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 12px 16px;
-      border: 1px solid #fed7aa;
-      border-radius: var(--radius);
-      background: #fff;
-      cursor: grab;
-      transition: all 120ms ease;
-    }
-
-    .file-item:hover {
-      background: #fffbf5;
-      border-color: #f59e0b;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.04);
-    }
-
-    .file-item.dragging { opacity: 0.35; transform: scale(0.98); }
-    .handle { color: #a8a29e; font-size: 1.2rem; cursor: grab; }
-    
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      background: var(--amber-primary);
-      color: #fff;
-      border: none;
-      padding: 10px 20px;
-      border-radius: var(--radius);
-      font-weight: 600;
-      font-size: 0.92rem;
-      cursor: pointer;
-      transition: all 150ms ease;
-    }
-
-    .btn:hover:not(:disabled) { background: var(--amber-hover); transform: translateY(-1px); }
-    .btn:disabled { background: #d6d3d1; cursor: not-allowed; }
-
-    .btn-secondary {
-      background: #fff;
-      color: var(--amber-primary);
-      border: 1px solid var(--amber-primary);
-    }
-
-    .btn-secondary:hover { background: #fef3c7; }
-    
-    .btn-remove {
-      background: transparent;
-      border: none;
-      color: #dc2626;
-      cursor: pointer;
-      font-weight: 700;
-      font-size: 1rem;
-      padding: 4px 8px;
-      border-radius: 4px;
-    }
-
-    .btn-remove:hover { background: #fee2e2; }
-
-    .field { margin-bottom: 16px; }
-    .field label { display: block; font-weight: 600; margin-bottom: 6px; color: #78350f; }
-    .field input[type="text"] {
-      width: 100%;
-      padding: 10px 14px;
-      border: 1px solid #fed7aa;
-      border-radius: var(--radius);
-      font-size: 0.95rem;
-      background: #fff;
-    }
-  </style>
-</head>
-<body>
-
-<div class="banner">
-  <div>🛠️ Manual PDF Merger — Isolated Workspace</div>
-  <small style="font-weight:400; opacity:0.85;">Out-of-Pipeline Tool (No AI, No DB)</small>
-</div>
-
-<div class="nav-isolated">
-  <a href="/dashboard">← Return to Automated Pipeline Dashboard</a>
-  <span style="color:#d6d3d1;">|</span>
-  <span style="font-weight:700; color:#78350f;">Manual Merger Active</span>
-</div>
-
-<div class="container">
-  <div class="card">
-    <h2>Arbitrary PDF Merger</h2>
-    <div class="notice">
-      <strong>Isolated from AI pipeline (FR-14.11–14.13):</strong> Files uploaded here bypass AI extraction, database persistence, and audit logging. Reorder PDFs arbitrarily and compile them into a downloadable packet on demand.
+{% block content %}
+<div
+  class="mm-page"
+  id="manual-merger"
+  data-max-files="{{ max_files }}"
+  data-max-bytes="{{ max_bytes }}"
+  data-max-mb="{{ max_mb }}"
+>
+  <header class="mm-hero">
+    <div class="mm-hero-copy">
+      <div class="mm-eyebrow">
+        <span class="badge badge-gray">Standalone tool</span>
+        <span class="mm-sep" aria-hidden="true">·</span>
+        <span>No AI</span>
+        <span class="mm-sep" aria-hidden="true">·</span>
+        <span>Nothing saved to the database</span>
+        <span class="mm-sep" aria-hidden="true">·</span>
+        <span>Not part of the pipeline</span>
+      </div>
+      <h1 class="mm-title">Merge PDF files</h1>
+      <p class="mm-subtitle">
+        Put your PDFs in the order you want and download one combined file.
+        This is a separate tool — nothing here is saved to the reconciliation pipeline.
+      </p>
     </div>
+    <a class="btn btn-secondary mm-back" href="/dashboard">← Back to dashboard</a>
+  </header>
 
-    <form id="merge-form" action="/manual/merge" method="post" enctype="multipart/form-data">
-      <div class="field">
-        <label>Upload PDF Documents to Merge</label>
-        <div id="dropzone">
-          <div style="font-size:2rem; margin-bottom:8px;">📄</div>
-          <p style="font-weight:600; color:#78350f; font-size:1rem; margin-bottom:4px;">Drag &amp; drop PDF files here</p>
-          <p class="muted" style="margin-bottom:12px;">or browse files from your computer</p>
-          <input type="file" id="file-input" name="files" multiple accept="application/pdf" style="display:none">
-          <button type="button" class="btn btn-secondary" onclick="document.getElementById('file-input').click()">
-            Choose PDF Files
-          </button>
+  <div class="mm-alert" id="mm-alert" role="alert" aria-live="assertive" hidden>
+    <span class="mm-alert-icon" aria-hidden="true">!</span>
+    <div class="mm-alert-body">
+      <strong id="mm-alert-title"></strong>
+      <span id="mm-alert-text"></span>
+    </div>
+    <button type="button" class="mm-alert-close" id="mm-alert-close" aria-label="Dismiss message">×</button>
+  </div>
+
+  <noscript>
+    <div class="mm-alert is-warning" role="status">
+      <span class="mm-alert-icon" aria-hidden="true">!</span>
+      <div class="mm-alert-body">
+        <strong>JavaScript is required</strong>
+        <span>This tool needs JavaScript to arrange your files. Please enable JavaScript and reload the page.</span>
+      </div>
+    </div>
+  </noscript>
+
+  <form
+    id="merge-form"
+    action="/manual/merge"
+    method="post"
+    enctype="multipart/form-data"
+    novalidate
+  >
+    <div class="mm-grid">
+      <section class="card mm-main" aria-labelledby="mm-files-heading">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title" id="mm-files-heading">Your PDFs</h2>
+            <p class="card-subtitle">Drag a card to change the order. The merged file follows this list from top to bottom.</p>
+          </div>
+          <div class="mm-toolbar">
+            <button type="button" class="btn btn-secondary btn-sm" id="mm-add">+ Add PDFs</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="mm-clear">Clear all</button>
+          </div>
         </div>
 
-        <ul id="file-list"></ul>
-        <input type="hidden" name="order" id="order-input" value="">
-      </div>
+        <label class="sr-only" for="file-input">Add PDF files</label>
+        <input
+          type="file"
+          id="file-input"
+          name="files"
+          multiple
+          accept=".pdf,application/pdf"
+          class="sr-only"
+          tabindex="-1"
+        >
 
-      <div class="field">
-        <label for="output_filename">Target Output Filename</label>
-        <input type="text" id="output_filename" name="output_filename" value="manual_merged.pdf" placeholder="e.g. Invoice-1234_merged.pdf">
-        <p class="muted" style="margin-top:4px; font-size:0.8rem;">Result will download immediately to your browser with this name.</p>
-      </div>
+        <div
+          id="dropzone"
+          class="mm-dropzone"
+          role="button"
+          tabindex="0"
+          aria-label="Add PDF files. Press Enter to browse, or drop files here."
+        >
+          <div class="mm-drop-icon" aria-hidden="true">📄</div>
+          <p class="mm-drop-title">Drop your PDFs here</p>
+          <p class="mm-drop-copy">or <span class="mm-link">browse your computer</span></p>
+          <p class="mm-drop-meta">
+            Up to {{ max_files }} PDFs · {{ max_mb }} MB total · PDF files only
+          </p>
+        </div>
 
-      <div style="display:flex; align-items:center; gap:16px; margin-top:20px;">
-        <button type="submit" id="merge-btn" class="btn" disabled>
-          <span>📥 Merge &amp; Download PDF</span>
+        <ul id="file-list" class="mm-file-list" aria-live="polite" aria-label="Files to merge"></ul>
+        <p class="mm-empty" id="mm-empty">No PDFs yet — add at least one to get started.</p>
+
+        <p class="mm-summary" id="mm-summary">0 files · 0 B</p>
+      </section>
+
+      <aside class="card mm-side" aria-labelledby="mm-output-heading">
+        <h2 class="card-title" id="mm-output-heading">Download</h2>
+
+        <label class="mm-label" for="output_filename">Download file name</label>
+        <input
+          class="mm-input"
+          type="text"
+          id="output_filename"
+          name="output_filename"
+          value="{{ default_name }}"
+          maxlength="104"
+          autocomplete="off"
+          spellcheck="false"
+          aria-describedby="mm-name-hint mm-name-error"
+        >
+        <p class="mm-hint" id="mm-name-hint">
+          Will save as <strong id="mm-name-preview">{{ default_name }}</strong>. We'll add .pdf if you leave it off.
+        </p>
+        <p class="mm-name-error" id="mm-name-error" role="alert" hidden></p>
+        <p class="mm-hint">It downloads straight to your computer — nothing is stored on the server.</p>
+
+        <button type="submit" id="merge-btn" class="btn btn-primary btn-lg mm-merge" disabled>
+          <span aria-hidden="true">🔗</span>
+          <span id="merge-btn-label">Merge &amp; download</span>
         </button>
-        <span class="muted" id="hint">Upload at least 1 PDF to begin.</span>
-      </div>
-    </form>
-  </div>
 
-  <div class="card" style="background:#fffaf5;">
-    <h2>When to use this tool?</h2>
-    <ul style="margin-left:20px; line-height:1.8; color:var(--muted); font-size:0.9rem;">
-      <li><strong>Resolving Quarantine:</strong> Grab files from a quarantined PO and combine them in custom order.</li>
-      <li><strong>One-off Packets:</strong> Merge invoices with receipts or certificates not tied to a Purchase Order.</li>
-      <li><strong>Custom Page Order:</strong> Arrange pages in any sequence by dragging cards above.</li>
-    </ul>
-  </div>
+        <div class="mm-progress" id="mm-progress" hidden>
+          <div
+            class="mm-progress-bar"
+            id="mm-progress-bar"
+            role="progressbar"
+            aria-label="Merge progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          ></div>
+        </div>
+        <p class="mm-status" id="mm-status" role="status"></p>
+
+        <ul class="mm-notes">
+          <li>The order here is the order in the final file.</li>
+          <li>Scanned and digital PDFs can be mixed.</li>
+          <li>Password-protected PDFs can't be merged — upload an unlocked copy.</li>
+          <li>For safety, active content such as JavaScript is removed from the merged file.</li>
+          <li>You can merge up to {{ max_files }} files, {{ max_mb }} MB in total, and {{ max_pages }} pages.</li>
+        </ul>
+      </aside>
+    </div>
+  </form>
 </div>
+{% endblock %}
 
-<script>
-const fileInput = document.getElementById('file-input');
-const dropzone = document.getElementById('dropzone');
-const fileList = document.getElementById('file-list');
-const orderInput = document.getElementById('order-input');
-const mergeBtn = document.getElementById('merge-btn');
-const hint = document.getElementById('hint');
-let files = [];
-
-function formatSize(bytes) {
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
-  return (bytes/(1024*1024)).toFixed(1) + ' MB';
-}
-
-function refreshList() {
-  fileList.innerHTML = '';
-  files.forEach((f, idx) => {
-    const li = document.createElement('li');
-    li.className = 'file-item';
-    li.draggable = true;
-    li.dataset.idx = idx;
-    
-    li.innerHTML = `
-      <span class="handle" title="Drag to reorder">⋮⋮</span>
-      <span style="font-weight:700; color:#78350f; width:24px;">#${idx+1}</span>
-      <span style="font-size:1.2rem;">📄</span>
-      <span style="font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${f.name}</span>
-      <span class="muted" style="font-size:0.8rem;">${formatSize(f.file.size)}</span>
-      <button type="button" class="btn-remove" onclick="removeFile(${idx})" title="Remove file">✕</button>
-    `;
-
-    li.addEventListener('dragstart', e => {
-      li.classList.add('dragging');
-      e.dataTransfer.setData('text/plain', idx);
-    });
-
-    li.addEventListener('dragend', () => li.classList.remove('dragging'));
-    li.addEventListener('dragover', e => e.preventDefault());
-    li.addEventListener('drop', e => {
-      e.preventDefault();
-      const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
-      const to = idx;
-      if (from !== to) {
-        const item = files.splice(from, 1)[0];
-        files.splice(to, 0, item);
-        refreshList();
-        syncOrder();
-        syncFileInput();
-      }
-    });
-
-    fileList.appendChild(li);
-  });
-
-  mergeBtn.disabled = files.length === 0;
-  hint.textContent = files.length ? `${files.length} PDF(s) staged — drag to arrange merge order.` : 'Upload at least 1 PDF to begin.';
-}
-
-function removeFile(index) {
-  files.splice(index, 1);
-  refreshList();
-  syncOrder();
-  syncFileInput();
-}
-
-function syncOrder() {
-  orderInput.value = files.map((_, i) => i).join(',');
-}
-
-function syncFileInput() {
-  const dt = new DataTransfer();
-  files.forEach(f => dt.items.add(f.file));
-  fileInput.files = dt.files;
-}
-
-fileInput.addEventListener('change', () => {
-  const newFiles = Array.from(fileInput.files).map(f => ({name: f.name, file: f}));
-  files.push(...newFiles);
-  refreshList();
-  syncOrder();
-  syncFileInput();
-});
-
-dropzone.addEventListener('click', (e) => {
-  if (e.target === dropzone || e.target.parentElement === dropzone) fileInput.click();
-});
-dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
-dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
-dropzone.addEventListener('drop', e => {
-  e.preventDefault();
-  dropzone.classList.remove('dragover');
-  const dropped = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
-  if (!dropped.length) return;
-  files.push(...dropped.map(f => ({name: f.name, file: f})));
-  refreshList();
-  syncOrder();
-  syncFileInput();
-});
-
-document.getElementById('merge-form').addEventListener('submit', () => {
-  syncOrder();
-});
-</script>
-</body>
-</html>
+{% block scripts %}
+<script src="/static/js/manual_merger.js" defer></script>
+{% endblock %}

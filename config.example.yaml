@@ -8,26 +8,72 @@ paths:
   output_folder: "./data/output"
   quarantine_folder: "./data/quarantine"
   stored_documents_folder: "./data/stored"
-  unclassified_folder: "./data/unclassified"
   database_path: "./data/aam_merger.db"
+  combined_folder: "./data/combined"
+  # Delete is an archive action: exported sets (PDFs + JSON + ARCHIVE.txt)
+  # are written here. Nothing in the database is deleted.
+  archive_folder: "./data/development/archived_sets"
   log_folder: "./data/logs"
 
 server:
+  # Not read by the service: NSSM starts it with the installer's -HostAddress and -Port.
   host: "0.0.0.0"
+  # Read only by scripts/reset_data.ps1 (to check the port is free). Keep it equal to the
+  # installer's -Port, or the reset checks the wrong port.
   port: 8000
+  # Hosts accepted in the HTTP Host header. ["*"] accepts any host and is only a
+  # development default: scripts/install_nssm_services.ps1 REFUSES it unless run with
+  # -AllowAnyHost (lab machines). On the office PC list the real name and static IP,
+  # e.g. ["aam-server", "10.0.0.5"]; that also closes DNS-rebinding reads and writes.
+  allowed_hosts: ["*"]
 
 vlm:
-  provider: "openrouter"
-  model: "openai/gpt-5.6-luna"  # SPEC §16 — Luna via OpenRouter (prod main), never hardcoded, swap via config only
-  request_timeout_seconds: 60
+  model: "openai/gpt-6-luna"  # team-confirmed VLM via OpenRouter, swap via config only
+  # Every page is rasterised and sent as an image. The validated recipe is
+  # 150 DPI + reasoning effort "high" (see prompt_improvement/eval). Valid
+  # ranges are enforced at startup in src/app/core/config.py: raster_dpi
+  # 72..300, reasoning_effort minimal|low|medium|high, max_pages >= 1.
+  request_timeout_seconds: 180
+  raster_dpi: 150
+  reasoning_effort: "high"
+  max_pages: 30
   api_key_env_var: "OPENROUTER_API_KEY"
 
 extraction:
+  # Attempts a document gets before it is permanently failed (counted as
+  # attempts, not retries-after-the-first-try). Each pass is a paid VLM call;
+  # accepted values are 1..5. `stale_processing_seconds` below must stay above
+  # the worst case, or the recovery sweep reclaims a live extraction.
   max_retries: 3
   retry_backoff_seconds: [2, 5, 15]
+  # A document claimed for extraction (pending -> processing) that is still
+  # "processing" after this many seconds belonged to a worker that died.
+  # It is released back to "pending" and read again on the next pass.
+  # Must exceed the worst case of one attempt: vlm.request_timeout_seconds
+  # * (extraction.max_retries + 1), plus the retry backoff. The app refuses to
+  # start if it does not.
+  stale_processing_seconds: 900
+  # A combined PDF (PO + DN + SI in one file) is quarantined as-is. Set true to
+  # split it into child PDFs instead (Layer-1 splitter).
+  split_combined: false
 
 matching:
+  # Description similarity, used only for vendor rows carrying no line number.
   fuzzy_description_threshold: 85
+  locale: "en_IN"  # quantity parsing locale (babel), caller-passed
+  # Line-number fallback, used ONLY when exact matching leaves DN or SI line
+  # numbers unmatched. Per pool (DN and SI independently), all-or-nothing, one
+  # rule per pool; PO numbers are never rewritten.
+  line_number_fallback:
+    step10: true                  # PO 10,20,30 vs DN/SI 1,2,3       (rule x10)
+    step10_reverse: true          # PO 1,2,3 vs DN/SI 10,20,30       (rule div10)
+    release_suffix: true          # PO 1-1,2-1 vs DN/SI 1,2          (rule add_rel)
+    release_suffix_reverse: true  # PO 1,2 vs DN/SI 1-1,2-1          (rule strip_rel)
+
+merge:
+  # Final packet order, editable without code change. Current default:
+  # SI→DN→PO→SHIPPING→CUSTOMS. Unknown types fail fast at startup.
+  legal_order: ["SI", "DN", "PO", "SHIPPING", "CUSTOMS"]
 
 ingestion:
   stability_poll_interval_seconds: 2
@@ -35,18 +81,60 @@ ingestion:
 
 prefect:
   work_pool_name: "aam-merger-process-pool"
+  # Not enforced: extraction is sequential. Do not treat it as a concurrency control.
   max_concurrent_extraction_tasks: 3
+  # The midnight sync runs at 00:00 in this zone. IST is the client default and
+  # is also what `scripts/deploy_prefect.py` falls back to when the key is
+  # absent — an unset key does NOT mean UTC.
+  schedule_timezone: "Asia/Kolkata"
 
 concurrency:
-  po_set_lock_timeout_seconds: 300
+  # Must exceed one document's worst-case extraction (vlm.request_timeout_seconds x attempts
+  # + backoff = 742 s with the defaults); the app refuses to start otherwise.
+  po_set_lock_timeout_seconds: 900
+
+schedule:
+  # Poll the input folder inside the web service and sync when new files appear.
+  # A running sync is never skipped: one more pass is queued behind it.
+  poll_enabled: true
+  poll_interval_seconds: 60
+  # Keep the midnight sweep (re-reconcile open sets, retry customs appends).
+  # Re-run scripts/deploy_prefect.py after changing this.
+  nightly_enabled: true
+  # A set started by the poller merges only once its newest file is this many
+  # minutes old (documents of one PO often arrive minutes apart). 0 = no wait.
+  merge_settle_minutes: 5
+
+manual_merge:
+  # Limits and staging for the standalone Merge PDFs tool. The page reads
+  # max_files/max_total_mb and shows them; restart the app after changing them
+  # (the request-body guard is built at startup). Encrypted/password-protected
+  # PDFs are refused regardless of these limits.
+  max_files: 20
+  max_total_mb: 100
+  max_pages: 5000
+  # Leave blank to use <database folder>/manual_merge_tmp. Must be separate
+  # from every pipeline data folder; the app refuses to start if it is not.
+  temp_folder: "./data/manual_merge_tmp"
+  # Delete our own abandoned mm-*.pdf staging files older than this many hours
+  # (on startup and before each merge). Only files with the mm- prefix are
+  # touched, so this can never delete a real document.
+  sweep_after_hours: 6
+  sweep_on_startup: true
+
+reconciliation:
+  # A PO Set is expected to hold one PO document. With this on, more than one
+  # PO document holds the set pending for a human; it is never summed and never
+  # auto-merged. No guessing.
+  single_po_document: true
 
 logging:
   level: "INFO"
   max_file_size_mb: 10
-  backup_count: 5
+  # 0 = keep one growing log file; never rotate/delete. The pilot's
+  # development snapshot task copies it to data/development/snapshots/logs.
+  backup_count: 0
 
-# Backup (SPEC NFR-6, simple folder copy)
-backup:
-  enabled: true
-  folder: "./data/backup"
-  interval_hours: 24
+# Database backup is NOT configured here. It was removed 2026-09-29 because
+# nothing read it. NFR-6 backup is a runbook item for the Windows host
+# (SQLite .backup), not application code.

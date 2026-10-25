@@ -24,13 +24,25 @@ data/samples/*
 !data/samples/.gitkeep
 data/Automation/
 data/backup/
+data/combined/
+data/development/
+data/*.json
+data/extraction_dump.json
+data/raw_extractions/
+data/raw_extractions/*
+data/.sync.lock
+data/*.lock
 *.sqlite3
 *.sqlite-wal
 *.sqlite-shm
 *.db
-*.db-shm
-*.db-wal
+*.db-*
+*.bak
+*.db.bak
 aam_merger.sqlite3
+logs/
+data/backup/
+data/backup/*
 
 # python
 __pycache__/
@@ -80,3 +92,28 @@ graphify-out/
 !skills-lock.json
 .worktrees/
 worktrees/
+
+# DB backups with a timestamp suffix (e.g. aam_merger.db.bak-20261022-201905, *.db-wal.bak-*)
+*.db.bak*
+*.db-wal.bak*
+*.db-shm.bak*
+
+# Local-only working data (real corpus backup, previous run, eval work): never commit
+data/input_corpus_backup/
+data/prev_run_20261024/
+data/ui_test/
+# Eval and pattern-lab work is tracked; the real documents (renders, PDFs) and databases are not
+pattern_lab/**/*.png
+pattern_lab/**/*.jpg
+pattern_lab/**/*.jpeg
+pattern_lab/**/*.pdf
+pattern_lab/**/*.db
+pattern_lab/**/*.sqlite*
+prompt_improvement/**/*.png
+prompt_improvement/**/*.jpg
+prompt_improvement/**/*.jpeg
+prompt_improvement/**/*.pdf
+prompt_improvement/**/*.db
+prompt_improvement/**/*.sqlite*
+scratch_*
+scratch_dump/

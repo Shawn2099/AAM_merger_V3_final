@@ -1,0 +1,1269 @@
+# AAM Merger V3 — Product Definition
+
+**Status:** Authoritative. This document describes the product as it is built
+and as it is intended to behave.
+
+**One-page contract:** [`docs/CORE_LOGIC.md`](./docs/CORE_LOGIC.md) restates the
+rule the operator gave: one PO + n DN + n SI sharing a PO number, per-line
+quantity aggregates, line number first with description only as the fallback,
+quantities only, and the customs append. Keep it and this document in step.
+
+**Supersedes:** `AAM_merger_V3_SPEC.md` for the reconciliation, matching and
+merge sections, and `AAM_merger_V3_business_logic.md` §8, §10, §11 wherever the
+two disagree. Where this document and the older specs conflict, **this
+document wins** — the older specs describe a richer matcher that was
+deliberately retired. They are kept for history and for the vendor research
+they contain, not as a description of current behaviour.
+
+**Decision of record:** 2026-09-29. The simplified reconciliation core is the
+product, not a scaffold. The feature set that used to surround it has been
+removed from the code, not merely disabled.
+
+---
+
+## 1. What this system does
+
+Input folder → SHA-256 dedup → VLM extraction → grouping by PO number →
+reconciliation by line number → automatic merge into one PDF per PO Set →
+output folder, with a web dashboard for the human reviewer.
+
+It automates the mechanical quantity check. It does not replace the CA. Every
+merge it performs is a claim that quantities agree, and §8 lists precisely what
+that claim does and does not cover.
+
+---
+
+## 2. The rule, in full
+
+This is the whole matching and reconciliation algorithm. There is no second
+implementation anywhere in the codebase.
+
+**What may place a document.** A document is attached to a PO Set only on
+evidence printed on the documents themselves:
+
+1. the PO number printed on the document, and
+2. the delivery-note number printed on the document (matched against the DN
+   number of a document already in an open set, or against a PO row that
+   names that DN number).
+
+**A filename is never evidence.** The same bytes can be renamed, and a batch
+export can give two unrelated documents the same prefix, so a name proves
+nothing about what a document is. A document that carries no content anchor
+waits for a human rather than being placed on a guess.
+
+```
+1. Group BOTH sides by line_item_no, summing each group.
+   Line numbers are normalised first: whitespace stripped, leading zeros
+   removed ('01' -> '1'). Alphanumeric forms survive verbatim ('1a', '1-1').
+   A '.' segment is kept verbatim ('1.05' stays '1.05', never '1.5'): dotted
+   numbers are sub-line identifiers and collapsing them can merge distinct
+   lines. Zeros after '-', '_' and '/' are still stripped ('01-01' -> '1-1').
+
+2. A vendor row with no usable line number may fall back to its description,
+   and only then. It never overrides a real line number.
+
+3. For every PO group, PO quantity must equal the vendor group in the DN pool
+   AND, independently, in the SI pool. Exact scaled integers. No tolerance.
+
+4. A vendor group with no PO counterpart is an orphan: quarantine the set.
+   A delivered line that resolves nowhere cannot be ignored.
+
+5. A PO line with no printed number is keyed by its description; a line with
+   neither a number nor a description is unresolvable: quarantine the set.
+
+6. Zero or negative anywhere: quarantine the set. Never evaluate it as a
+   normal case.
+
+7. Anything that fails: quarantine the whole set. There is no partial pass.
+```
+
+**Two different questions, two different answers.** This is the distinction
+most worth being precise about:
+
+- **Matching** — how a vendor row is attached to a PO line — uses exactly
+  **two** signals: `line_item_no` (primary) and, for a row carrying no usable
+  number, its `description` (fuzzy, threshold from `matching.fuzzy_description_threshold`).
+- **Reconciling** — whether the numbers agree, i.e. the pass/fail test —
+  uses **quantity only**.
+
+So "quantities are the only signal" means *no price, no part number, no UOM and no
+positional order participate in the decision*. Step-10 and `-1` line-number
+schemes are mapped only by the per-pool fallback below, which changes how a
+vendor row is *keyed*, never what is compared. It
+does **not** mean matching is number-only: the description fallback in step 2
+above is a real matching signal, and it is the only one besides the number.
+§7 explains why each removed input was removed; §8 states what that costs.
+
+**Line-number fallback (2026-10-24).** Exact matching runs first. Only when a vendor pool (DN or SI, each on its own) has numbered rows that exact matching cannot place on the PO, one of four rules may re-key a COPY of that pool's rows: `x10` (PO 10,20,30 vs vendor 1,2,3), `div10` (PO 1,2,3 vs vendor 10,20,30), `add_rel` (PO 1-1,2-1 vs vendor 1,2) and `strip_rel` (PO 1,2 vs vendor 1-1,2-1). Each rule has a switch under `matching.line_number_fallback` (all on by default). Invariants: PO keys are never rewritten; DN and SI resolve independently and may use different rules; one rule per pool, all-or-nothing (every numbered key must land on a PO key); a pool where any single document already fits the PO as printed is never mapped (`line_mapping_rejected`); a numberless row anywhere disables it; when a rule applies it applies to EVERY key of the pool, so a vendor key that equals a PO key can be re-keyed (PO 10,20,100 vs DN 1,2,10 pairs DN 10 with PO 100; pinned by `test_known_limitation_x10_rekeys_a_vendor_key_that_equals_a_po_key`); the function default is exact-only (`line_fallback=None`). The comparison is unchanged: PO == sum(DN) == sum(SI) per line, exact integers. The rule used is stored in `po_sets.line_mapping_rule`, shown as *lines mapped (rule)*, appended to the reason, and a merged set gets one `line_mapping_applied` audit row. Pinned by `tests/test_line_mapping*.py`.
+
+### Where it lives
+
+| Function | File | Role |
+|---|---|---|
+| `group_by_line_no` | `services/matching.py` | steps 1, 2, 4, 5 |
+| `_best_desc_key` | `services/matching.py` | the description fallback in step 2 |
+| `compare_aggregates` | `services/matching.py` | step 3's comparison, orphan reporting |
+| `compare_po_set_lines` | `services/reconciliation.py` | the whole comparison, one entry point |
+| `reconcile_po_set` | `services/reconciliation.py` | applies status transitions and merges |
+
+`compare_po_set_lines` is called by **both** the engine and the PO Set detail
+view. The dashboard cannot disagree with the engine, because it runs the same
+code. This was a real defect before: the detail page carried a private copy of
+an older algorithm and could show "Match" on a set the engine had quarantined.
+
+---
+
+## 3. Status model
+
+Exactly five states, unchanged:
+
+| Status | Meaning | Leaves the set by |
+|---|---|---|
+| `pending` | not evaluated yet, or awaiting a delivery | next sync, or Redo matching |
+| `mismatched` | both sides reported a line and the quantities disagree | a human, or new data |
+| `quarantined` | a line could not be identified, a quantity is non-positive, the documents disagree on the PO number, or the packet could not be named | a human |
+| `blocked_customs` | customs toggle on, CUSTOMS + SHIPPING not both attached | uploading the second document, then Merge Now (or the next sync) |
+| `merged` | packet written; closed to reconciliation | nothing — terminal, except a customs append (§6) |
+
+The complete status-to-reason mapping is in **§3.1**.
+
+**Partial delivery vs disagreement.** When a line fails, the distinction is
+whether the vendor said anything about it:
+
+- vendor reported **nothing** for a PO line → `pending`, reason
+  `partial_fulfillment`. The set is waiting for a delivery that may still come.
+- vendor reported **something** that differs → `mismatched`. Two documents
+  disagree and a human has to decide which is right.
+
+This is a deliberate narrowing of the original "no partial pass" rule. It is
+implemented in `reconcile_po_set`, not in the comparison, because only the
+engine knows the set's history.
+
+**Every terminal state leaves a readable reason** on `po_sets.reconcile_reason`,
+written by `reconciliation.explain`. Every reason code the reconciler can emit
+must exist in `REASON_TEXT`; an unmapped code renders as "Awaiting further
+processing", which understates a quarantine as a wait. If you add a reason
+code, add the text in the same change.
+
+**A stored reason is never overwritten by a later sweep.** The reconciler
+returns a reason **code** (or none), and the code is rendered into the
+sentence the dashboard shows. A verdict with no code and no quantity
+evidence has nothing new to say, so the reason a previous pass wrote stays
+where it is. A quarantine's explanation must survive the nightly sweep that
+reconciles every open set — a quarantine that reads as "Awaiting further
+processing" tells the reviewer to wait for a set that will never resolve
+itself.
+
+### 3.1 Every status this engine can produce
+
+Verified against `reconcile_po_set` — this is the complete list, not an
+approximation.
+
+| Status | Reason code | Trigger |
+|---|---|---|
+| `pending` | `missing_po_document` / `missing_dn_document` / `missing_si_document` | a required side has no document row yet — not yet evaluable |
+| `pending` | `partial_fulfillment` | a PO line the vendor reported nothing about |
+| `mismatched` | `quantity_mismatch` | both sides reported a line and the quantities differ |
+| `quarantined` | `non_positive_quantity` | any quantity zero, negative, or unparseable |
+| `quarantined` | `po_reference_mismatch` | a document's PO number disagrees with its set's |
+| `quarantined` | `duplicate_document_number` | two delivery notes (or two invoices) in one set carry the same document number: a re-scan or re-issue would be summed twice, so the set is held for review; part-deliveries have distinct numbers |
+| `quarantined` | `po_line_missing_line_item_no` | a PO line has neither a number nor a description to compare on |
+| `pending` | `multiple_po_documents` | the set holds more than one PO document (config `reconciliation.single_po_document`); held for review, never summed or auto-merged |
+| `quarantined` | `unmatched_vendor_line` | a vendor row resolved to no PO line (see 3.2) |
+| `quarantined` | `po_document_has_no_line_items` | the PO document was read but contains no line items |
+| `quarantined` | `vendor_document_has_no_line_items` | any single DN or SI document was read but contains no line items (checked per document, so an empty DN beside a full one still quarantines) |
+| `quarantined` | `document_extraction_failed` | a PO/DN/SI document in the set failed extraction; its stale lines are never reconciled or merged. Use Re-Extract |
+| `pending` | `document_not_yet_read` | a PO/DN/SI document in the set is still pending/processing extraction |
+| `pending` | `placed_by_number_only` | a document was placed in the set only because its DN number matches another document's; an operator must confirm (or Force Merge) |
+| `pending` | `settling` | every gate passed, but the set was started by the poller and its newest file is younger than `schedule.merge_settle_minutes`; it merges on a later pass by itself unless something else arrives (text starts "Reconciled; waiting for more files to arrive") |
+| `pending` | `documents_changed_during_merge` | a document was attached to, or changed in, the set after reconcile read it and before the packet was written; no packet is written and the next reconcile re-checks the set |
+| `quarantined` | `unclassified_document_in_set` | a document that is not PO/DN/SI/CUSTOMS/SHIPPING (UNKNOWN, COMBINED) is attached to the set (legacy-row defence; the sweeps never attach one) |
+| `quarantined` | `packet_naming_failed` | merged packet could not be named unambiguously |
+| `quarantined` | `packet_source_unreadable` | a member PDF is missing, corrupt, or encrypted, so the packet cannot be written |
+| `pending` | `packet_write_failed` | the output folder could not be written (disk full, share offline, permissions, lock timeout). The documents are consistent, so the set stays pending and the next sweep retries it; nothing partial is left (R-07) |
+| `quarantined` | `no_line_item_evidence` | every attached document has zero line items, so there is nothing to merge |
+| `blocked_customs` | `blocked_customs` | customs toggle on, CUSTOMS + SHIPPING not both attached |
+| `merged` | *(none)* | reconciled, customs gate clear, packet written - terminal except a customs append (§6) |
+
+`REASON_TEXT` carries every reason code the reconciler can emit (in
+`services/reconciliation.py`). `mismatched` and `merged` pass no reason
+because the status already says everything a reviewer needs; `blocked_customs`
+now carries its own reason so a customs wait cannot inherit a previous
+quantity-mismatch sentence.
+
+> Retired 2026-09-30 (Layer-2 purge): `combined_unverified` is gone. A
+> multi-doc PDF is split in Layer 1 into single-section child files
+> (`combined/` → `input/`, sterile parent row); Layer 2 only ever sees
+> PO/DN/SI rows and never names `COMBINED` — see the PLAN.
+
+### 3.1.1 One PO document per set
+
+A PO Set is expected to hold one PO **document**. With
+`reconciliation.single_po_document: true` (the default, in `config.yaml`), a
+set carrying more than one PO document is held **pending** with
+`multiple_po_documents`; it is not summed and it does not auto-merge. The
+documents may be page fragments or a re-issue, and the engine must not guess.
+The detail names the files. The operator resolves the set using the existing
+document tools; this release adds no PO-selection UI.
+
+Without the gate, two POs in one set are summed into the baseline, which
+silently doubles every quantity the DN and SI are then compared against — the
+set could never reconcile, and the reason would not be obvious. This normally
+means a re-issued PO or a mistyped PO number landing under the same key.
+
+Turn it off only if your vendors genuinely issue split POs under one number.
+
+### 3.2 Every flag the comparison can produce
+
+Per-line flags, sorted priority 1 before 2. **There are five types and six
+reasons** (`line_mapping` and `line_mapping_rejected` came with the line-number fallback) — verified by driving `compare_po_set_lines` over every case.
+
+| Priority | `type` | `reason` | Pool | Means |
+|---|---|---|---|---|
+| 1 | `identification` | `no_po_line_with_this_number` | DN or SI | vendor row's number is not on the PO |
+| 1 | `identification` | `no_line_number_and_no_description_match` | DN or SI | vendor row has no number and no description clears the threshold |
+| 2 | `quantity` | `quantity_mismatch` | DN or SI | both sides reported the line, quantities differ |
+| 2 | `line_mapping` | `line_number_mapped` | DN or SI | a pool's vendor line numbers were mapped to the PO by a rule (x10, div10, add_rel, strip_rel) — **advisory, not a failure** |
+| 1 | `line_mapping_rejected` | `document_fits_exact` | DN or SI | the pool fits a rule but one document already matches the PO as printed, so nothing was mapped — **advisory**; the orphans quarantine the set |
+| 2 | `description_match` | `matched_by_description` | DN or SI | the row was attached by the description fallback, not by a printed line number — **advisory, not a failure** |
+| 3 | `naming` | *(no `reason` key)* | — | packet had to be named from the PO number because no invoice number was extracted (§6) |
+
+Priority 3 `naming` and priority 2 `description_match` describe a successful
+outcome. `naming` is raised by `reconcile_po_set` rather than by the
+comparison. `description_match` is raised by `compare_po_set_lines` for every
+vendor row the description fallback placed, because that link is a guess the
+reviewer should see even when the quantities agree.
+
+**`description_match` never changes the verdict.** It is not an
+identification or quantity failure; a set carrying only these flags still
+merges if its quantities reconcile. The dashboard shows an amber
+*Merged • review* pill and the detail page marks the affected matrix rows, so
+the CA checks the item descriptions. The count is persisted on
+`po_sets.description_match_count` for the list view. This is the one place the
+engine guesses, and the tag is how that guess is made visible rather than
+silent.
+
+`po_reference_mismatch`, `po_line_missing_line_item_no` and
+`packet_naming_failed` quarantine the set directly. `multiple_po_documents`
+holds it pending for review instead. All are listed in §3.1 rather than as
+per-line flags.
+
+Both pools are evaluated independently and reported separately, so a set can
+carry a DN flag and an SI flag for the same line.
+
+**Identification outranks quantity** because an unidentifiable line is not a
+shortfall — the engine cannot say which item is missing, so guessing is worse
+than stopping. Any identification flag quarantines the set outright; a set only
+reaches `pending`/`mismatched` on quantity flags alone. `description_match`
+sits outside that ladder: it records a fallback link, not a failure.
+
+`unmatched_vendor_line` (the set-level reason) is the quarantine raised by
+either identification reason above — the set-level code says *what happened*,
+the per-line reason says *which row*.
+
+**There is no price flag.** The retired matcher produced identification
+variants (`LINE_REINDEXED`, `INDEX_DESCRIPTION_MISMATCH`,
+`AMBIGUOUS_LINE_MATCH`) and a `price` flag. All are gone with §7.
+
+---
+
+## 4. Extraction
+
+The VLM's entire job is PDF → structured JSON. Every decision after that is
+deterministic code. The model id comes from `config.yaml` and is never
+hardcoded.
+
+The schema in `services/extraction.py` is the whole contract with the model.
+Extracted, per document: `document_type`, `po_reference`,
+`po_reference_ambiguous`, `document_number`, `vendor_name`, and per line
+`line_item_no`, `description`, `quantity`, `dn_no`.
+
+**`quantity` is the number and nothing else.** No unit, no UOM, no currency
+symbol, no surrounding text. A cell printed as `12.5 EA` must come back as
+`12.5`; `1,200.00 M3` as `1200.00`. The prompt states this explicitly (STEP 4)
+and the schema field repeats it, because the strict parser in §5 will reject a
+unit-bearing string and quarantine the set for no legible reason.
+
+**UOM is not extracted, not stored, and not reconciled.** There is no UOM
+column, by decision — see §8 for what that costs. `unit_price` is not extracted
+or stored; the printed price stays visible on the vendor pages of the merged
+packet. Quantities are the only signal (§2).
+
+**Not extracted:** confidence score, part number, UOM, line type, unit price. If a value
+is not in the schema it is not stored and not used.
+
+Two extraction behaviours are load-bearing and easy to break:
+
+- **Tax, freight, fee, discount and subtotal rows are excluded by the prompt**
+  (STEP 3: *"EXCLUDE subtotal, VAT, tax, total, amount-in-words, payment terms,
+  signatures"*), not by a stored row-kind column. See §8.
+- **`po_reference_ambiguous` must survive into the result dict.** The VLM is
+  asked whether more than one PO number is printed. A document that lists
+  several POs is left unattached rather than attached to whichever PO was named
+  first, because guessing strands the other POs' invoices. Omitting this key
+  from `_call_vlm`'s return silently disables the whole feature — it did once,
+  and nothing caught it because the extraction path had no test coverage.
+
+---
+
+## 5. Quantity parsing
+
+`parse_quantity_scaled` in `services/sanitizer.py` turns a printed quantity
+into an exact integer scaled ×1000, using the `matching.locale` setting
+(default `en_IN`).
+
+**Accepted:** `"50"`, `"12.5"`, `"350.00"`, `"1,000"`, `"1,00,000"`, and any
+value with **at most 2 significant decimal places**.
+
+**Trailing zeros are formatting, not precision.** `"12.45000000"`, `"12.450"`
+and `"12.45"` are the same number and all parse identically. They are
+normalised *before* the precision check, because vendors emit them constantly
+(Excel and OCR round-trips) and rejecting them would quarantine documents that
+are perfectly legible. A precision rule that counted characters instead of
+significant decimals would be a bug, not strictness.
+
+**Rejected** (raises → the row stores 0 → the set quarantines on
+`non_positive_quantity`): empty, unparseable, inner spaces (`"1 000"`), more
+than 2 significant decimals, zero, negative, non-finite, and anything above
+1e12.
+
+**Why 2 decimals.** Real quantities are whole units, occasionally `.50`. A
+third significant decimal means the printed string is something else — and the
+realistic case is a European thousands separator: `"1.234"` printed by a vendor
+who means `1234` would otherwise be read as `1.234`, a **1000× error**. Rejecting
+it routes the set to quarantine, which is the safe direction. See §8.
+
+**Storage stays ×1000.** Existing databases and the column semantics are
+unchanged, so no data migration is needed. With a 2dp input contract the low
+two digits are always zero, which is harmless — every comparison still
+operates on an exact integer, never a float.
+
+Rejecting is deliberate throughout. A false quarantine costs a human ten
+minutes; a silently mis-scaled quantity ships a wrong document.
+
+**The locale is an assumption, not a detection.** `matching.locale` is a fixed
+value, never inferred from the document. The 2-decimal rule closes the common
+European-thousands case, but the trailing-zero form (`"17.200"`) is
+indistinguishable from a legitimate `17.2` and is still read as 17.2. Set
+`matching.locale` to match your vendors. A mixed-vendor estate cannot be served
+correctly by one locale and would need per-document locale detection, which
+this product does not do. This is a known open risk, not a solved problem.
+
+---
+
+## 6. Merge
+
+**Order** — `merge.legal_order` in `config.yaml`, default
+`SI → DN → PO → SHIPPING → CUSTOMS`. Types absent from the list
+append in first-seen order, so a new manual type never silently vanishes.
+`COMBINED` is not in the order and never reaches the merger: split parents
+are sterile rows with no `po_set_id`, so no set ever contains one.
+
+**Naming — invoice number, falling back to the PO number.** The packet is
+named from the SI document's own number (`si_no`, else `invoice_no`). Nothing
+else. A number printed on a DN or a PO is never used, because a packet named
+from the wrong document is worse than an unnamed one. (Retired 2026-09-30:
+a `COMBINED` document used to count as the SI-bearing document. It no longer
+does — children re-extracted from the split carry their own SI section and
+its number is the packet's number.)
+
+**When no invoice number was extracted at all**, the packet is named from the
+PO number instead: `<po_no>.pdf`. The quantities are what reconciliation
+proves, so a missing label must not veto an otherwise correct packet. The
+fallback is never silent — it raises a `naming` flag (§3.2) and the dashboard
+shows *"No invoice number was extracted; packet named 'X.pdf' from the PO
+number"*, so a reviewer who expects an invoice-named file can see why it isn't
+one. A PO number alone is safe as a filename: only one open set exists per PO
+key at a time, and a genuine duplicate still raises in `_resolve_output_path`.
+
+Force Merge is the operator's override and may look at any document's invoice
+number, then the PO number.
+
+**Collisions fail closed.** `_resolve_output_path` raises `MergeNamingError`
+rather than overwriting a packet belonging to another PO Set; the reconciler
+catches it and quarantines. A clobbered delivered packet is never acceptable.
+This is the failure mode when one invoice number legitimately covers two PO
+Sets — the second quarantines instead of overwriting the first.
+
+**Refusals.** Auto-merge refuses when the set is `mismatched`, `quarantined` or
+`blocked_customs`, when the customs gate is unsatisfied, when the output name
+is taken, or when the set has **zero line-item evidence**. Force Merge bypasses
+the gates by design but still refuses to write a 0-page PDF.
+
+**Immutability.** Once `merged`, the set is closed to reconciliation. Re-merging
+returns the existing path. A later document with the same PO number starts a
+new PO Set. The one exception is the customs append described next.
+
+**Customs can be turned on and appended after the merge.** The requirement
+defaults **off**, so a set can deliver before anyone considers customs. Turning
+it on for a merged set is allowed and the status stays `merged` — a packet that
+has already been delivered is never re-opened or shown as "Awaiting Customs"
+(the old implementation wrote `blocked_customs` and did exactly that).
+Uploading both a CUSTOMS and a SHIPPING document to a merged set rebuilds the
+packet from every attached document in `merge.legal_order`
+(`SI → DN → PO → SHIPPING → CUSTOMS`) and atomically replaces the same file;
+the first merge's `merged_at` is unchanged and a `customs_append` audit row
+records the documents. The rebuild is idempotent, and toggling the requirement
+off later cannot remove pages.
+
+With the requirement on **before** the merge, the older path still applies: the
+set waits in `blocked_customs` until both documents are uploaded, then merges
+with them in the same order, under the invoice number (or the PO number when no
+invoice number was extracted).
+
+**Force Merge writes an audit row on every path**, carrying the customs
+document count, the output filename, and the operator's written justification.
+The justification must be ≥ 20 characters when supplied.
+
+### 6.1 Merge Now — the gated manual button
+
+`POST /po_sets/{id}/merge` (button: **📦 Merge Now** on the PO Set detail page)
+re-runs the comparison and merges **if** the set is now eligible.
+
+It exists because, on a set that has **not** merged, uploading the two customs
+documents does **not** itself merge anything: the upload route only updates
+`customs_doc_count` and lifts the set from `blocked_customs` to `pending`, so
+it otherwise sits there until the midnight sync or a manual re-check. Without
+this button an operator who has just finished the manual step sees nothing
+happen. (On a **merged** set the upload does rebuild the packet once both
+documents are present — see §6.)
+
+**Merge Now is not Force Merge.** Every gate still applies — quantities must
+reconcile, the customs toggle must be satisfied, the packet must be nameable.
+It is safe to press at any time: if the set is not eligible the response
+carries the status and reason and nothing is written. Force Merge is the
+separate, deliberately unconditional override.
+
+### 6.2 Merge PDFs — the standalone tool
+
+`GET /manual/merger` (navigation: **Merge PDFs**, plus a button on the
+dashboard) opens a tool that is part of the same application but **not part
+of the pipeline**: no AI call, no `documents`/`po_sets` row, no `audit_log`
+entry, and no `po_no` association (FR-14.11). The page is clearly marked
+"Standalone tool · No AI · Nothing saved to the database · Not part of the pipeline".
+
+The operator stages PDFs within the limits configured under `manual_merge:`
+in `config.yaml` (defaults: 20 files, 100 MB total, 5,000 pages), reorders them
+by drag or with the arrow buttons, names the download, and presses **Merge
+PDFs**. The merged file is returned as a browser download; the browser chooses
+the folder. That is the deliberate resolution of FR-14.12 — there is no
+server-side destination field and nothing is written to `output_folder`
+(amended 2026-10-23).
+
+The server validates every input as a real PDF (header in the first 1024
+bytes, openable by pypdf, at least one page) and **refuses every encrypted or
+password-protected PDF**, including owner-password-only files: the tool never
+decrypts and never silently drops permission flags. The uploader is asked to
+supply an unlocked copy. Page-level JavaScript and launch actions are stripped;
+the whole request is capped before multipart parsing. Failures are rendered in
+the page, name the offending file, and keep the staged list so the operator
+does not have to rebuild it.
+
+The download name is validated live and again on the server: spaces, parentheses
+and Unicode are kept; Windows-invalid characters, leading/trailing dots or
+spaces, reserved device names and names over 100 characters are refused with a
+clear message. Uploads are staged in `manual_merge.temp_folder` (default: beside
+the database) and the tool sweeps only its own `mm-*.pdf` files older than
+`sweep_after_hours` on startup and before each merge. The staging folder must be
+separate from every pipeline data folder; the app refuses to start otherwise.
+
+---
+
+## 7. What was removed, and why
+
+Each of these was implemented and has been deleted. The code is gone, not
+disabled.
+
+| Removed | Reason | Cost — see §8 |
+|---|---|---|
+| **SKU / part-number rescue** | `part_no` was blank on **every DN sample across all three real vendor sets** reviewed. It cannot be relied on, and the column was permanently NULL because the VLM was never asked for it. | L |
+| **Reindex detection** (`LINE_REINDEXED`) | Needed a description-vs-number sanity gate to be useful, and that gate is the next row. | L |
+| **ERP step-10 alignment as a pairing heuristic** (PO line 10 ↔ DN line 1) | Replaced 2026-10-24 by the per-pool line-number fallback (section 2): structural rules only, exact matching first, PO keys never rewritten. | M |
+| **Description sanity guard** on exact-number hits | This is the gate that catches "right line number, wrong item". Removing it is the single most consequential decision in this document. | **H** |
+| **Conflicting-description quarantine** (old FR-8.4) | Quantities are the only signal. The engine sums; it does not judge. | **H** |
+| **Fuzzy margin / ambiguity resolution** | With no second candidate to choose between, the margin has nothing to measure. | — |
+| **Price check** (FR-11.1) | Secondary, and a price-only mismatch does not block a merge. Price is no longer extracted at all. | L |
+| **`line_items.unit_price` column** | Dropped (migration `d5e6f7a8b9c0`); price is not extracted or stored. | L |
+| **`line_items.part_no` column + index** | Never populated. | L |
+| **`line_items.line_type` column** | Never populated. Tax rows are excluded by the prompt instead. | M |
+| **`line_items.uom`** | Never existed. Deliberately. | M |
+| **Extraction `confidence`** | Binary valid/failed is the contract; a score nobody acts on is noise. | — |
+
+Net: ~250 lines of matching code, 1 migration adding a column and an index,
+and 4 test files deleted.
+
+---
+
+## 8. Accepted limitations
+
+These are real. They are the price of §7, stated plainly so nobody discovers
+them on a live document.
+
+### H — a wrong item can merge (highest consequence)
+
+Two rows on the same printed line number with the same quantity but describing
+**different items** are summed, and the set reconciles.
+
+**Real example.** ADES/NOMAC set `D7264-PO186000-013-01`. The PO orders part
+`TLMKC`. The DN and SI ship part `Runclimb-VALVE` instead. Same line number,
+same quantity, quantities reconcile exactly, packet merges. The guard that used
+to catch this was the retired description-conflict check.
+
+> Mitigation today: the CA's human review. This is the case that makes it
+> load-bearing rather than a formality.
+
+> If this ever needs closing, the cheapest fix that does not reopen the retired
+> matcher is a single pairwise description check inside `group_by_line_no`:
+> when two or more vendor rows share a line number, compare their descriptions
+> and quarantine if any pair falls below the threshold. ~15 lines. It was
+> declined on 2026-09-29; that decision can be revisited.
+
+### H — UOM is invisible
+
+No UOM column, no conversion, not extracted at all (§4). A PO ordering
+**1 BOX** and a DN delivering **1 EA** are both the number 1 and reconcile. A
+12-piece box counts as one unit.
+
+This is a deliberate narrowing: UOM was blank or inconsistent across the real
+vendor samples, and a conversion table cannot be built from data you do not
+trust. The cost is that unit-quantity disagreements are invisible to the
+engine, and only a human comparing the printed documents can catch one.
+
+### M — tax rows depend on the prompt
+
+There is no `line_type` column. Tax, freight, fee and discount rows are removed
+by the extraction prompt. If the VLM fails to exclude one it is summed like any
+other line and the set mismatches. Safe direction, false quarantine.
+
+### M — numbering schemes outside the four rules quarantine
+
+Step-10 (PO 10,20,30 against 1,2,3 and the reverse) and `-1` release suffixes
+(Bridon `100060000080880`: PO `1-1`, DN/SI `1`) now map by the line-number
+fallback (section 2). Anything else still quarantines: safe direction, a human
+resolves it. The limits below are each pinned by a test.
+
+### L — test_limitation_two_rules_never_compose
+
+PO `1` against vendor `10-1` (SAP schedule against a serial PO) needs two rules; each rule is tried alone, so it quarantines. Pinned by `test_limitation_two_rules_never_compose`.
+
+### L — test_limitation_slash_schedule_is_not_mapped
+
+`00010/1` is not a release suffix (only an ASCII-hyphen `-1` is), so it quarantines. Pinned by `test_limitation_slash_schedule_is_not_mapped`.
+
+### L — test_limitation_unicode_dash_is_not_normalised
+
+`1–1` and `1−1` do not equal `1-1`; the key stays foreign and the set quarantines. Pinned by `test_limitation_unicode_dash_is_not_normalised`.
+
+### L — test_limitation_other_separators_are_not_mapped
+
+Dotted (`1.1`, `1.0`, `1.1.1`), underscored (`1_1`) and slashed (`1/1`) keys are not mapped. Pinned by `test_limitation_other_separators_are_not_mapped`.
+
+### L — test_limitation_labelled_keys_are_not_mapped
+
+`Line 10`, `#10`, `Item 10`, `10.` and `10.0` are not mapped (the prompt asks for the bare number). Pinned by `test_limitation_labelled_keys_are_not_mapped`.
+
+### L — test_limitation_steps_other_than_10_are_not_mapped
+
+Step-5, step-20 and step-100 numbering is not mapped. Pinned by `test_limitation_steps_other_than_10_are_not_mapped`.
+
+### L — test_limitation_shifted_numbering_is_not_mapped
+
+A shifted or renumbered series (PO 1,3,4 against DN 1,2,3; offset +1) is not mapped. Pinned by `test_limitation_shifted_numbering_is_not_mapped`.
+
+### L — test_limitation_real_dts22843_shifted_numbering_is_not_mapped
+
+The real shifted-numbering set (DTS 22843) stays quarantined. Pinned by `test_limitation_real_dts22843_shifted_numbering_is_not_mapped`.
+
+### L — test_limitation_mixed_pool_is_not_mapped
+
+A pool where one document already matches the PO as printed and another needs a rule is never mapped; the set quarantines with `Line Numbers Not Mapped`. Pinned by `test_limitation_mixed_pool_is_not_mapped`.
+
+### L — test_known_limitation_vendor_serial_renumbering_pairs_wrongly_but_never_merges
+
+A vendor that renumbers a partial delivery 1..m is paired by position under x10 (the exact path pairs it wrongly too); the quantities then disagree, so it normally mismatches. It could merge only when the quantities coincide across the documents, the same exposure exact numbering already has. Pinned by `test_known_limitation_vendor_serial_renumbering_pairs_wrongly_but_never_merges`.
+
+A vendor document split by page into several files (for example `pages-1.pdf` with lines 1-9, 11, 12 and `pages-2.pdf` with line 10 only) is a mixed pool when one file's keys already match the PO as printed: the pool is never mapped and the set quarantines (the safe direction). Pinned by `test_known_limitation_step10_pool_split_across_files_quarantines`.
+
+### L — test_known_limitation_single_line_step10_maps_on_quantity_alone
+
+With one PO line, x10 maps on structure and quantity alone (same exposure a plain-numbered single-line PO already has, see 8-H). Pinned by `test_known_limitation_single_line_step10_maps_on_quantity_alone`.
+
+### L — test_known_limitation_reverse_rules_map_on_structure_alone
+
+div10 and strip_rel on a single line map on structure alone; harmless by the cross-set replay (0 merges beyond the same-numbering baseline). Pinned by `test_known_limitation_reverse_rules_map_on_structure_alone`.
+
+### L — inner-space quantities quarantine
+
+A vendor printing `"1 000"` gets a quarantine, not a merge. Deliberate (§5).
+
+### L — trailing-zero European decimals are still mis-scaled
+
+The 2-decimal rule rejects `"1.234"` (European 1234), so the common form is
+caught. But `"17.200"` is indistinguishable from a legitimate `17.2` and is
+still read as 17.2. Since real quantities are whole units or occasional `.50`,
+this shape is not expected from our vendors — accepted as an open risk rather
+than solved (§5).
+
+### L — three-digit PO revision counters split the set
+
+`normalize_po_no` strips a trailing `,N` only when N is `0` or one or two digits
+(a SAP revision such as `161538,0`). A three-digit tail is treated as thousands
+grouping and kept, so `12,345` is PO 12345 and never PO 12. The cost: a PO
+printed with a three-digit revision (`161538,100`) no longer groups with a DN or
+SI that prints a bare `161538`. That document sits visibly unattached for a
+person to place. Safe direction, pinned by
+`test_known_limitation_three_digit_revision_is_not_stripped`.
+
+### M — an HTTP 400 breaker protects the night's batch (R-06)
+
+An HTTP 400 is the provider rejecting the request, normally for one bad file.
+When three DIFFERENT documents in a row are rejected with a 400, the cause is
+taken to be the request (a wrong `vlm.model`, an unsupported option, a provider
+schema change), not the documents. The breaker refunds those documents' attempts
+and leaves them `pending`, stops calling the provider for the rest of the sync
+(Prefect does not retry the tripping call), logs one clear error, and reports
+`vlm_halted: true` in the sync summary. While a rejection might still be withdrawn
+by a trip, the document's quarantine is held back: nothing is moved out of input
+and no audit row is written for a batch that trips. A successful read, or the start
+of the next sync, resets the count; counting happens only during a sync, so a
+Re-Extract from the web page never trips or is refunded by it. A refunded document
+carries a marker: if it is rejected again it is judged on its own and fails as
+usual, so three genuinely bad files cannot halt every night. The cost is one
+halted pass before such files are condemned. A refunded document that is rejected
+AGAIN is judged on its own, but its quarantine is still held back until the pass ends,
+so if that pass trips the breaker it is refunded too (nothing is condemned while the
+provider keeps rejecting every request). The input poller pauses for an hour after a
+halt (`vlm_halted`); documents stay pending and a manual Scan can run at any time.
+Pinned by `test_a_persistent_400_never_condemns_documents_across_passes`, `test_the_400_breaker_refunds_attempts_and_reports_the_halt`,
+`test_a_document_the_breaker_already_refunded_is_judged_on_its_own` and
+`test_a_good_read_between_400s_does_not_trip_the_breaker`.
+
+### L — a delivered packet's customs or shipping file cannot be replaced (D19)
+
+Before a set merges, a wrong CUSTOMS or SHIPPING file can be removed on the set page (the row is detached and archived, audited, the stored file kept) and the right one uploaded before Merge Now. Once the set is merged the removal is refused (409): the packet may already have been sent, so the app never rewrites it with a different file. The only remedy is outside the app. Pinned by `test_known_limitation_delivered_packet_customs_cannot_be_replaced`.
+
+### L — a one-digit PO misread is not detected (D18, owner decision 2026-10-25)
+
+When the model misreads one digit of the PO number on a continuation page (real run: set 9 against set 8), that page becomes a
+phantom PO-only set next to the complete set. The complete set still reconciles and merges on its own numbers, so its packet can
+be missing that page. A hold for this case was designed (`docs/SPEC_WS2_MISREAD_HOLD.md`) and the owner chose to skip it: it would
+be a new feature plus a migration, and a plain "one digit apart" rule gave 2 false positives to 1 true positive on the real corpus.
+Cover: the first pilot week is supervised (the operator checks each merged packet's page count against the PO), and a wrongly
+read PO is repaired with the manual merger. Revisit only if real use shows it happens. Pinned by
+`test_known_limitation_one_digit_po_misread_is_not_detected`.
+
+### L — operating limits found by the 2026-10-24 reviews (pipeline and web)
+
+- **Input files of sets that never merge** (quarantined, mismatched, pending, unattached)
+  stay in the input folder, so every pass that runs re-checks, parses and hashes all of
+  them. A pass only runs when something new arrives (or on the nightly sweep), but its
+  cost grows with the number of stuck files. Clear or archive resolved sets regularly.
+- **Prefect server down.** A poller-started sync fails in about 10 seconds; the poller
+  backs off 5 minutes and retries the same files (the snapshot is not committed). The
+  web service does not depend on the Prefect service at boot: start Prefect first.
+- **A hung sync that still holds the lock** (Windows cannot delete an open lock file)
+  leaves the poller queued behind it; it logs a warning every two minutes. Restart the
+  web service to clear it.
+- **Orphaned "sync running" marker.** A service that stopped mid-sync left a marker that
+  blocked every operator action for up to 20 minutes; startup now removes it when no
+  process holds the sync lock.
+- **Per-PO lock timeout** is 900 s by default and must exceed one document's worst-case
+  extraction (742 s with the defaults); the app refuses to start with a shorter value.
+- **Data folders may not sit inside the input folder** (config is refused), and a
+  merged set's cleanup never deletes a stored copy.
+- **Unused config keys:** `server.host` and `prefect.max_concurrent_extraction_tasks` are
+  validated but read by nothing (the service is started by NSSM with the installer's own host
+  and port; extraction is sequential). `server.port` is read ONLY by `scripts/reset_data.ps1`
+  to check that the port is free, so it must equal the installer's `-Port` or the reset checks
+  the wrong port. The keys are kept because the config model rejects unknown keys: removing
+  one would stop an existing `config.yaml` from loading.
+- **The set page's upload (`POST /po_sets/<id>/upload`) is size-limited before the body is
+  parsed** (H1-4): 100 MB per file plus 2 MiB of form overhead, by `Content-Length` and by
+  counting a chunked body. Over the cap is a 413 (a themed page for a browser). FastAPI turns
+  an error raised while it parses `File`/`Form` fields into a 400, so the middleware replaces
+  any non-413 response produced after the cap tripped. The in-route 100 MB read cap stays as
+  the second line.
+- **Re-Extract** shows "extraction queued" on any success; per-document errors are in
+  the JSON response, not in the toast.
+
+### M — scheduling: input-folder poller, queue, settle time, nightly sweep (D5)
+
+`schedule.poll_enabled` (default off in code, on in `config.example.yaml`) starts a thread
+inside the web service. Every `poll_interval_seconds` (default 60, minimum 15) it lists the
+input folder and subfolders (a listing, no hashing, no API calls) and starts one sync when a
+non-empty PDF is new or changed since the last sync started. One pass reads every waiting
+file, oldest first, then reconciles and merges the touched sets. Nothing is skipped: while a
+sync runs the poller is busy, and its next tick sees whatever arrived meanwhile; if a manual
+Scan or the nightly run holds the sync lock the run is queued and retried every 5 seconds.
+A pass that reports errors is retried up to 3 times, then left for the nightly sweep.
+**Settle time:** a set started by the poller merges only when its newest document arrived at
+least `merge_settle_minutes` (default 5) ago, because the documents of one PO often arrive
+minutes apart; the poller wakes itself when that time passes. Manual Scan, Merge Now and the
+nightly run never wait (reason `settling` is only produced by a poller-started pass). Every
+other gate (PO == DN == SI per line, customs, naming, guards) is unchanged, so a set merges
+if and only if all conditions are satisfied. `schedule.nightly_enabled` (default true) keeps
+the midnight Prefect sweep (re-reconcile open sets, retry customs appends); after changing
+it re-run `scripts/deploy_prefect.py`. Limits: the "seen" memory is per process (a restart
+re-checks the input once, which is cheap because ingest de-duplicates by SHA); a file that
+fails every retry waits for the nightly sweep or a manual Scan; zero-byte files never trigger.
+Pinned by `tests/test_poller.py`.
+
+### L — settings page: what it will not change (WS3)
+
+The Settings page edits 28 operating settings (watcher, AI model and limits, matching switches, lock time,
+merge-tool limits, log file). It does not edit folders, the database path, allowed hosts, the API key, the midnight
+schedule or the packet page order: those stay in `config.yaml` (IT). A value is validated by the service's own
+config models on a candidate copy before the file is replaced, a backup is kept, and a failed read-back restores
+the previous file. A config file broken by a hand edit while the service runs is logged and the service continues on
+the last good settings; a service started on a broken file still refuses to start. The page cannot tell a
+well-formed but wrong model id from a right one. See `docs/SETTINGS_SPEC.md`.
+
+### L — subfolders of the input folder are read; zero-byte files are skipped (R-17)
+
+The scan reads the input folder AND its subfolders (a folder per supplier or per
+day works), skipping hidden folders (a leading dot) and the other configured data
+folders if they sit inside input. A merged set's input copies are cleared wherever
+they sit, and a quarantined document's input copy is found in a subfolder too.
+A zero-byte `.pdf` never passes the stability check, so it is skipped every
+night with no row, no error count and no log line; nothing is lost (decided
+2026-10-24 to leave it for now). Pinned by
+`test_a_full_set_dropped_in_subfolders_merges_and_clears_its_inputs`,
+`test_a_hidden_or_data_folder_inside_input_is_not_scanned`,
+`test_files_in_subfolders_are_read` and `test_limitation_zero_byte_file_is_skipped_every_night`.
+
+### L — a waiting set shows vendor lines that match no PO line as a neutral note
+
+A set that is only waiting (no DN yet, or several PO documents) does not paint
+unmatched vendor lines red, but the set page lists them as "Not on the PO" with
+their quantity, so no delivered or invoiced quantity is hidden. They are still not
+counted in the matrix totals until they match a PO line. Numberless PO rows
+(overflow text, qty 0) show as `0 0 0 Match`. Pinned by
+`test_a_waiting_set_still_shows_a_vendor_line_that_matches_no_po_line`.
+
+### L — files rejected at ingest are listed, re-sent merged files are cleared (R-03, R-16)
+
+A file ingest refuses for good (not a PDF, truncated and older than five
+minutes, password-protected, over the size cap) is moved to
+`quarantine/_documents/` and now also gets a `failed`, unattached Document row,
+so it appears on the Unclassified page with the reason ("Rejected on arrival").
+A byte-identical file re-sent after its set merged resolves to the existing
+document, no longer mints an empty set, and is removed from input once the set
+is merged, the stored copy exists and the bytes still hash to the stored SHA.
+An unreadable file (permission or I/O error) still has no row: only a reason file.
+A rejected row cannot be reclassified, previewed or uploaded as a customs/shipping
+document (422 with the reason). Quarantined filenames are made safe for Windows
+(invalid characters, reserved names and length), falling back to the stored name.
+
+### M — a document the provider can never serve is retried every run
+
+A provider fault (timeout, 429, 5xx, credit, bad key or model id) leaves the
+document `pending` and is not charged as an attempt, so one outage cannot
+quarantine a batch. There is no circuit breaker: a bad key (401) or an empty
+credit balance (402) is re-attempted for every document in the run, one provider
+call each, rather than stopping the run at the first failure. Each stays
+`pending` and uncharged. The cost of both: a file the provider can *never* serve (for
+example a scan that always times out) is retried on every sync and never
+reaches `failed`. It shows as "Not read" and each run logs a warning; it does
+not quarantine its set or hide anything. The operator resolves it by removing
+or re-scanning the file. Pinned by
+`test_known_limitation_provider_fault_is_retried_every_run` and
+`test_known_limitation_auth_fault_is_attempted_once_per_document`.
+
+### M — a document placed under the wrong PO cannot be moved from the UI
+
+The Unclassified page places a held document under the PO number the operator
+types. If the number is mistyped, the document is attached to that set (or a new
+set is minted for it) and the reclassify route then refuses to move it (409): it
+is no longer held, and moving it would leave the old set's status stale. Re-Extract
+returns a document to Unclassified only when no PO number is printed on it; a
+manually placed document keeps its manual PO through every re-read. If the
+wrong placement makes the set quarantine, the operator Deletes (archives) the
+set and adds the files again; a set that only sits `pending` needs the
+administrator.
+
+**Real-world consequence.** A typo can strand one document in a stray set until an
+administrator fixes it. It cannot cause a wrong merge: the stray set has nothing
+to reconcile against. Pinned by
+`test_known_limitation_an_attached_document_cannot_be_reclassified`.
+
+### L — a packet left behind by a crash quarantines its set
+
+If the process dies after the packet file is written but before the database
+commit, the file exists but no set records it. The next merge attempt finds a
+file at the packet name that nothing owns, refuses to overwrite it, and
+quarantines the set with a message to inspect or remove the file. The operator
+removes the file and presses Re-Match. Overwriting such a file automatically was
+tried and rejected: a matching page count does not prove the file is this set's,
+and a person's own file must never be overwritten. Pinned by
+`test_known_limitation_leftover_packet_after_a_crash_quarantines_the_set`.
+
+### L — a rejected incomplete PDF leaves no row on the dashboard
+
+A file that is not a complete, openable PDF (a truncated copy, a corrupt file or
+a password-protected one) is rejected at ingestion. A file written within the
+last five minutes stays in the input folder to be retried (it may still be
+copying); an older one is moved to `quarantine/_documents` with a `.reason.txt`.
+No database row is created, so it does not appear on the dashboard; it shows in
+the sync's error count and in the log. This matches how a non-PDF input is
+treated. Pinned by `tests/test_ingestion_truncated_pdf.py`.
+
+### L — locale assumption
+
+`matching.locale` is a fixed value (`en_IN`), never inferred from a document.
+The client base is **English-language UAE and USA**, which use `.` as the
+decimal separator — identical to `en_IN` — so in practice this is correct.
+
+The one divergence is **Western digit grouping at six digits or more**:
+
+| Printed | `en_IN` (default) | `en_US` |
+|---|---|---|
+| `100,000` | rejected | `100000` |
+| `1,234,567` | rejected | `1234567` |
+| `1,00,000` | `100000` | rejected |
+
+Indian grouping writes six digits as `1,00,000`; Western grouping writes them
+as `100,000`. A row that fails to parse is stored as 0 and the set quarantines
+as `non_positive_quantity` — a **false quarantine, never a wrong merge**.
+
+Everything else in the real range is identical under both locales: whole
+numbers, `.50` decimals, four-digit grouping (`1,234`), and 5-digit round
+numbers. Checked against the client base on 2026-09-29: six-digit quantities
+have never been observed, so this limit is **accepted rather than engineered
+around**. A dual-locale parse (accept when `en_IN` and `en_US` agree, reject
+when they disagree) is the obvious fix if it ever bites, and would be a small,
+contained change to `parse_quantity_scaled`.
+
+**If a six-digit quantity appears in production, the fix is one config line, no
+code:** set `matching.locale: "en_US"` in `config.yaml`.
+
+Two related risks were checked and are *not* real — babel's strict mode rejects
+both under every locale, so they cannot occur:
+
+- comma-as-decimal (`1,5`, `12,50`) — so the "is this 12.5 or 1250?" ambiguity
+  never arises
+- space grouping (`1 000`)
+
+European `1.234` is caught by the 2-significant-decimal rule in §5.
+
+### L — no price flag
+
+Price is not extracted or stored, so a price-only discrepancy is never surfaced
+to the reviewer. Pinned by `test_limitation_price_is_not_extracted`.
+
+### M — a line the VLM could not read is kept, not dropped
+
+A row the VLM returns is **never dropped**. A row without a usable quantity
+is stored with a zero quantity, which the existing `non_positive_quantity`
+guard quarantines — the safe direction, and the reviewer sees the line in
+the quarantine report. A row without a description keeps its quantity and is
+stored with an empty description: the description is a fallback matching
+signal, not a reconciliation signal.
+
+**Why it matters.** Dropping a PO row would remove a line from the baseline
+the DN and SI are compared against, and the set could then merge with that
+line never checked. Kept instead of dropped, the cost is a false quarantine
+on a document the VLM read badly.
+
+### L — the reason on a quarantined set survives the nightly sweep
+
+The sweep reconciles every open set, quarantined ones included. A
+quarantine's plain-language reason is written once and is **not** rewritten by
+a later sweep — a quarantine that reads as "Awaiting further processing"
+tells the reviewer to wait for a set that will never resolve itself. The
+reconciler returns a reason **code**; the code is rendered into the sentence
+the dashboard shows.
+
+### M — a document claimed by a worker that died is re-claimed
+
+Extraction claims a document (`pending` -> `processing`) before the VLM
+call. If the process dies after the claim, the row would stay `processing`
+forever: the recovery sweep only looks at `pending`, and the extraction task
+returns the row unchanged — the document would be reported as processed and
+never read again. A claim older than `extraction.stale_processing_seconds`
+(default 900s, above the worst case of one attempt) is released back to
+`pending` and read again.
+
+### L — a multi-PO document is left for a human by every attach path
+
+A document that shows more than one PO number (`po_reference_ambiguous`) is
+never attached to a PO Set — not by the attach sweep, and not by the
+resolution sweep. Attaching it to any one PO strands the others, so it waits
+for a human. The resolution sweep also matches documents by sibling
+filename prefix, which is the weakest evidence it uses; a filename
+resemblance must not decide what the attach sweep deliberately leaves for a
+human.
+
+**It is visible while it waits.** A document nothing will attach on purpose
+must not wait unseen: it is listed in the Unclassified holding area with a
+"N need a PO number" count, and the operator resolves it by entering the PO
+number there. Naming the PO number clears the ambiguity — a human decision
+supersedes the model's uncertainty — and the document joins the set.
+
+### M — a document that has been read is not read again
+
+A file stays in the input folder until its PO Set merges, so a set that is
+still waiting for a document would otherwise be re-read on every sync: one
+VLM call per file per night, and the attempt count climbing until a
+perfectly good document was marked permanently failed. A document that was
+read successfully is therefore **not** read again. A deliberate re-read is
+the operator's — Redo/Re-extract sets the status back to pending first. A
+document whose extraction **failed** is read again (up to the attempt cap),
+because that is the recovery path.
+
+### L — a document with no PO reference is **held**, not quarantined
+
+A PO carries its own number; a DN and an SI carry the PO they belong to. A
+document of any of those three types that arrives without a readable PO
+reference has **not** been broken — it was read successfully. It is therefore
+**held**: it stays `valid`, attached to nothing, and listed in the Unclassified
+holding area, where the operator can name the PO it belongs to.
+
+Marking it `failed` (the behaviour before 2026-10-22) was wrong twice over: it
+made a perfectly readable document look like a loss, and it hid the document
+from the two content-based sweeps, which place only valid documents — so a DN
+that a later PO would have named could never be picked up.
+
+A **purchase order** is no exception: it used to be stored, attached to
+nothing, in no set and in no view — it simply disappeared. A PO that shows
+more than one PO number mints **no** set (a PO is the only type that can mint
+one) and waits for a human, so the other PO's invoices are not stranded under
+whichever number was named first.
+
+### L — a document that only a filename could have placed waits for a human
+
+The resolution sweep used to attach a document that shared a batch filename
+prefix with a document already in a set (`SIV-DTS-25-477-…` → the set that
+held `SIV-DTS-25-477-…`). That is gone: a filename is not evidence (§2).
+
+**The cost, stated plainly.** In the live vendor run, **26 of 284 documents**
+(9%) carry neither a PO number nor a DN number — the vendor did not print
+one on those pages. Nothing on their face links them to a PO, so under this
+rule they cannot be placed automatically. Each one waits for a human to name
+its PO on the Unclassified page. The alternatives were worse: placing them on
+a name (a guess that can attach a delivery to the wrong purchase order) or
+quarantining them (which hides a readable document and stops the sweeps from
+ever placing it).
+
+### M — a document that failed to read is quarantined, and the operator puts it back
+
+**The rule: anything broken, or that cannot be confirmed, is quarantined.**
+Nothing uncertain is allowed to look like normal work, and nothing broken is
+allowed to keep running.
+
+When a document exhausts its attempt cap it is quarantined at both levels that
+apply to it:
+
+- **The document.** Its input-folder copy is removed and the file is copied to
+  `quarantine/_documents/<name>/` with a `QUARANTINE.txt` stating the reason.
+  Every automatic quarantine (document or set) keeps the original filename,
+  writes the same `QUARANTINE.txt` layout (what happened, documents, what to
+  do) and an `audit_log` row (`quarantined`) holding that text. The input copy
+  is removed only after a copy exists in quarantine. Pinned by
+  `tests/test_quarantine_report.py`.
+  This is what stops the loop: `ingest_file` copies into `stored/` and leaves
+  the original in the input folder, and input is only cleared when a set
+  merges, so without this a dead PDF is re-hashed, de-duplicated to the same
+  failed row and re-counted as an error on every run, forever. The `stored/`
+  copy is kept, never moved, so the document row stays valid.
+- **The PO Set, if the document belongs to one.** A set containing a document
+  that cannot be read cannot be verified, so it is moved to `quarantined`
+  rather than left in an apparently-normal `pending` state waiting on a
+  document that is never going to arrive.
+
+**To put a quarantined file back.** Enter its PO number on the unclassified
+row — this attaches it to a PO Set, creating one if needed — then open that set
+and press **Redo/Re-extract**, which resets the attempt cap for every attached
+file and re-runs extraction. Verified end to end by
+`tests/test_failed_document_recovery.py`.
+
+**Why a human has to do that step.** A failed document never produced a PO
+number, so it was never grouped and has no PO Set; the set-scoped
+`POST /po_sets/{id}/redo_extract` cannot reach it. Reclassifying the type
+alone does not help — `POST /unclassified/{id}/reclassify` does not reset the
+attempt count, so a document reclassified as PO, DN or SI keeps its dead
+status and is skipped identically on the next run.
+
+**What stays pending, and why that is not the same thing.** A set with a
+genuinely absent document is left `pending`, not quarantined — the vendor may
+simply not have sent it yet, and POs arrive over days. The engine cannot tell
+"not yet sent" from "sent and broken" until the broken one is attached to the
+set, which is what the PO-number step is for. The deliberate asymmetry: an
+incomplete set never merges either way, so leaving it pending risks nothing.
+
+### M — a re-scanned DN or SI is caught only when the guard can tell it is a copy
+
+A second copy of a delivery note or invoice has different bytes, so it is a second
+document. The `duplicate_document_number` guard quarantines two DNs (or two SIs) in
+one set that share a number AND a line number: the key ignores case, punctuation and
+leading zeros ("DN-0077" = "DN-77"), line numbers are compared the way matching does
+("1" = "01"), and documents with no readable number are compared among themselves.
+Pages of one document with different lines still sum. The remaining holes: a copy
+whose number was read as a genuinely different string ("DN-77" vs "DN-71") or whose
+lines were read under different numbers escapes the guard, and a re-scan of a document
+whose only copy sits in a different set cannot be seen. In those cases a person checking
+the numbers printed on every document of the packet is the control. The pure comparison
+still sums (`test_known_limitation_rescanned_dn_quantities_are_summed`); the engine-level
+guard is pinned by `tests/test_core_review_fixes.py` and `tests/test_duplicate_document_number.py`.
+
+### M — a numberless row can match a description that differs by one token
+
+The description fallback accepts token-sort similarity of 85 % or more. One
+token that changes the item, such as a size or rating, still clears it: a
+numberless vendor row `Gate valve 4in CL150` attaches to PO line
+`Gate valve 2in CL150`. The link is recorded only as an advisory
+`description_match` flag, not as a quantity or identification diff, so if the
+quantities agree the set can merge.
+
+**Real-world consequence.** A different-size item can merge against the wrong
+PO line. It is the description-fallback form of the H entry above.
+
+> Mitigation today: a person reviews the packet. The description-match flag
+> names the PO line each row was linked to, and the reviewer checks the item.
+> Pinned by `test_known_limitation_numberless_row_matches_a_size_variant_by_description`.
+
+### L — zeros after a dash, underscore or slash are stripped
+
+`normalize_line_no` strips leading zeros after `-`, `_` and `/`, as its docstring
+states, so `1-05` and `1-5` share a key. A dotted segment keeps its zeros, so
+`1.05` and `1.5` stay distinct.
+
+**Real-world consequence.** Two lines printed as `1-05` and `1-5` would be
+summed as one. Such a pair is not expected from the current vendors.
+
+> Mitigation today: a person reviews the packet. Pinned by
+> `test_known_limitation_zeros_after_a_dash_are_stripped`.
+
+### L — PO separators are flattened, so distinct POs can share a key
+
+`normalize_po_no` drops every separator on purpose, so `D7264-PO-186000-013-01`
+and `D7264-PO186000-013-01-` agree. The cost: `12-345` and `123-45` are the same
+key, `12345`. Two different POs that differ only in where a separator sits would
+be grouped into one set.
+
+> Mitigation today: a person reviews the packet. Pinned by
+> `test_known_limitation_po_separators_are_flattened`.
+
+### L — a PO number that starts with the letters PO loses them
+
+The leading `PO` label is stripped even when it is part of the number, so
+`POST123` keys as `123` with letters `ST` (the key is the digits). A document
+that prints `ST123` or a plain `123` groups with it.
+
+> Mitigation today: a person reviews the packet. Pinned by
+> `test_known_limitation_po_prefix_strip_eats_the_letters_po`.
+
+### M — the PO key is the digits; letters only veto a clash
+
+The grouping key is the digits of the PO number. Letters on one side only do
+not split a PO (`60213576 OPG` = `60213576`, `P213899` = `213899`), so a plain
+`213899` from a different vendor would join the `P213899` set. Letters on both
+sides that differ (`TOGA-PO-25-26-163` vs `ARM-PO-25-26-163`) are held
+(`po_letters_conflict`), and reconcile quarantines a set whose documents carry
+two different letter groups (`po_reference_mismatch`). Accepted failures:
+`J255-300115876` keys as `255300115876` and never joins a plain `300115876`;
+a PO number with no digits (`OPG`) has no key and is held. Pinned by `tests/test_po_digit_key.py`.
+
+**Fresh database required.** Migration `a9b0c1d2e3f4` adds `po_no_letters` but does
+not rewrite `po_no_normalized` keys created before the digit key. A database from
+before this change must not be upgraded in place: open sets would not receive new
+DN/SI documents, re-reading their documents would raise a drift quarantine, and
+a re-uploaded PO would mint a second open set. Start from a fresh database
+(`scripts/migrate_db.py`).
+
+> Mitigation today: quantities must still agree exactly, and a person reviews
+> the packet. Pinned by
+> `test_known_limitation_letters_on_one_side_join_any_po_with_the_same_digits`,
+> `test_known_limitation_j_prefix_digits_do_not_match_the_plain_number`,
+> `test_known_limitation_a_po_number_without_digits_never_groups`.
+
+### L — a bare `R` revision stays in the key
+
+`Rev`/`Revision` is stripped as a revision, also when glued to the number
+(`161538Rev2` = `161538`). A bare `R` is not: `161538 R2` keys as `1615382`
+with letter `R`. It waits unattached rather than joining `161538`, but it would
+join a genuine open PO `1615382`, where only quantities keep it from merging.
+Pinned by `test_known_limitation_a_bare_r_revision_stays_in_the_key`.
+
+### L — a document over `vlm.max_pages` pages is not read
+
+Pages are sent to the model as 150 DPI images, at most `vlm.max_pages`
+(default 30) per document. A longer file, a page larger than about A0, or more
+than 40 MB of page images fails extraction before any request is sent and is
+shown as a failed document, like any unreadable file. A combined packet over the limit is
+therefore never split. Pinned by
+`test_page_cap_refuses_before_a_request_is_built`.
+
+### L — a permanently unreadable input file is retried every night
+
+A read or stat error on an input file (`PermissionError`, a broken share handle) leaves the
+file where it is and is counted as a sync error; the next sync tries again. This protects a
+good file that antivirus or a backup tool held for a moment. A file that stays unreadable is
+therefore never moved to quarantine and has no Document row: its only trace is the error
+count and the log. Content problems (not a PDF, over the size cap, incomplete) are still
+quarantined at once. Pinned by `test_known_limitation_unreadable_input_file_stays_for_next_sync`.
+
+### M — Re-Extract can overwrite a document type the operator set
+
+Re-Extract re-reads a document and takes the type the model returns, so a type
+the operator set by hand (for example DN) is replaced by the new reading. Fails
+safe: if the new type is UNKNOWN the set quarantines (`unclassified_document_in_set`);
+if it is another valid type the set reconciles on that type. Nothing is merged on
+a type the operator did not confirm, but the operator's correction can be lost
+silently. Not yet pinned by a test.
+
+### M — a DN number that matches another vendor's set holds the set until confirmed
+
+The sweep that places unattached documents matches a DN on its DN number alone
+against open sets; it cannot check the vendor. Because the set's PO number is copied
+onto the document, the PO-mismatch guard could not see a foreign DN placed this way
+(proven by the 2026-10-24 review: a different vendor's DN 1001 completed a set and it
+merged). Now such a document is marked (`documents.po_no_source = 'dn_number'`) and the
+set stays `pending` with reason `placed_by_number_only` until an operator presses
+"Confirm it belongs here" on the set page (audited) or Force Merges. Placement through the
+PO's own per-line DN reference is not marked. Pinned by
+`test_a_dn_placed_by_its_number_alone_holds_the_set_instead_of_merging`,
+`test_the_operator_confirms_the_placement_and_it_is_audited`.
+Since 2026-10-25 (Opus review B3) the DN-number sweep skips a document that prints its own PO
+number: it stays for the PO-based attach sweep, so another vendor's repeated DN number can no
+longer pull it into an unrelated set. Pinned by
+`test_dn_number_collision_does_not_attach_a_document_with_its_own_po`. The duplicate
+DN/SI guard (Opus review B2) now also compares a copy with an unreadable number against every
+other document in the pool, and folds look-alike characters (O/0, I/L/1) in the number it
+compares; this only adds holds.
+
+### L — reclassify attaches a document before it takes the set lock
+
+Reclassify attaches the document to a set before it acquires that set's lock. A
+merge of the same set that is in progress can therefore see the document arrive
+after its check. The merge's pre-write check (`documents_changed_during_merge`)
+catches a change made before the packet is written, but a change that lands
+between that check and the write is not caught. The window is small. Not yet
+pinned by a test.
+
+### L — some operator actions write no audit row
+
+Reclassify, Re-Extract (`redo_*`) and the customs/shipping upload write no `audit_log` row; they are not yet
+pinned. Toggling the customs requirement now writes one (H1-5, `test_customs_toggle_writes_an_audit_row`).
+
+### L — a manual Scan needs the Prefect server
+
+The manual Scan Input Folder action runs through Prefect, so it needs
+`AAMMerger-PrefectServer` running. The nightly sync has the same dependency. If the
+server is down the scan cannot run. Start `AAMMerger-PrefectServer` (see
+DELIVERY.md). Not yet pinned by a test.
+
+### L — the server accepts any Host header
+
+`server.allowed_hosts` defaults to `["*"]`, so the dashboard answers any host
+name. This is deliberate for a LAN server behind a changing IP. The cost is that
+DNS rebinding is not blocked until real names are listed, and it exposes WRITES too:
+a page on an attacker's name that resolves to the server's LAN address sends both
+`Host` and `Origin` as that name, so the Origin check (which compares the host
+name and port) lets Force Merge, archive and upload through. Listing the PC's real name or
+address in `server.allowed_hosts` is therefore a required install step, not hardening
+(DELIVERY step 6). The Origin check compares the host name and the port (H1-1; the scheme is not compared
+because the service has no TLS and may sit behind a TLS-terminating proxy), so another web
+app on the same machine on a different port can no longer forge requests. A proxy that
+strips the port from `Host` on a non-default port is not supported. Pinned by
+`test_known_limitation_allowed_hosts_defaults_to_any_host`.
+
+### L — the quantity parser accepts exponent and underscore forms
+
+The strict babel parse accepts `1e2` and `1_000`, read as 100 and 1000. A vendor
+printing a quantity in these forms gets a number, not a quarantine. Pinned by
+`test_known_limitation_sanitizer_accepts_exponent_and_underscore_forms`.
+
+### L — a customs append that fails waits for the next sync
+
+When the customs requirement is on for a set that is already merged, the packet
+must be rebuilt to include the CUSTOMS and SHIPPING documents. If the rebuild
+fails (for example the set's lock is busy, or the write fails), the set is flagged
+`customs_append_pending` and the packet on disk is left without those documents.
+The flag is set by the toggle, the upload and a reclassify that attaches customs
+or shipping documents. The set's badge reads **Customs append pending** and its
+detail page reads **Merged • customs not yet in packet**. The toggle response
+carries `append_pending` and a scrubbed `append_error`, and the page shows a
+warning that the packet was NOT rebuilt and will retry on the next sync. The nightly
+sync retries each flagged merged set under that set's lock. The flag clears when the
+append succeeds, or when the toggle is switched off. Until then the packet is out of
+date, and the badge is the only sign of it. Pinned by
+`test_customs_append_failure_is_persisted_and_retried_by_sync` and
+`test_badge_shows_when_append_pending` in `tests/test_mvp_blockers.py`.
+
+---
+
+## 9. Non-goals
+
+Not built, by decision: authentication and roles (accepted risk, LAN-only
+tool); multi-server deployment; post-merge distribution, email drafting,
+company lookup; a UI mode for editing extracted line items; per-document locale
+detection; UOM conversion; price reconciliation.
+
+---
+
+## 10. Operating notes
+
+**No authentication.** Anyone with LAN access can force-merge or delete. This is
+a documented accepted risk, not an oversight. The audit log is the
+accountability record, not access control.
+
+**`cfg_path` is not a parameter.** `POST /sync` and `GET /sync/status` once
+accepted a caller-supplied config path, which let any LAN host redirect the
+whole pipeline and create directories as the service account. That parameter
+has been removed. Do not reintroduce a request-supplied path.
+
+**Windows paths in `config.yaml`.** Use forward slashes, or single quotes. A
+double-quoted `C:\AAM\input` is a YAML escape error and the app refuses to
+start.
+
+**`backup.*` config is not wired.** NFR-6 backup is a runbook item
+(`DEPLOY.md`), not code. `make backup` is Linux-only and unusable on the WS2016
+target — do a SQLite `.backup` from a Windows host instead.
+
+**`max_concurrent_extraction_tasks` is not enforced.** Extraction is
+sequential, so the cap is satisfied trivially. Do not treat the setting as a
+concurrency control.
+
+**A run summary is only as honest as its worst document.** The sync summary
+(`processed` / `extracted` / `errors`) must be computed from the *persisted
+document row*, never from whether a Prefect task raised. Prefect places a task
+in a `COMPLETED` state whenever it returns any Python object, and
+`extract_document` deliberately returns normally once a document has exhausted
+its attempt cap — a terminal failure. Trusting the task return is how a
+permanently lost document came to be reported as `errors: 0, extracted: 4`
+against three real successes. Read
+`app/flows/sync.py::_persisted_extraction_status`. The same principle as
+batch-recovery practice generally: the updated tables are the point of truth,
+not what the log claims.
+
+**A failed extraction is quarantined.** Reaching the attempt cap marks the
+document `failed`, logs at ERROR, counts in the summary, and moves the file
+out of the input folder into `quarantine/_documents/` — see §8 for the rule and
+for how an operator puts it back.
+
+**The unclassified view holds losses, not just unknowns.** A document whose
+extraction failed keeps `doc_type = UNKNOWN` (nothing advances it), so it
+stays listed in the holding area. The row and the page header both label and
+count it as failed, because a reviewer must be able to tell a file that will
+never be read from one that is merely waiting to be classified.
+
+**A PO Set's detail page lists its files, with their read state.** The set's
+own status does not explain why it is stuck: a set on `pending` because its SI
+never parsed is indistinguishable from one still waiting for the vendor to
+send a third document. Listing the files — filename, type, extraction badge,
+line count — is what makes **Redo/Re-extract** an informed action rather than a
+guess, and it is where a reviewer confirms a retry actually worked.
+
+---
+
+## 11. Changing this product
+
+1. Read this document first. It is the contract.
+2. A change to the rule in §2 needs a decision recorded here, in this file, and
+   a test that fails before the change and passes after.
+3. If you remove a guard, add the limitation to §8 **and** pin it with a test
+   named `test_limitation_*` or `test_known_limitation_*`. A removed guard that
+   leaves no trace is how this document came to be needed.
+4. `AAM_merger_V3_SPEC.md` is history. If you change §2, update or strike the
+   corresponding FR there too, or explicitly mark it superseded — do not leave
+   two documents disagreeing.

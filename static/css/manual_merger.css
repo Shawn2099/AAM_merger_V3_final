@@ -1,0 +1,475 @@
+/* ==========================================================================
+   Manual PDF merger — tool-specific layout
+   Uses the design tokens from theme.css so it belongs to the same program,
+   with an indigo workspace and an amber "standalone" marker.
+   ========================================================================== */
+
+.mm-page {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.mm-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 8px 0 22px;
+}
+
+.mm-hero-copy { max-width: 68ch; }
+
+.mm-eyebrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  margin-bottom: 10px;
+}
+
+.mm-sep { color: var(--text-light); }
+
+.mm-title {
+  font-size: 2rem;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+  font-weight: 800;
+  color: var(--text-main);
+  margin-bottom: 8px;
+}
+
+.mm-subtitle {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  max-width: 62ch;
+}
+
+.mm-back { flex: 0 0 auto; margin-top: 22px; }
+
+/* ---------------------------------------------------------------- layout */
+.mm-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 20px;
+  align-items: start;
+}
+
+.mm-side {
+  position: sticky;
+  top: 84px;
+  margin-bottom: 0;
+}
+
+.mm-main { margin-bottom: 0; }
+
+/* ------------------------------------------------------------- dropzone */
+.mm-dropzone {
+  border: 2px dashed var(--border-focus);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.06), transparent 60%),
+    #fbfcff;
+  padding: 30px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.mm-dropzone:hover,
+.mm-dropzone:focus-visible {
+  border-color: var(--primary);
+  background-color: var(--primary-light);
+  outline: none;
+}
+
+.mm-dropzone:focus-visible {
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.18);
+}
+
+.mm-dropzone.is-dragging {
+  border-color: var(--primary);
+  background-color: var(--primary-light);
+  transform: scale(1.005);
+}
+
+.mm-drop-icon {
+  width: 54px;
+  height: 54px;
+  margin: 0 auto 12px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  font-size: 1.55rem;
+}
+
+.mm-drop-title {
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 3px;
+}
+
+.mm-drop-copy {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  margin-bottom: 10px;
+}
+
+.mm-link {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.mm-drop-meta {
+  color: var(--text-light);
+  font-size: 0.76rem;
+}
+
+/* ------------------------------------------------------------ file cards */
+.mm-file-list {
+  list-style: none;
+  margin: 16px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mm-file {
+  display: grid;
+  grid-template-columns: 22px 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px 9px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #ffffff;
+  transition: border-color 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+}
+
+.mm-file:hover {
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-sm);
+}
+
+.mm-file.is-dragging { opacity: 0.4; }
+
+.mm-file.is-over {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.18);
+}
+
+.mm-file.has-error {
+  border-color: #fca5a5;
+  background: #fff7f7;
+}
+
+.mm-handle {
+  color: var(--text-light);
+  cursor: grab;
+  font-size: 0.95rem;
+  letter-spacing: -2px;
+  user-select: none;
+  text-align: center;
+}
+
+.mm-handle:active { cursor: grabbing; }
+
+.mm-file-icon {
+  width: 36px;
+  height: 42px;
+  border-radius: 5px;
+  border: 1px solid #fecaca;
+  background: #fff1f2;
+  color: #b91c1c;
+  display: grid;
+  place-items: center;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  flex: 0 0 auto;
+}
+
+.mm-file-body { min-width: 0; }
+
+.mm-file-name {
+  display: block;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mm-file-meta {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  margin-top: 1px;
+}
+
+.mm-file-error {
+  display: block;
+  color: #b91c1c;
+  font-size: 0.76rem;
+  font-weight: 500;
+  margin-top: 3px;
+}
+
+.mm-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.mm-icon-btn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.mm-icon-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: var(--text-main);
+  border-color: var(--border);
+}
+
+.mm-icon-btn.mm-remove:hover:not(:disabled) {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.mm-icon-btn:disabled { opacity: 0.28; cursor: not-allowed; }
+
+.mm-icon-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.mm-empty {
+  margin-top: 16px;
+  padding: 14px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: #fcfdff;
+}
+
+.mm-summary {
+  margin-top: 14px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.mm-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* --------------------------------------------------------------- output */
+.mm-label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--text-main);
+  margin: 18px 0 6px;
+}
+
+.mm-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  color: var(--text-main);
+  background: #ffffff;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.mm-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.mm-input.is-invalid {
+  border-color: #fca5a5;
+  background: #fffdfd;
+}
+
+.mm-input.is-invalid:focus {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12);
+}
+
+.mm-name-error {
+  color: #b91c1c;
+  font-size: 0.76rem;
+  font-weight: 500;
+  margin-top: 6px;
+}
+
+.mm-name-error[hidden] { display: none; }
+
+.mm-hint {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  margin-top: 6px;
+}
+
+.mm-merge {
+  width: 100%;
+  margin-top: 20px;
+}
+
+.mm-progress {
+  height: 8px;
+  margin-top: 14px;
+  border-radius: var(--radius-full);
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.mm-progress-bar {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6366f1, var(--primary));
+  transition: width 140ms linear;
+}
+
+.mm-status {
+  min-height: 1.2em;
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.mm-status.is-success { color: var(--clr-merged-text); font-weight: 600; }
+.mm-status.is-error { color: #b91c1c; font-weight: 600; }
+
+.mm-notes {
+  list-style: none;
+  margin: 20px 0 0;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mm-notes li {
+  position: relative;
+  padding-left: 14px;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.mm-notes li::before {
+  content: "•";
+  position: absolute;
+  left: 2px;
+  color: var(--text-light);
+}
+
+/* ---------------------------------------------------------------- alert */
+.mm-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-md);
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.mm-alert[hidden] { display: none; }
+
+.mm-alert.is-warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.mm-alert-icon {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: currentColor;
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 800;
+  margin-top: 1px;
+}
+
+.mm-alert-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.mm-alert-body strong { font-size: 0.86rem; }
+
+.mm-alert-close {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: currentColor;
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  opacity: 0.7;
+}
+
+.mm-alert-close:hover { opacity: 1; }
+
+/* ------------------------------------------------------------ responsive */
+@media (max-width: 900px) {
+  .mm-grid { grid-template-columns: 1fr; }
+  .mm-side { position: static; }
+  .mm-hero { flex-direction: column; gap: 10px; }
+  .mm-back { margin-top: 0; }
+}
+
+@media (max-width: 560px) {
+  .mm-title { font-size: 1.65rem; }
+  .mm-file { grid-template-columns: 18px 34px minmax(0, 1fr); row-gap: 6px; }
+  .mm-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .mm-dropzone { padding: 24px 14px; }
+  .mm-toolbar { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mm-dropzone,
+  .mm-file,
+  .mm-progress-bar,
+  .mm-icon-btn { transition: none; }
+  .mm-dropzone.is-dragging { transform: none; }
+}

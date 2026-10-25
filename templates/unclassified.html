@@ -8,10 +8,22 @@
     <div>
       <h2 class="card-title">
         <span>❓ Unclassified Documents Holding Area</span>
-        <span class="badge badge-gray" style="font-size:0.8rem;">{{ documents|length }} pending</span>
+        <span class="badge badge-gray" data-testid="unclassified-count" style="font-size:0.8rem;">{{ documents|length }} awaiting classification</span>
+        {% if failed_count %}
+        <span class="badge badge-failed" style="font-size:0.8rem;" title="Extraction permanently failed — these will not be retried automatically.">{{ failed_count }} failed</span>
+        {% endif %}
+        {% if ambiguous_count %}
+        <span class="badge badge-quarantined" style="font-size:0.8rem;" title="These documents show more than one PO number. Nothing will attach them automatically — enter the PO number to place them.">{{ ambiguous_count }} need a PO number</span>
+        {% endif %}
+        {% if unplaced_count %}
+        <span class="badge badge-pending" style="font-size:0.8rem;" title="These were read successfully but are not in a PO Set yet. Enter the PO number to place them.">{{ unplaced_count }} waiting to be placed</span>
+        {% endif %}
       </h2>
       <p class="card-subtitle">
-        These documents could not be automatically identified during ingestion. Review each document's PDF and assign its type to route it to the pipeline.
+        Documents that are not in a PO Set yet: files that could not be
+        identified, files that failed to read, files showing more than one PO
+        number, and files read successfully but not placed. Preview one, then
+        one, then assign its type and/or the PO number to route it.
       </p>
     </div>
   </div>
@@ -23,6 +35,7 @@
         <tr>
           <th>Document</th>
           <th>Received</th>
+          <th>Extraction</th>
           <th>Assign Document Type</th>
           <th>PO Number</th>
           <th style="text-align:right;">Actions</th>
@@ -30,42 +43,83 @@
       </thead>
       <tbody>
         {% for doc in documents %}
-        <tr id="doc-row-{{ doc.id }}" x-data="{ poInput: '', get norm() { return this.poInput.replace(/[^A-Za-z0-9]/g, '').toUpperCase(); } }">
-          <form method="post" action="/unclassified/{{ doc.id }}/reclassify" hx-post="/unclassified/{{ doc.id }}/reclassify" hx-target="#doc-row-{{ doc.id }}" hx-swap="outerHTML">
+        <tr id="doc-row-{{ doc.id }}" data-testid="unclassified-row" data-doc-id="{{ doc.id }}" x-data="{ poInput: '', docType: '', norm: '', refreshNorm() { const q = this.poInput.trim(); if (!q) { this.norm = ''; return; } fetch('/unclassified/normalize?po_no=' + encodeURIComponent(q)).then(r => r.json()).then(d => { this.norm = d.normalized; }).catch(() => { this.norm = ''; }); } }">
             <td>
               <div style="font-weight:600; color:var(--text-main);">{{ doc.original_filename }}</div>
               <div class="muted" style="font-size:0.75rem; font-family:ui-monospace, monospace;">
                 SHA: {{ doc.sha256_hash[:12] }}…
+                {% if doc.po_no_normalized %}<br>Extracted PO: {{ doc.po_no_raw or doc.po_no_normalized }} (key {{ doc.po_no_normalized }}){% endif %}
               </div>
+              {% if hold_notes and hold_notes.get(doc.id) %}
+              <div style="font-size:0.75rem; margin-top:4px; color:var(--danger, #b91c1c);">{{ hold_notes[doc.id] }}</div>
+              {% endif %}
+              {% if doc.po_reference_ambiguous %}
+              {# One aggregate badge is not enough: with several held rows the
+                 operator cannot tell which file shows two PO numbers. #}
+              <div style="font-size:0.75rem; margin-top:4px; color:var(--danger, #b91c1c); font-weight:600;">
+                ⚠️ multiple PO numbers — cannot be placed automatically
+              </div>
+              <div class="muted" style="font-size:0.72rem; margin-top:2px;">
+                Nothing will attach this file. Type the PO number to place it.
+              </div>
+              {% endif %}
             </td>
 
             <td class="muted" style="font-size:0.85rem;">
               {{ doc.created_at.strftime('%b %d, %H:%M') if doc.created_at else '—' }}
             </td>
 
+            {# Extraction outcome. A document that is `failed` has exhausted
+               its attempt cap and will NOT be retried until an operator
+               resets the count, so it must be distinguishable at a glance
+               from one still waiting to be read. #}
             <td>
-              <select name="doc_type" required style="padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); font-weight:600; background:#fff; width:100%; max-width:240px;">
+              {% set es = doc.extraction_status.value if doc.extraction_status else 'unknown' %}
+              {% if es == 'failed' %}
+                <span class="badge badge-failed" style="font-size:0.75rem;">Failed</span>
+                <div class="muted" style="font-size:0.7rem; margin-top:3px;">
+                  {{ doc.extraction_attempt_count or 0 }}/{{ attempt_cap }} attempts.<br>
+                  Quarantined — file copied to the quarantine folder.
+                  {% if doc.ingest_reject_reason %}<br><strong>Rejected on arrival:</strong> {{ doc.ingest_reject_reason }}{% endif %}
+                </div>
+              {% elif es == 'valid' %}
+                <span class="badge badge-merged" style="font-size:0.75rem;">Read</span>
+              {% elif es == 'processing' %}
+                <span class="badge badge-pending" style="font-size:0.75rem;">Reading…</span>
+              {% else %}
+                <span class="badge badge-pending" style="font-size:0.75rem;">Not read</span>
+              {% endif %}
+            </td>
+
+            <td>
+              <select name="doc_type" data-testid="select-doc-type" required x-model="docType" style="padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); font-weight:600; background:#fff; width:100%; max-width:240px;">
                 <option value="">-- Select Type --</option>
                 <option value="PO">📄 Purchase Order (PO)</option>
                 <option value="DN">📦 Delivery Note (DN)</option>
                 <option value="SI">🧾 Sales Invoice (SI)</option>
-                <option value="COMBINED">📑 Combined Packet (PO+DN+SI)</option>
                 <option value="CUSTOMS">🛃 Customs Declaration</option>
                 <option value="SHIPPING">🚚 Shipping Document</option>
-                <option value="COMMERCIAL_INVOICE">💼 Commercial Invoice</option>
               </select>
+              {# Read-only, never the control's value: the operator must still
+                 choose deliberately before Route enables (U-03). #}
+              {% set stored_type = doc.doc_type.value if doc.doc_type else 'UNKNOWN' %}
+              {% if stored_type != 'UNKNOWN' %}
+              <div class="muted" style="font-size:0.72rem; margin-top:3px;">Stored type: {{ stored_type }}</div>
+              {% endif %}
             </td>
 
             <td>
               <input 
                 type="text" 
                 name="po_no" 
+                data-testid="input-po-no"
                 placeholder="e.g. PO-210851" 
                 x-model="poInput"
+                @input.debounce.300ms="refreshNorm()"
                 style="padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); width:150px; font-family:ui-monospace, monospace;"
               >
-              <div x-show="poInput.length > 0" class="muted" style="font-size:0.72rem; margin-top:2px;">
-                Normalized: <strong x-text="norm" style="color:var(--primary);"></strong>
+              <div data-testid="po-key-preview" x-show="norm.length > 0" class="muted" style="font-size:0.72rem; margin-top:2px;">
+                Server key: <strong x-text="norm" style="color:var(--primary);"></strong>
               </div>
             </td>
 
@@ -74,22 +128,30 @@
                 <button 
                   type="button"
                   class="btn btn-secondary btn-sm"
-                  @click="$store.pdfDrawer.open('/documents/{{ doc.id }}/preview', '{{ doc.original_filename }}')"
-                  title="Preview PDF in slide-over drawer"
+                  data-preview-url="/documents/{{ doc.id }}/preview"
+                  data-preview-name="{{ doc.original_filename }}"
+                  @click="$store.pdfDrawer.open($el.dataset.previewUrl, $el.dataset.previewName)"
+                  data-testid="btn-preview" title="Preview PDF in slide-over drawer"
                 >
                   <span>👁️ Preview</span>
                 </button>
 
                 <button 
-                  type="submit" 
+                  type="button"
                   class="btn btn-primary btn-sm"
+                  data-testid="btn-route"
+                  hx-post="/unclassified/{{ doc.id }}/reclassify"
+                  hx-target="#doc-row-{{ doc.id }}"
+                  hx-swap="outerHTML"
+                  hx-include="closest tr"
+                  hx-disabled-elt="this"
+                  :disabled="!docType"
                   title="Assign type and route document"
                 >
                   <span>Save &amp; Route</span>
                 </button>
               </div>
             </td>
-          </form>
         </tr>
         {% endfor %}
       </tbody>

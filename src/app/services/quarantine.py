@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
+import logging
+import re
 import shutil
-import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -13,16 +14,374 @@ from sqlalchemy.orm import Session
 from app.core.database import get_engine
 from app.models import AuditAction, AuditLog, Document, LineItem, POSet, POSetStatus
 from app.models.base import Base
+from app.services.manual_merge import manual_merge  # noqa: F401  (re-export, FR-14.11)
+
+logger = logging.getLogger(__name__)
+
+# Windows reserved device names. The production host is Win2016, so a PO
+# number normalising to one of these would create an unusable folder.
+_RESERVED_NAMES = (
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+_MAX_FOLDER_LEN = 80
 
 
-def quarantine_copy(po_set, cfg) -> Path:
-    """Copy every document tied to po_no into quarantine folder (FR-13.3).
+def _source_file(doc) -> Path | None:
+    """The document's stored PDF, or None when the row cannot name a file.
+
+    `Path("")` is `"."`, which exists and would make `shutil.copy` try to copy
+    the working directory. A malformed/blank stored_path is a missing source,
+    not the cwd.
+    """
+    raw = getattr(doc, "stored_path", None)
+    if not raw:
+        return None
+    p = Path(raw)
+    return p if p.is_file() else None
+
+
+def _set_fingerprint(po_set) -> str:
+    """A stable, collision-free discriminator for one PO set.
+
+    Derived from the set's document hashes rather than its id: SQLite reuses
+    the id of a deleted row, so a new set could otherwise inherit an old set's
+    folder and overwrite its QUARANTINE.txt. Re-quarantining the same set gives
+    the same fingerprint, so the folder stays stable across runs.
+    """
+    import hashlib
+
+    hashes = sorted((getattr(d, "sha256_hash", "") or "") for d in (po_set.documents or []))
+    joined = "|".join(hashes)
+    return hashlib.sha1(joined.encode("utf-8", "replace")).hexdigest()[:8]
+
+
+def _safe_po_folder(
+    po_no: str | None, po_set_id: int | None = None, fingerprint: str | None = None
+) -> str:
+    """A filesystem-safe folder name for a PO set.
+
+    Keeps the PO number readable: hyphens, underscores and dots survive, which
+    matters because this is a folder a person opens and reads. Anything that
+    could escape the quarantine root (separators, dots-only names) is stripped,
+    and Windows reserved device names are prefixed. In production
+    `po_no_normalized` is already alphanumeric, so this is a no-op there and a
+    guard for values written directly to the database.
+
+    A blank PO number falls back to UNIDENTIFIED_PO plus a content fingerprint.
+    Without one, every unnumbered set would share a folder, pooling unrelated
+    PDFs and overwriting each other's QUARANTINE.txt. The id is deliberately
+    not used for this: SQLite reuses the id of a deleted row.
+    """
+    raw = "".join(ch for ch in (po_no or "") if ch.isalnum() or ch in "-_.")
+    raw = raw.strip(".-")
+    if not raw or set(raw) <= {"."}:
+        tag = fingerprint or (f"{po_set_id}" if po_set_id is not None else None)
+        return f"UNIDENTIFIED_PO_{tag}"[:_MAX_FOLDER_LEN] if tag else "UNIDENTIFIED_PO"
+    if raw.upper() in _RESERVED_NAMES:
+        raw = f"_{raw}"
+    return raw[:_MAX_FOLDER_LEN]
+
+
+def _format_qty(value) -> str:
+    """Render a scaled-x1000 integer back as a printed quantity."""
+    if value is None:
+        return "-"
+    return f"{int(value) / 1000:g}"
+
+
+# One sentence per reason code telling the operator what to do next. Unknown
+# codes get the generic sentence, so a new reason never produces an empty line.
+WHAT_TO_DO: dict[str, str] = {
+    "document_extraction_failed": "Open the named file; Re-Extract the set or replace the file.",
+    "unclassified_document_in_set": "Reclassify the unclassified document, or remove it.",
+    "multiple_po_documents": "Decide which PO document is correct; remove the other one.",
+    "po_reference_mismatch": "Check the PO number printed on each document; fix the odd one out.",
+    "duplicate_document_number": "Check if the same DN/SI was scanned twice; remove the duplicate.",
+    "po_document_has_no_line_items": "Check the PO has every page; add missing ones, re-extract.",
+    "non_positive_quantity": "Open the document with the bad quantity; fix or replace it.",
+    "unmatched_vendor_line": "Compare DN/SI line numbers with the PO; fix or force-merge.",
+    "quantity_mismatch": "Compare PO, DN and SI quantities on the lines listed; fix the document.",
+    "vendor_document_has_no_line_items": "Open the DN/SI with no items; replace it.",
+    "no_line_item_evidence": "Check the documents are readable and have line items; re-extract.",
+    "packet_naming_failed": "Two packets would get the same name; resolve the PO number clash.",
+    "packet_source_unreadable": "Restore or re-upload the missing PDF, then retry the merge.",
+    "packet_write_failed": "Check the output folder is writable and has free space; retry.",
+}
+_GENERIC_WHAT_TO_DO = "Review the listed documents, fix the source files and re-run the sync."
+
+
+def _reason_sentence(reason: str | None) -> str:
+    from app.services.reconciliation import REASON_TEXT  # lazy: reconciliation imports us
+
+    code = (reason or "").split(":", 1)[0]
+    return REASON_TEXT.get(code) or (reason or "No reason recorded")
+
+
+def _doc_number(doc) -> str:
+    """The document's own number as printed (DN, SI/invoice, or the PO for a PO)."""
+    kind = getattr(doc.doc_type, "value", str(doc.doc_type))
+    if kind == "DN":
+        return doc.dn_no or "-"
+    if kind == "SI":
+        return doc.si_no or doc.invoice_no or "-"
+    return doc.po_no_raw or "-"
+
+
+def _document_rows(docs, names: dict[int, str]) -> list[str]:
+    """Table of the documents: original filename, type, number, PO as printed."""
+    header = f"{'File':<42}{'Type':<10}{'Doc number':<22}PO as printed"
+    out = [header, "-" * 90]
+    for d in docs:
+        kind = getattr(d.doc_type, "value", str(d.doc_type))
+        out.append(
+            f"{(names.get(d.id) or d.original_filename or '?')[:40]:<42}{kind:<10}"
+            f"{_doc_number(d)[:20]:<22}{d.po_no_raw or '-'}"
+        )
+    return out
+
+
+_BAD_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_MAX_FILENAME_LEN = 100
+
+
+def _safe_filename(name: str | None, fallback: str) -> str:
+    """The operator's filename made safe to create on Windows, or `fallback`.
+
+    Strips path parts, characters Windows refuses (`<>:"/\\|?*` and control
+    characters; `:` would otherwise write an alternate data stream), trailing
+    dots/spaces, reserved device stems (CON, NUL, ...), and caps the length so a
+    quarantine folder path stays inside MAX_PATH on Server 2016.
+    """
+    base = re.split(r"[/\\]", name or "")[-1].strip()
+    base = _BAD_FILENAME_CHARS.sub("_", base).strip(" .")
+    if not base:
+        return fallback
+    stem, suffix = Path(base).stem, Path(base).suffix
+    if stem.upper() in _RESERVED_NAMES:
+        stem = f"_{stem}"
+    if len(stem) + len(suffix) > _MAX_FILENAME_LEN:
+        stem = stem[: max(1, _MAX_FILENAME_LEN - len(suffix))]
+    return f"{stem}{suffix}"
+
+
+def _copy_documents(folder: Path, docs) -> dict[int, str]:
+    """Copy each document's stored PDF into `folder` under its ORIGINAL filename.
+
+    A clash (two documents with the same original name, or a name this folder
+    uses for its own files) gets `_2`, `_3`. Order is by document id, so
+    re-quarantining the same set reproduces the same names. Returns
+    {document_id: filename written}.
+    """
+    reserved = {"quarantine.txt", ".po_set_id"}
+    used: set[str] = set()
+    names: dict[int, str] = {}
+    for doc in sorted(docs, key=lambda d: d.id or 0):
+        src = _source_file(doc)
+        if src is None:
+            continue
+        base = _safe_filename(doc.original_filename, src.name)
+        stem, suffix = Path(base).stem, Path(base).suffix or src.suffix
+        candidate, n = f"{stem}{suffix}", 1
+        while candidate.lower() in used or candidate.lower() in reserved:
+            n += 1
+            candidate = f"{stem}_{n}{suffix}"
+        used.add(candidate.lower())
+        try:
+            shutil.copy(str(src), str(folder / candidate))
+        except OSError:
+            # A name the file system still refuses must not stop the report: the
+            # stored name (a hash) always works.
+            logger.warning("Could not copy %s as %s; using its stored name", src, candidate)
+            candidate = src.name
+            shutil.copy(str(src), str(folder / candidate))
+        names[doc.id] = candidate
+    return names
+
+
+def _record_quarantine_audit(po_set_id: int | None, cfg, reason, text: str, **extra) -> None:
+    """Persist what the operator is told, so the audit trail survives the folder."""
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        s.add(
+            AuditLog(
+                po_set_id=po_set_id,
+                action=AuditAction.quarantined,
+                detail=json.dumps({"reason": reason, "report": text, **extra}),
+                source="system",
+            )
+        )
+        s.commit()
+
+
+def _write_quarantine_report(
+    folder: Path,
+    po_no: str | None,
+    status: str,
+    reason: str | None,
+    detail: str | None,
+    flags: list[dict] | None,
+    po_line_qty: dict | None = None,
+    documents: list[str] | None = None,
+) -> str:
+    """Make the folder self-describing. Returns the text written.
+
+    A quarantined folder is a case a human has to work through. Writing the
+    reason and the per-line numbers next to the PDFs means whoever opens the
+    folder can see what the engine could not decide, instead of having to
+    re-derive it.
+    """
+    lines: list[str] = [
+        "QUARANTINED PO SET",
+        "=" * 60,
+        f"PO number   : {po_no or '(none)'}",
+        f"Status      : {status}",
+        f"Reason      : {reason or '(none recorded)'}",
+        f"Detected    : {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        "",
+        "What happened",
+        "-" * 60,
+        _reason_sentence(reason),
+    ]
+    if detail:
+        lines.append(f"Detail: {detail}")
+    if documents:
+        lines += ["", "Documents in this set", "-" * 60, *documents]
+
+    # Every PO line, so the reviewer sees the whole set rather than only the
+    # rows that failed. Flags then overlay the vendor-side numbers.
+    rows: dict[str, dict] = {
+        str(k): {"po": v, "dn": None, "si": None} for k, v in (po_line_qty or {}).items()
+    }
+    notes: list[str] = []
+    for f in flags or []:
+        if f.get("type") in ("line_mapping", "line_mapping_rejected"):
+            notes.append(str(f.get("message") or ""))
+            continue
+        key = str(f.get("line_item_no") or "?")
+        row = rows.setdefault(key, {"po": None, "dn": None, "si": None})
+        pool = (f.get("pool") or "").upper()
+        if f.get("type") == "identification":
+            row["note"] = f.get("reason") or "unmatched"
+            if pool in ("DN", "SI"):
+                row[pool.lower()] = f.get("vendor_quantity")
+        elif pool in ("DN", "SI"):
+            row[pool.lower()] = f.get("vendor_quantity")
+
+    if rows:
+        lines += [
+            "",
+            "Line-item quantities (PO vs sum of vendor lines)",
+            "-" * 60,
+            f"{'Line':<12}{'PO':>12}{'DN':>12}{'SI':>12}   Note",
+        ]
+        for key in sorted(rows, key=lambda k: (len(k), k)):
+            r = rows[key]
+            lines.append(
+                f"{key:<12}{_format_qty(r['po']):>12}{_format_qty(r['dn']):>12}"
+                f"{_format_qty(r['si']):>12}   {r.get('note', '')}"
+            )
+        lines += [
+            "",
+            "These are the exact numbers the engine compared. Reconciliation",
+            "requires PO == sum(DN) and PO == sum(SI) for every line.",
+        ]
+    else:
+        lines += ["", "(no line-item numbers were recorded for this set)"]
+    if notes:
+        lines += ["", "Line numbers", "-" * 60, *notes]
+
+    lines += [
+        "",
+        "What to do",
+        "-" * 60,
+        WHAT_TO_DO.get((reason or "").split(":", 1)[0], _GENERIC_WHAT_TO_DO),
+        "Force-merge ships the packet as-is and needs a written justification.",
+        "",
+    ]
+    text = "\n".join(lines)
+    (folder / "QUARANTINE.txt").write_text(text, encoding="utf-8")
+    return text
+
+
+def _po_line_quantities(po_set) -> dict[str, int]:
+    """Every PO line's quantity, keyed by line number."""
+    from app.services.matching import normalize_line_no
+
+    out: dict[str, int] = {}
+    for doc in po_set.documents or []:
+        if (doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)) != ("PO"):
+            continue
+        for li in doc.line_items or []:
+            key = normalize_line_no(li.line_item_no)
+            if key:
+                out[key] = out.get(key, 0) + (li.quantity or 0)
+    return out
+
+
+def _quarantine_set_folder(ps, cfg) -> Path:
+    """The folder for one set, disambiguated when a PO key is reused.
+
+    A duplicate PO after a merged set is allowed (the merged set is
+    historical), so two sets can share a PO number. Keying the folder only by
+    the number made the second set overwrite the first set's PDFs and
+    QUARANTINE.txt. The marker records the owner; a different owner gets the
+    content fingerprint appended. Re-quarantining the same set reuses its
+    folder.
+    """
+    base = Path(cfg.paths.quarantine_folder)
+    name = _safe_po_folder(ps.po_no_normalized, ps.id, _set_fingerprint(ps))
+    folder = base / name
+    marker = folder / ".po_set_id"
+    if folder.exists():
+        try:
+            owner = marker.read_text(encoding="utf-8").strip() if marker.is_file() else None
+        except OSError:
+            owner = None
+        if owner != str(ps.id):
+            # A third set can share both the PO and the content fingerprint
+            # (archive -> re-upload identical bytes -> quarantine). Keep
+            # incrementing until the folder is either free or already ours.
+            fp = (_set_fingerprint(ps) or str(ps.id))[:8]
+            counter = 2
+            while True:
+                suffix = f"__{fp}" if counter == 2 else f"__{fp}_{counter}"
+                candidate = base / f"{name[:70]}{suffix}"
+                if not candidate.exists():
+                    folder = candidate
+                    break
+                candidate_marker = candidate / ".po_set_id"
+                try:
+                    candidate_owner = (
+                        candidate_marker.read_text(encoding="utf-8").strip()
+                        if candidate_marker.is_file()
+                        else None
+                    )
+                except OSError:
+                    candidate_owner = None
+                if candidate_owner == str(ps.id):
+                    folder = candidate
+                    break
+                counter += 1
+    folder.mkdir(parents=True, exist_ok=True)
+    try:
+        marker.write_text(str(ps.id), encoding="utf-8")
+    except OSError:
+        logger.warning("Could not write quarantine owner marker in %s", folder)
+    return folder
+
+
+def quarantine_copy(
+    po_set, cfg, reason: str | None = None, detail: str | None = None, flags: list | None = None
+) -> Path:
+    """Copy every document tied to po_no into quarantine/<PO_NO>/ (FR-13.3).
 
     Uses shutil.copy (not move) so stored_path and quarantine copies both remain.
+    Writes a QUARANTINE.txt summary so the folder explains itself.
     Returns quarantine folder Path.
     Accepts POSet object or po_set_id int.
     """
-    # handle int id: fetch POSet
     if isinstance(po_set, int):
         eng = get_engine(cfg)
         Base.metadata.create_all(eng)
@@ -32,34 +391,435 @@ def quarantine_copy(po_set, cfg) -> Path:
                 raise ValueError(f"POSet {po_set} not found")
             s.refresh(ps, attribute_names=["documents"])
             # copy within session context while documents are loaded
-            q = Path(cfg.paths.quarantine_folder) / ps.po_no_normalized
-            q.mkdir(parents=True, exist_ok=True)
+            folder = _quarantine_set_folder(ps, cfg)
             docs = list(ps.documents or [])
-            for doc in docs:
-                src = Path(doc.stored_path)
-                if not src.exists():
-                    continue
-                dst = q / src.name
-                shutil.copy(str(src), str(dst))
-            return q
+            names = _copy_documents(folder, docs)
+            doc_rows = _document_rows(docs, names)
+            set_id = ps.id
+            status = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
+            po_no = ps.po_no_normalized
+            po_line_qty = _po_line_quantities(ps)
+    else:
+        folder = _quarantine_set_folder(po_set, cfg)
+        docs = list(po_set.documents or [])
+        names = _copy_documents(folder, docs)
+        doc_rows = _document_rows(docs, names)
+        set_id = po_set.id
+        status = po_set.status.value if hasattr(po_set.status, "value") else str(po_set.status)
+        po_no = po_set.po_no_normalized
+        po_line_qty = _po_line_quantities(po_set)
 
-    q = Path(cfg.paths.quarantine_folder) / po_set.po_no_normalized
-    q.mkdir(parents=True, exist_ok=True)
-    for doc in po_set.documents or []:
-        src = Path(doc.stored_path)
-        if not src.exists():
+    text = _write_quarantine_report(
+        folder, po_no, status, reason, detail, flags, po_line_qty, doc_rows
+    )
+    _record_quarantine_audit(set_id, cfg, reason, text, folder=str(folder))
+    return folder
+
+
+def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
+    """Quarantine a single document that could not be processed.
+
+    A document whose extraction permanently failed is broken, and nothing about
+    it can be confirmed, so it is taken out of the running rather than left
+    where the next sync will pick it up again. `ingest_file` copies into
+    `stored/` and leaves the original in the input folder, and input is only
+    cleared when a PO Set merges — so without this, a dead PDF is re-hashed,
+    de-duplicated to the same failed row and re-counted as an error on every
+    single run, forever.
+
+    The stored copy is kept (never moved) so the document row stays valid and
+    an operator can still attach and retry it. Only the input-folder copy is
+    removed, which is what stops the loop.
+
+    Returns the quarantine folder for the document.
+    """
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        doc = s.get(Document, doc_id)
+        if doc is None:
+            raise ValueError(f"Document {doc_id} not found")
+        stored = Path(doc.stored_path)
+        name = stored.name
+        original = doc.original_filename
+        doc_id_out = doc.id
+        attempts = doc.extraction_attempt_count or 0
+        sha = doc.sha256_hash
+        reject_reason = doc.ingest_reject_reason
+        doc_rows = _document_rows([doc], {})
+        s.expunge(doc)
+
+    folder = Path(cfg.paths.quarantine_folder) / "_documents" / name.replace(".pdf", "")
+    folder.mkdir(parents=True, exist_ok=True)
+    # The copy keeps the operator's own filename (the folder is keyed by hash).
+    out_name = _safe_filename(original, name)
+    if out_name.lower() in ("quarantine.txt", ".po_set_id"):
+        out_name = f"document_{out_name}"
+    from app.services.ingestion import locate_input_copy
+
+    input_copy = locate_input_copy(cfg, original, sha)
+    try:
+        if stored.exists():
+            shutil.copy(str(stored), str(folder / out_name))
+    except OSError:
+        logger.warning("Could not copy stored file %s", stored, exc_info=True)
+    # Remove the input copy here, not only in the sync caller: the report below
+    # tells the operator it was removed, and `extraction._handle_combined`
+    # calls this directly. Match on content, so a same-named unrelated file is
+    # never swept away. The input copy is never removed unless a copy of it now
+    # exists in the quarantine folder (the stored file may be missing).
+    if input_copy is not None and input_copy.is_file():
+        try:
+            import hashlib
+
+            data = input_copy.read_bytes()
+            if hashlib.sha256(data).hexdigest() == sha:
+                if not (folder / out_name).is_file():
+                    (folder / out_name).write_bytes(data)
+                if (folder / out_name).is_file():
+                    input_copy.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove input copy %s", input_copy, exc_info=True)
+    # A renamed byte-identical copy would be re-hashed and re-counted as an error on every
+    # sync, forever. Once a quarantine copy exists, remove every input file with the same
+    # content (the quarantine copy is the durable one).
+    if (folder / out_name).is_file():
+        import hashlib
+
+        from app.services.ingestion import input_pdfs
+
+        for other in input_pdfs(cfg):
+            try:
+                if other.stat().st_size == (folder / out_name).stat().st_size and (
+                    hashlib.sha256(other.read_bytes()).hexdigest() == sha
+                ):
+                    other.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Could not remove duplicate input copy %s", other, exc_info=True)
+    # The text must match the case: a rejected-on-arrival file was never read,
+    # a combined file WAS read but holds several documents, and only a real
+    # extraction failure has an attempt count against the configured cap.
+    from app.services.extraction import _attempt_cap
+
+    attempts_line: list[str] = []
+    if reject_reason:
+        what_happened = (
+            f"This file was rejected on arrival ({reject_reason}) and was never read.",
+            "It has been removed from the input folder so it is not retried nightly.",
+        )
+    elif reason.startswith(("combined_document", "child_recombined", "split_failed")):
+        what_happened = (
+            "This file was read, but it holds several documents in one PDF and was not split,",
+            "so none of its content was used. A person must separate it into single documents.",
+            "It has been removed from the input folder so it is not retried nightly.",
+        )
+    else:
+        attempts_line = [
+            f"Attempts    : {attempts}/{_attempt_cap(cfg)} "
+            "(cap reached, no further automatic attempts)"
+        ]
+        what_happened = (
+            "This file could not be read, so nothing about it could be verified.",
+            "It has been removed from the input folder so it is not retried nightly.",
+        )
+    text = "\n".join(
+        [
+            "QUARANTINED DOCUMENT",
+            "=" * 60,
+            f"File        : {original}",
+            f"Document id : {doc_id_out}",
+            *attempts_line,
+            f"Reason      : {reason}",
+            f"Detected    : {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+            "",
+            "What happened",
+            "-" * 60,
+            *what_happened,
+            "",
+            "Documents in this set",
+            "-" * 60,
+            *doc_rows,
+            "",
+            "What to do",
+            "-" * 60,
+            "Enter its PO number on the Unclassified page to attach it to a PO Set,",
+            "then press Re-extract on that set. Or replace the file with a readable copy.",
+            "",
+        ]
+    )
+    (folder / "QUARANTINE.txt").write_text(text, encoding="utf-8")
+    _record_quarantine_audit(None, cfg, reason, text, document_id=doc_id_out, folder=str(folder))
+    return folder
+
+
+MIN_JUSTIFICATION_CHARS = 20
+
+
+def validate_justification(text: str | None) -> str | None:
+    """Normalize an optional operator justification (v20.5 §audit).
+
+    None/absent stays None so existing callers and the UI keep working. When
+    supplied it must be a real sentence-ish note, not a one-word checkbox.
+    """
+    if text is None:
+        return None
+    cleaned = str(text).strip()
+    if not cleaned:
+        return None
+    if len(cleaned) < MIN_JUSTIFICATION_CHARS:
+        raise ValueError(
+            f"Justification must be at least {MIN_JUSTIFICATION_CHARS} characters "
+            f"(got {len(cleaned)})"
+        )
+    return cleaned
+
+
+def _json_default(value):
+    """Serialize DB values without losing the archive's audit detail."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if hasattr(value, "value"):
+        return value.value
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError(f"not JSON serializable: {type(value)!r}")
+
+
+def _write_json(path: Path, payload) -> None:
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False, default=_json_default),
+        encoding="utf-8",
+    )
+
+
+def _archive_file_name(doc: Document) -> str:
+    """A collision-free archive filename.
+
+    Two documents can legitimately share an original filename (batch exports
+    reuse names), so the archive uses the immutable document id and a hash
+    prefix rather than trusting the vendor's name.
+    """
+    source_name = Path(doc.stored_path).name if doc.stored_path else "missing.pdf"
+    prefix = f"{doc.id:06d}_{(doc.sha256_hash or '')[:12]}"
+    return f"{prefix}_{source_name}"
+
+
+def _copy_doc_to_archive(
+    doc: Document,
+    files_dir: Path,
+    file_rows: list[dict],
+    missing_files: list[dict],
+) -> None:
+    """Copy one document's stored PDF and append its manifest row."""
+    source_path = _source_file(doc)
+    row = {
+        "document_id": doc.id,
+        "sha256_hash": doc.sha256_hash,
+        "original_filename": doc.original_filename,
+        "stored_path": doc.stored_path,
+        "archived_name": None,
+    }
+    if source_path is None:
+        missing_files.append({"document_id": doc.id, "stored_path": doc.stored_path})
+        file_rows.append(row)
+        return
+    dest = files_dir / _archive_file_name(doc)
+    shutil.copy2(source_path, dest)
+    row["archived_name"] = dest.name
+    file_rows.append(row)
+
+
+def _find_existing_archive(archive_root: Path, po_set_id: int, po_no: str | None) -> Path | None:
+    """A complete archive left by a previous attempt whose DB commit failed.
+
+    Reusing it makes a retry idempotent instead of writing a second copy of
+    every PDF. Only folders with both manifests AND a matching manifest count;
+    a half-written staging folder or another database's folder with the same
+    numeric id is ignored.
+    """
+    if not archive_root.exists():
+        return None
+    for candidate in sorted(archive_root.iterdir(), reverse=True):
+        if not candidate.is_dir() or not candidate.name.endswith(f"_{po_set_id}"):
             continue
-        dst = q / src.name
-        shutil.copy(str(src), str(dst))
-    return q
+        if not ((candidate / "ARCHIVE.txt").is_file() and (candidate / "manifest.json").is_file()):
+            continue
+        try:
+            manifest = json.loads((candidate / "manifest.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if manifest.get("po_set_id") != po_set_id:
+            continue
+        if manifest.get("po_no_normalized") != (po_no or ""):
+            continue
+        # A manifest is not proof that its files survived. A partially deleted
+        # export must not be adopted as the archive.
+        if any(
+            row.get("archived_name") and not (candidate / "files" / row["archived_name"]).is_file()
+            for row in manifest.get("files", [])
+        ):
+            continue
+        return candidate
+    return None
 
 
-def delete_quarantined(po_set_id: int, cfg) -> AuditLog:
-    """Delete quarantined POSet DB rows only, keep files, write audit_log (FR-13.6-13.7).
+def _write_archive_manifest(
+    folder: Path,
+    ps: POSet,
+    docs: list[Document],
+    line_items: list[LineItem],
+    audits: list[AuditLog],
+    *,
+    source: str,
+    note: str | None,
+    archived_at: datetime,
+    archive_path: Path,
+    file_rows: list[dict],
+    missing_files: list[dict],
+) -> None:
+    """Write the self-describing export next to the copied PDFs."""
+    po_no = ps.po_no_normalized
+    status = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
+    reason = ps.reconcile_reason or note or "operator archive"
 
-    Removes po_sets + documents + line_items rows scoped to po_set_id.
-    Does NOT delete stored_path files nor quarantine folder copies.
-    Inserts AuditLog(action=quarantine_delete). Verified status==quarantined.
+    _write_json(
+        folder / "po_set.json",
+        {
+            "id": ps.id,
+            "po_no_normalized": po_no,
+            "status": status,
+            "has_customs_toggle": ps.has_customs_toggle,
+            "customs_doc_count": ps.customs_doc_count,
+            "merged_output_path": ps.merged_output_path,
+            "reconcile_reason": ps.reconcile_reason,
+            "description_match_count": ps.description_match_count,
+            "line_mapping_rule": ps.line_mapping_rule,
+            "merged_at": ps.merged_at,
+            "locked_by_action": ps.locked_by_action,
+            "locked_at": ps.locked_at,
+            "created_at": ps.created_at,
+            "updated_at": ps.updated_at,
+            "archived_at": archived_at,
+            "archived_by": source,
+            "archive_reason": reason,
+            "archive_path": str(archive_path),
+        },
+    )
+    _write_json(
+        folder / "documents.json",
+        [
+            {
+                "id": d.id,
+                "sha256_hash": d.sha256_hash,
+                "original_filename": d.original_filename,
+                "stored_path": d.stored_path,
+                "doc_type": d.doc_type,
+                "raw_extraction_json": d.raw_extraction_json,
+                "po_no_raw": d.po_no_raw,
+                "po_no_normalized": d.po_no_normalized,
+                "po_no_source": d.po_no_source,
+                "po_reference_ambiguous": d.po_reference_ambiguous,
+                "dn_no": d.dn_no,
+                "si_no": d.si_no,
+                "invoice_no": d.invoice_no,
+                "extraction_status": d.extraction_status,
+                "extraction_attempt_count": d.extraction_attempt_count,
+                "po_set_id": d.po_set_id,
+                "parent_document_id": d.parent_document_id,
+                "is_split_parent": d.is_split_parent,
+                "split_completed_at": d.split_completed_at,
+                "archived_at": archived_at,
+                "created_at": d.created_at,
+                "updated_at": d.updated_at,
+            }
+            for d in docs
+        ],
+    )
+    _write_json(
+        folder / "line_items.json",
+        [
+            {
+                "id": li.id,
+                "document_id": li.document_id,
+                "line_item_no": li.line_item_no,
+                "description": li.description,
+                "quantity": li.quantity,
+                "dn_no": li.dn_no,
+            }
+            for li in line_items
+        ],
+    )
+    _write_json(
+        folder / "audit_log.json",
+        [
+            {
+                "id": a.id,
+                "po_set_id": a.po_set_id,
+                "action": a.action,
+                "detail": a.detail,
+                "justification": a.justification,
+                "timestamp": a.timestamp,
+                "source": a.source,
+            }
+            for a in audits
+        ],
+    )
+    _write_json(
+        folder / "manifest.json",
+        {
+            "po_no_normalized": po_no,
+            "po_set_id": ps.id,
+            "archived_at": archived_at,
+            "archived_by": source,
+            "archive_reason": reason,
+            "document_count": len(docs),
+            "line_item_count": len(line_items),
+            "audit_count": len(audits),
+            "files": file_rows,
+            "missing_files": missing_files,
+        },
+    )
+    lines = [
+        "ARCHIVED PO SET",
+        "=" * 60,
+        f"PO number      : {po_no or '(none)'}",
+        f"PO Set id      : {ps.id}",
+        f"Status         : {status}",
+        f"Reason         : {reason}",
+        f"Archived at    : {archived_at.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        f"Archived by    : {source}",
+        f"Justification  : {note or '(none)'}",
+        f"Documents      : {len(docs)}",
+        f"Line items     : {len(line_items)}",
+        f"Audit rows     : {len(audits)}",
+        f"Files copied   : {len(file_rows)}",
+        f"Files missing  : {len(missing_files)}",
+        "",
+        "This set is NOT deleted. The database rows remain and are hidden from",
+        "the active worklists. Re-ingesting these exact bytes creates a new",
+        "active document; the archived row no longer reserves the hash.",
+    ]
+    if missing_files:
+        lines += ["", "Missing stored files (recorded, not silently ignored):"]
+        for item in missing_files:
+            lines.append(f"  - document {item['document_id']}: {item['stored_path']}")
+    (folder / "ARCHIVE.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def archive_quarantined(
+    po_set_id: int, cfg, justification: str | None = None, source: str = "system"
+) -> AuditLog:
+    """Archive a quarantined PO Set without deleting a single row.
+
+    The exported folder contains every stored PDF (copied, never moved), the
+    full PO Set/document/line-item/audit rows as JSON, a hash manifest and a
+    human-readable ARCHIVE.txt. The set's documents and the set itself are
+    marked `archived_at`; worklists and grouping ignore them.
+
+    Input-folder copies whose CONTENT matches one of the set's documents are
+    moved into the export's ``input/`` folder so the next sync cannot
+    resurrect the set. A newer active document with the same bytes is left
+    alone: re-uploading after an archive is a supported workflow.
     """
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
@@ -67,30 +827,237 @@ def delete_quarantined(po_set_id: int, cfg) -> AuditLog:
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise ValueError(f"POSet {po_set_id} not found")
-        # verify quarantined status (handle both enum and string)
+
+        # Idempotent: a second Delete click must not write a second export.
+        if ps.archived_at is not None:
+            existing = (
+                s.query(AuditLog)
+                .filter(
+                    AuditLog.po_set_id == po_set_id,
+                    AuditLog.action == AuditAction.quarantine_delete,
+                )
+                .order_by(AuditLog.id.desc())
+                .first()
+            )
+            if existing is not None:
+                return existing
+            audit = AuditLog(
+                po_set_id=po_set_id,
+                action=AuditAction.quarantine_delete,
+                detail=json.dumps(
+                    {
+                        "archived": True,
+                        "already_archived": True,
+                        "archive_path": ps.archive_path,
+                    }
+                ),
+                source=source,
+                justification=validate_justification(justification),
+            )
+            s.add(audit)
+            s.commit()
+            s.refresh(audit)
+            return audit
+
+        note = validate_justification(justification)
         status_val = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
         if status_val != POSetStatus.quarantined.value:
             raise ValueError(f"POSet {po_set_id} is not quarantined (status={status_val})")
-        po_no = ps.po_no_normalized
-        # collect doc ids for line_items deletion
-        docs = s.query(Document).filter_by(po_set_id=po_set_id).all()
+
+        docs = s.query(Document).filter_by(po_set_id=po_set_id).order_by(Document.id).all()
         doc_ids = [d.id for d in docs]
-        if doc_ids:
-            s.query(LineItem).filter(LineItem.document_id.in_(doc_ids)).delete(
-                synchronize_session=False
+        line_items = (
+            s.query(LineItem).filter(LineItem.document_id.in_(doc_ids)).order_by(LineItem.id).all()
+            if doc_ids
+            else []
+        )
+        audits = (
+            s.query(AuditLog).filter(AuditLog.po_set_id == po_set_id).order_by(AuditLog.id).all()
+        )
+
+        archive_root = Path(cfg.paths.archive_folder)
+        archive_root.mkdir(parents=True, exist_ok=True)
+        archived_at = datetime.now(UTC)
+
+        file_rows: list[dict] = []
+        missing_files: list[dict] = []
+
+        final_folder = _find_existing_archive(archive_root, po_set_id, ps.po_no_normalized)
+        if final_folder is None:
+            import uuid
+
+            staging = archive_root / f".tmp-{uuid.uuid4().hex}"
+            files_dir = staging / "files"
+            files_dir.mkdir(parents=True, exist_ok=True)
+
+            try:
+                for doc in docs:
+                    _copy_doc_to_archive(doc, files_dir, file_rows, missing_files)
+
+                # A concurrent sync/reclassify can attach a document while the
+                # copy runs. Re-read and include late arrivals so the manifest
+                # does not describe a different set than the DB commit marks.
+                for _ in range(2):
+                    current_docs = (
+                        s.query(Document).filter_by(po_set_id=po_set_id).order_by(Document.id).all()
+                    )
+                    seen = {row["document_id"] for row in file_rows}
+                    late = [d for d in current_docs if d.id not in seen]
+                    if not late:
+                        docs = current_docs
+                        break
+                    for doc in late:
+                        _copy_doc_to_archive(doc, files_dir, file_rows, missing_files)
+                    docs = current_docs
+
+                doc_ids = [d.id for d in docs]
+                line_items = (
+                    s.query(LineItem)
+                    .filter(LineItem.document_id.in_(doc_ids))
+                    .order_by(LineItem.id)
+                    .all()
+                    if doc_ids
+                    else []
+                )
+                audits = (
+                    s.query(AuditLog)
+                    .filter(AuditLog.po_set_id == po_set_id)
+                    .order_by(AuditLog.id)
+                    .all()
+                )
+
+                safe = _safe_po_folder(ps.po_no_normalized, ps.id)
+                stamp = archived_at.strftime("%Y%m%dT%H%M%SZ")
+                final_folder = archive_root / f"{safe}_{stamp}_{ps.id}"
+                if final_folder.exists():
+                    # Keep the id LAST: _find_existing_archive matches the
+                    # suffix, and a post-commit retry must find this folder.
+                    final_folder = archive_root / f"{safe}_{stamp}_{uuid.uuid4().hex[:6]}_{ps.id}"
+                _write_archive_manifest(
+                    staging,
+                    ps,
+                    docs,
+                    line_items,
+                    audits,
+                    source=source,
+                    note=note,
+                    archived_at=archived_at,
+                    archive_path=final_folder,
+                    file_rows=file_rows,
+                    missing_files=missing_files,
+                )
+                staging.rename(final_folder)
+            except Exception:
+                # No DB row has changed yet; remove only the half-written
+                # staging folder. A complete folder is left for a safe retry.
+                shutil.rmtree(staging, ignore_errors=True)
+                raise
+        else:
+            # Retry after a commit failure: reuse the completed export and
+            # recover its file/missing counts for the audit row.
+            try:
+                manifest = json.loads((final_folder / "manifest.json").read_text(encoding="utf-8"))
+                file_rows = list(manifest.get("files", []))
+                missing_files = list(manifest.get("missing_files", []))
+            except (OSError, ValueError):
+                file_rows = []
+                missing_files = []
+
+        # Recompute against the rows that exist now, not the snapshot taken
+        # before the copy. The bulk mark below is the authority for the DB.
+        doc_ids = [d.id for d in docs]
+        valid_hashes = {d.sha256_hash for d in docs if d.sha256_hash}
+        # A newer active document with the same bytes is NOT part of this
+        # archive's input sweep. Re-uploading identical content after archiving
+        # is intentional; sweeping it away would ingest the new file and then
+        # immediately remove it, looking like data loss.
+        active_hashes = {
+            h
+            for (h,) in s.query(Document.sha256_hash)
+            .filter(
+                Document.sha256_hash.in_(valid_hashes),
+                Document.archived_at.is_(None),
+                ~Document.id.in_(doc_ids),
             )
-        # delete documents scoped to this POSet
-        s.query(Document).filter_by(po_set_id=po_set_id).delete(synchronize_session=False)
-        # delete po_set row itself
-        s.delete(ps)
-        s.flush()
-        # audit: po_set_id=None since parent row is deleted (FK ON would block reference)
-        detail = json.dumps({"po_no_normalized": po_no, "document_count": len(doc_ids)})
+            .all()
+            if h
+        }
+
+        # Move content-matched input copies into the archive. This runs for a
+        # fresh export AND for a retry that reuses a complete folder, so a
+        # commit failure cannot leave the input file able to re-create the set.
+        moved: list[tuple[Path, Path]] = []
+        input_dir = final_folder / "input"
+        input_dir.mkdir(parents=True, exist_ok=True)
+        input_root = Path(cfg.paths.input_folder)
+        if input_root.exists():
+            import hashlib
+
+            from app.services.ingestion import input_pdfs
+
+            for source_file in input_pdfs(cfg):
+                try:
+                    digest = hashlib.sha256(source_file.read_bytes()).hexdigest()
+                except Exception:
+                    continue
+                # Never sweep a file that a newer ACTIVE document still
+                # claims: re-uploading identical bytes after archive is
+                # supported, and moving its input copy would look like loss.
+                if digest not in valid_hashes or digest in active_hashes:
+                    continue
+                dest = input_dir / source_file.name
+                counter = len(moved) + 1
+                while dest.exists():
+                    dest = input_dir / (f"{source_file.stem}_{counter}{source_file.suffix}")
+                    counter += 1
+                try:
+                    shutil.move(str(source_file), str(dest))
+                except Exception:
+                    for original, moved_to in reversed(moved):
+                        try:
+                            if moved_to.exists() and not original.exists():
+                                shutil.move(str(moved_to), str(original))
+                        except Exception:
+                            logger.warning(
+                                "Could not restore input file %s", original, exc_info=True
+                            )
+                    raise
+                moved.append((source_file, dest))
+
+        # Re-read through the same session: the folder is complete now.
+        ps.archived_at = archived_at
+        ps.archived_by = source
+        ps.archive_reason = ps.reconcile_reason or note or "operator archive"
+        ps.archive_path = str(final_folder)
+        # One UPDATE, not a loop over the stale snapshot: a document attached
+        # during the copy above must not stay ACTIVE inside an archived set
+        # (it would reserve its hash and be invisible in every worklist).
+        s.query(Document).filter(
+            Document.po_set_id == po_set_id,
+            Document.archived_at.is_(None),
+        ).update({Document.archived_at: archived_at}, synchronize_session=False)
+
+        document_count = s.query(Document).filter_by(po_set_id=po_set_id).count()
+        line_item_count = (
+            s.query(LineItem).filter(LineItem.document_id.in_(doc_ids)).count() if doc_ids else 0
+        )
+        detail = json.dumps(
+            {
+                "archived": True,
+                "po_no_normalized": ps.po_no_normalized,
+                "document_count": document_count,
+                "line_item_count": line_item_count,
+                "archive_path": str(final_folder),
+                "missing_files": len(missing_files),
+                "moved_input_count": len(moved),
+            }
+        )
         audit = AuditLog(
-            po_set_id=None,
+            po_set_id=po_set_id,
             action=AuditAction.quarantine_delete,
             detail=detail,
-            source="system",
+            source=source,
+            justification=note,
         )
         s.add(audit)
         s.commit()
@@ -98,45 +1065,8 @@ def delete_quarantined(po_set_id: int, cfg) -> AuditLog:
         return audit
 
 
-def manual_merge(
-    files: list[Path],
-    order: list[int],
-    output_path: Path | None = None,
-) -> Path:
-    """Isolated manual PDF merger — no DB, no po_no association (FR-14.11-14.13).
-
-    Concatenates PDFs in user-specified order via pypdf.
-    Output destination and filename are user-selectable (FR-14.12); if output_path is None,
-    a temp file is created (isolated from pipeline output_folder).
-    Returns Path to merged PDF.
-    """
-    if not files:
-        raise ValueError("No files provided for manual merge")
-    if order is None:
-        order = list(range(len(files)))
-    if len(order) != len(files):
-        raise ValueError(f"order length {len(order)} != files length {len(files)}")
-    if set(order) != set(range(len(files))):
-        raise ValueError(f"order must be permutation of 0..{len(files) - 1}, got {order}")
-
-    if output_path is None:
-        fd, tmp = tempfile.mkstemp(suffix=".pdf")
-        os.close(fd)
-        output_path = Path(tmp)
-    else:
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    from pypdf import PdfReader, PdfWriter
-
-    writer = PdfWriter()
-    ordered = [Path(files[i]) for i in order]
-    for p in ordered:
-        if not p.exists():
-            raise FileNotFoundError(f"File not found: {p}")
-        reader = PdfReader(str(p))
-        for pg in reader.pages:
-            writer.add_page(pg)
-    # handle empty writer (no pages) — still write file
-    writer.write(str(output_path))
-    return output_path
+def delete_quarantined(
+    po_set_id: int, cfg, justification: str | None = None, source: str = "system"
+) -> AuditLog:
+    """Backward-compatible name for the Delete route: archive, never delete."""
+    return archive_quarantined(po_set_id, cfg, justification=justification, source=source)
