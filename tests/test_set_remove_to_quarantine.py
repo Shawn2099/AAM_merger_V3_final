@@ -157,6 +157,8 @@ def test_the_folder_holds_the_pdfs_the_export_and_the_report_and_stored_copies_s
     folder = Path(result["folder"])
     assert (folder / "files" / "po.pdf").is_file()
     assert (folder / "files" / "dn.pdf").is_file()
+    assert (folder / "REMOVED.txt").is_file()
+    assert not (folder / "REMOVAL_IN_PROGRESS.txt").exists()
     for name in (
         "po_set.json",
         "documents.json",
@@ -482,12 +484,13 @@ def test_a_removed_id_can_be_reused_and_the_old_folder_is_not_adopted(cfg):
         (old_folder / ".po_set_id").read_text(encoding="utf-8").split(":")[-1]
     )
     with Session(get_engine(cfg)) as s:
-        new = POSet(po_no_normalized="PO8401", status=POSetStatus.pending)
+        new = POSet(po_no_normalized="PO8400", status=POSetStatus.pending)
         s.add(new)
         s.commit()
         s.refresh(new)
         new_id = new.id
         new_folder = q._quarantine_set_folder(new, cfg)
+    assert new_id == set_id, "SQLite reuses the highest removed id (PRODUCT section 8, O)"
     assert new_folder != old_folder
     assert (new_folder / ".po_set_id").read_text(encoding="utf-8") == str(new_id)
 
@@ -529,7 +532,7 @@ def test_the_same_bytes_can_be_added_again_after_removal(cfg):
 
 def test_an_unreadable_input_file_stops_the_removal(cfg, monkeypatch):
     """Review 1: an input file that cannot be read might hold the set's bytes; the removal stops."""
-    set_id, doc_ids, input_copy, unrelated = _set_with_files(cfg, po="PO8700")
+    set_id, _doc_ids, _input_copy, unrelated = _set_with_files(cfg, po="PO8700")
     real_read = Path.read_bytes
 
     def unreadable(self):
@@ -544,3 +547,23 @@ def test_an_unreadable_input_file_stops_the_removal(cfg, monkeypatch):
     with Session(get_engine(cfg)) as s:
         assert s.get(POSet, set_id) is not None
     assert unrelated.is_file()
+
+
+def test_restore_never_overwrites_a_file_the_operator_put_back(cfg):
+    """Review 7: a restore writes under a free name rather than overwriting, and leaves no
+    temporary file behind."""
+    input_dir = Path(cfg.paths.input_folder)
+    folder = Path(cfg.paths.quarantine_folder) / "restore-test"
+    folder.mkdir(parents=True, exist_ok=True)
+    copy = folder / "po.pdf"
+    copy.write_bytes(b"%PDF-1.4 the copy")
+    original = input_dir / "po.pdf"
+    original.write_bytes(b"%PDF-1.4 the operator's new file")
+
+    failed = q._restore_input_copies([(copy, original)])
+
+    assert failed == []
+    assert original.read_bytes() == b"%PDF-1.4 the operator's new file"
+    restored = [p for p in input_dir.iterdir() if p.name != "po.pdf"]
+    assert [p.read_bytes() for p in restored] == [b"%PDF-1.4 the copy"]
+    assert not any(p.name.endswith(".restoring") for p in input_dir.iterdir())

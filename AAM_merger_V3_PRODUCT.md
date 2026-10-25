@@ -519,6 +519,8 @@ Audit detail: the old audit rows keep their history, but their `po_set_id` link 
 cleared (ON DELETE SET NULL); that link survives only in `audit_log.json` in the
 removal folder and in the new audit row's detail.
 
+Crash behaviour: a removal writes REMOVAL_IN_PROGRESS.txt first and REMOVED.txt only after the commit. A folder that still has the in-progress note was interrupted; check the set before retrying.
+
 Failure behaviour: if any step fails, nothing is deleted. Input files moved out are
 put back, and the folder is kept with REMOVAL_FAILED.txt and a 500 that names it.
 An unreadable input-folder file stops the removal, because it might hold the set's

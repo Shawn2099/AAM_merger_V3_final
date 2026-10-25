@@ -644,7 +644,8 @@ def remove_to_quarantine(po_set_id: int, request: Request, note: str = Form(""))
     if sync_lock._is_sync_running():
         return refuse(
             409,
-            "A sync is currently reading documents; wait for it to finish before removing a set.",
+            "Moves and removals are paused while a sync reads documents. "
+            "They resume when the sync finishes; a large batch can take an hour or more.",
         )
     try:
         _acquire_lock(po_set_id, "remove_set", cfg)

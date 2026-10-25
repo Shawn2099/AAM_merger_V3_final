@@ -631,7 +631,9 @@ def set_aside_document(doc_id: int, cfg) -> Path | None:
     lock = sync_lock.acquire_sync_lock()
     if lock is None:
         raise SetAsideRefused(
-            409, "A sync is currently reading documents; try again when it finishes."
+            409,
+            "Moves and removals are paused while a sync reads documents. "
+            "They resume when the sync finishes; a large batch can take an hour or more.",
         )
     try:
         return _set_aside_locked(doc_id, cfg)
@@ -1283,14 +1285,20 @@ def _restore_input_copies(moved: list[tuple[Path, Path]]) -> list[str]:
     """
     failed: list[str] = []
     for copy, original in moved:
+        partial = original.with_name(original.name + ".restoring")
         try:
-            # Write beside the target and rename, so a crash cannot leave a truncated PDF
-            # in the input folder (review L3).
-            partial = original.with_name(original.name + ".restoring")
+            # Never overwrite a file the operator put there meanwhile: restore under a
+            # free name instead. Write beside the target and rename, so a crash cannot
+            # leave a truncated PDF (review L3, review 7).
+            target = original
+            if target.exists():
+                target = original.with_name(_unique_name(original.parent, original.name))
+            partial = target.with_name(target.name + ".restoring")
             partial.write_bytes(copy.read_bytes())
-            partial.replace(original)
+            partial.replace(target)
             copy.unlink(missing_ok=True)
         except OSError:
+            partial.unlink(missing_ok=True)
             failed.append(original.name)
             logger.warning("Could not restore input copy %s", original, exc_info=True)
     return failed
@@ -1325,6 +1333,7 @@ def _mark_removal_failed(folder: Path, reason: str) -> None:
     ]
     try:
         (folder / "REMOVED.txt").unlink(missing_ok=True)
+        (folder / "REMOVAL_IN_PROGRESS.txt").unlink(missing_ok=True)
         (folder / "REMOVAL_FAILED.txt").write_text(chr(10).join(lines), encoding="utf-8")
     except OSError:
         logger.warning("Could not write the removal failure report in %s", folder, exc_info=True)
@@ -1356,7 +1365,8 @@ def remove_set_to_quarantine(
     if lock is None:
         raise SetRemovalRefused(
             409,
-            "A sync is currently reading documents; wait for it to finish before removing a set.",
+            "Moves and removals are paused while a sync reads documents. "
+            "They resume when the sync finishes; a large batch can take an hour or more.",
         )
     try:
         eng = get_engine(cfg)
@@ -1494,7 +1504,15 @@ def remove_set_to_quarantine(
                     "",
                 ]
             )
-            (stage / "REMOVED.txt").write_text(text, encoding="utf-8")
+            # A crash before the commit leaves this note, not a false "removed" report (review 5).
+            (stage / "REMOVAL_IN_PROGRESS.txt").write_text(
+                "THE REMOVAL IS IN PROGRESS OR DID NOT FINISH"
+                + chr(10)
+                + f"Started {stamp} (UTC). The set is removed only when REMOVED.txt appears."
+                + chr(10),
+                encoding="utf-8",
+            )
+            report_text = text
             stage.rename(final)
 
             input_dir = final / "input"
@@ -1605,6 +1623,10 @@ def remove_set_to_quarantine(
                 detail += f" These input files could not be put back: {', '.join(failed)}."
             _mark_removal_failed(final, detail)
             raise SetRemovalRefused(500, detail) from exc
+
+        # The commit is done: the completion report replaces the in-progress note.
+        (final / "REMOVED.txt").write_text(report_text, encoding="utf-8")
+        (final / "REMOVAL_IN_PROGRESS.txt").unlink(missing_ok=True)
 
         # A future set with this id must not adopt the old quarantine folder (id reuse).
         for marker in Path(cfg.paths.quarantine_folder).glob("*/.po_set_id"):

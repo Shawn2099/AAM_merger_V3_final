@@ -1596,8 +1596,8 @@ def set_aside_route(doc_id: int, request: Request):
         raise HTTPException(
             status_code=409,
             detail=(
-                "A sync is currently reading documents; wait for it to finish "
-                "before moving a document."
+                "Moves and removals are paused while a sync reads documents. "
+                "They resume when the sync finishes; a large batch can take an hour or more."
             ),
         )
     try:

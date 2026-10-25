@@ -221,19 +221,40 @@ def test_a_set_aside_is_refused_while_the_sync_lock_is_held(cfg, client, monkeyp
         assert s.get(Document, doc_id).archived_at is None
 
 
-def test_a_rejected_row_whose_stored_file_is_missing_keeps_its_input_copy(cfg, client):
-    """Review L3: no quarantine PDF and no stored file means nothing is removed."""
+def test_a_rejected_row_with_no_stored_file_is_refused_and_keeps_the_row(cfg, client):
+    """Review L3: no quarantine PDF and no stored file means nothing is moved or removed."""
     from app.services import quarantine as q
 
     sha = "7" * 64
     doc_id = _held_rejected(cfg, sha=sha)
     stem = f"rejected_{sha[:8]}"
     (Path(cfg.paths.quarantine_folder) / "_documents" / f"{stem}.pdf").unlink()
+    unrelated = Path(cfg.paths.input_folder) / "leave-me.pdf"
+    unrelated.write_bytes(b"%PDF-1.4 unrelated")
     with pytest.raises(q.SetAsideRefused) as exc:
         q.set_aside_document(doc_id, cfg)
     assert exc.value.status_code == 409
+    assert unrelated.is_file()
     with Session(get_engine(cfg)) as s:
         assert s.get(Document, doc_id).archived_at is None
+
+
+def test_a_report_without_its_pdf_gets_the_pdf_copied_before_the_input_copy_goes(cfg, client):
+    """Review L3: the quarantine report exists but its PDF is missing. The stored file is copied
+    into the folder first, and only then is the input copy removed."""
+    from app.services import quarantine as q
+
+    doc_id, sha, input_copy = _held_valid_si(cfg, name="SIV-NO-PDF.pdf")
+    folder = Path(cfg.paths.quarantine_folder) / "_documents" / sha
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "QUARANTINE.txt").write_text("earlier reason", encoding="utf-8")
+
+    q.set_aside_document(doc_id, cfg)
+
+    assert any(p.suffix == ".pdf" for p in folder.iterdir()), "the PDF must be copied first"
+    assert not input_copy.exists()
+    with Session(get_engine(cfg)) as s:
+        assert s.get(Document, doc_id).archived_at is not None
 
 
 def test_reclassifying_a_moved_document_says_it_was_moved_not_archived(cfg, client):

@@ -362,3 +362,57 @@ def test_ui_u_10_the_count_badge_follows_a_reclassify(page: Page, manifest, db):
     assert badge and int(badge[-1]) == before - 1, page.get_by_test_id(
         "nav-unclassified"
     ).inner_text()
+
+
+def test_ui_u_20_move_to_quarantine_takes_a_held_row_off_the_list(page: Page, ui_env):
+    """Batch step 10 (decision D10): a held document moves to the quarantine folder, its row
+    leaves the holding list, and the page says where the copy is. Seeds its own document, so
+    other tests' counts are not affected (the move archives it again)."""
+    import hashlib
+    import io
+    from datetime import UTC, datetime
+
+    from pypdf import PdfWriter
+    from sqlalchemy.orm import Session
+
+    from app.core.config import load_config
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus
+
+    buf = io.BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=111, height=222)
+    writer.write(buf)
+    data = buf.getvalue()
+    sha = hashlib.sha256(data).hexdigest()
+    stored = ui_env.root / f"{sha}.pdf"
+    stored.write_bytes(data)
+    cfg = load_config(str(ui_env.root / "config.yaml"))
+    with Session(get_engine(cfg)) as s:
+        doc = Document(
+            sha256_hash=sha,
+            original_filename="U20-MOVE-ME.pdf",
+            stored_path=str(stored),
+            doc_type=DocType.SI,
+            extraction_status=ExtractionStatus.valid,
+            po_set_id=None,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        s.add(doc)
+        s.commit()
+        s.refresh(doc)
+        doc_id = doc.id
+
+    page.goto("/unclassified")
+    row = page.locator(f'[data-testid="unclassified-row"][data-doc-id="{doc_id}"]')
+    expect(row).to_have_count(1)
+    page.once("dialog", lambda d: d.accept())
+    row.get_by_test_id("btn-set-aside").click()
+    expect(page.get_by_test_id("set-aside-result")).to_contain_text(
+        "quarantine folder", timeout=15000
+    )
+    page.goto("/unclassified")
+    expect(page.locator(f'[data-testid="unclassified-row"][data-doc-id="{doc_id}"]')).to_have_count(
+        0
+    )
