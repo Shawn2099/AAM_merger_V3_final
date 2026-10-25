@@ -1291,6 +1291,15 @@ def _audit_entries(rows: list[AuditLog]) -> list[dict]:
         except Exception:  # pragma: no cover - defence against a future shape
             logger.warning("Could not summarise audit row %s", entry.id, exc_info=True)
             summary = ""
+        # A removed set (step 13): its rows are gone, so the row names the old set id
+        # and the folder that holds the files.
+        if action == "quarantine_delete" and detail.get("deleted") is True:
+            label = "Set Removed"
+            removed_id = detail.get("removed_po_set_id")
+            folder = detail.get("folder") or "_removed_sets"
+            summary = (
+                f"Removed PO Set #{removed_id} (removed); files in quarantine folder: {folder}"
+            )
         views.append(
             {
                 "action": action,

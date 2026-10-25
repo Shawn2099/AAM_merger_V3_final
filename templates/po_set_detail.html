@@ -583,4 +583,24 @@
 </div>
 {% endif %}
 
+{% if not is_archived and status_str in ['pending', 'mismatched', 'quarantined', 'blocked_customs'] %}
+<div class="card" style="margin-top:20px; border-color:var(--clr-quarantined-border);" data-testid="remove-set-card">
+  <h3 style="font-size:1rem; margin-bottom:6px;">Move to quarantine and remove set</h3>
+  <p class="muted" style="font-size:0.85rem; margin-bottom:12px;">
+    Copies every PDF of this set to the quarantine folder (with a JSON export and a
+    REMOVED.txt), then deletes this set's rows, so corrected documents can form a new set.
+    Stored copies and the audit trail are kept. Use this only when the set cannot be
+    completed as it is.
+  </p>
+  <form method="post" action="/po_sets/{{ po_set.id }}/remove_to_quarantine"
+        onsubmit="return confirm('Remove this PO Set? Its rows are deleted. Its files are copied to the quarantine folder first.');">
+    <label class="muted" style="font-size:0.85rem; display:block; margin-bottom:8px;">
+      Note (optional)
+      <input name="note" maxlength="200" style="width:100%; max-width:420px; padding:6px 8px;">
+    </label>
+    <button type="submit" class="btn btn-danger" data-testid="btn-confirm-remove-set">Move to quarantine and remove set</button>
+  </form>
+</div>
+{% endif %}
+
 {% endblock %}

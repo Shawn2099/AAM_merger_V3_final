@@ -500,6 +500,24 @@ and 4 test files deleted.
 These are real. They are the price of §7, stated plainly so nobody discovers
 them on a live document.
 
+### N — removing a set deletes its rows; the files and audit trail are kept (2026-10-25)
+
+"Move to quarantine and remove set" (decision 2026-10-25) is the one operator action
+that deletes rows. It applies to pending, mismatched, quarantined and blocked-customs
+sets, never to merged or archived ones. It copies and verifies every stored PDF into
+`quarantine/_removed_sets/<PO>_<UTC stamp>_<id>/`, moves the input-folder copies there,
+writes a JSON export and REMOVED.txt, and only then deletes the set's rows in one
+transaction. The audit row keeps the old set id and PO number. A missing stored PDF
+is recorded and does not stop the removal. Restore: put the files from `files/` and
+`input/` back in the input folder and scan; CUSTOMS and SHIPPING files are re-uploaded
+on the new set's page.
+
+A future set that reuses the old id does not adopt the old folder: the marker is
+rewritten to `removed:<id>:<stamp>`.
+
+> Not yet covered by a test: a set that is removed and then re-ingested from the same
+> bytes (the new row is expected, and it should be tested before relying on it).
+
 ### L — a PO document cannot be removed from a set
 
 When a PO Set holds several PO documents (D11, Q2), the set page offers no remove

@@ -611,6 +611,46 @@ def confirm_placement(po_set_id: int, doc_id: int):
         _release_lock(po_set_id, cfg, "confirm_placement")
 
 
+@router.post("/{po_set_id}/remove_to_quarantine", response_class=HTMLResponse)
+def remove_to_quarantine(po_set_id: int, note: str = Form("")):
+    """Copy the set's files to the quarantine folder, then delete its rows (step 13).
+
+    Refused while a sync reads documents, and for merged or archived sets. The
+    set's own lock is held for the whole removal.
+    """
+    from app.services import sync_lock
+    from app.services.quarantine import SetRemovalRefused, remove_set_to_quarantine
+
+    cfg = load_config()
+    if sync_lock._is_sync_running():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A sync is currently reading documents; wait for it to finish "
+                "before removing a set."
+            ),
+        )
+    _acquire_lock(po_set_id, "remove_set", cfg)
+    try:
+        result = remove_set_to_quarantine(po_set_id, cfg, note=note.strip()[:200])
+    except SetRemovalRefused as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    finally:
+        _release_lock(po_set_id, cfg, "remove_set")
+
+    missing = ""
+    if result["missing_files"]:
+        missing = f" {len(result['missing_files'])} stored file(s) were missing and are listed in REMOVED.txt."
+    return HTMLResponse(
+        content=(
+            '<div class="card" data-testid="remove-set-result">'
+            f"<p>Removed PO Set #{po_set_id}. {result['document_count']} document(s) were copied to "
+            f"<code>{_html.escape(result['folder'])}</code>.{_html.escape(missing)}</p>"
+            '<p><a href="/dashboard">Back to dashboard</a></p></div>'
+        )
+    )
+
+
 @router.post("/{po_set_id}/documents/{doc_id}/remove_supporting")
 def remove_supporting_document(po_set_id: int, doc_id: int):
     """Take a wrong CUSTOMS / SHIPPING file out of a set that has not merged yet.
