@@ -380,6 +380,8 @@ def _quarantine_set_folder(ps, cfg) -> Path:
                     folder = candidate
                     break
                 counter += 1
+    # The marker belongs to the folder actually chosen, which may be a candidate.
+    marker = folder / ".po_set_id"
     folder.mkdir(parents=True, exist_ok=True)
     try:
         marker.write_text(str(ps.id), encoding="utf-8")
