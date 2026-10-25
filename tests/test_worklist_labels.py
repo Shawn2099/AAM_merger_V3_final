@@ -166,3 +166,43 @@ def test_detail_heading_keeps_needs_review_for_an_over_delivery(cfg, client):
     )
     page = client.get(f"/po_sets/{set_id}/view").text
     assert "Why this set needs review" in page
+
+
+def test_batched_shortfall_matches_the_per_set_result_and_stays_constant_in_queries(cfg):
+    """Review A6: one batch for many sets gives the same answer and a fixed query count."""
+    from sqlalchemy import event
+
+    from app.api.routes.dashboard import _shortfall_shape, _shortfall_shapes
+
+    under = _make_set(cfg, "4500000201", POSetStatus.mismatched, _full(100, 60, 60))
+    over = _make_set(cfg, "4500000202", POSetStatus.mismatched, _full(100, 120, 120))
+    empty = _make_set(cfg, "4500000203", POSetStatus.mismatched, [])
+    ids = [under, over, empty]
+
+    with Session(get_engine(cfg)) as s:
+        batch = _shortfall_shapes(s, ids, cfg)
+        per_set = {i: _shortfall_shape(s, s.get(POSet, i), cfg) for i in ids}
+    assert batch == per_set
+    assert batch[under] == "under" and batch[over] == "review" and batch[empty] == "review"
+
+    engine = get_engine(cfg)
+    counted: list[str] = []
+
+    def _count(conn, cursor, statement, parameters, context, executemany):
+        counted.append(statement)
+
+    many = [under] + [
+        _make_set(cfg, f"4500000{300 + n}", POSetStatus.mismatched, _full(100, 60, 60))
+        for n in range(20)
+    ]
+    with Session(engine) as s:
+        event.listen(engine, "before_cursor_execute", _count)
+        try:
+            _shortfall_shapes(s, [under], cfg)
+            few = len(counted)
+            counted.clear()
+            _shortfall_shapes(s, many, cfg)
+            many_count = len(counted)
+        finally:
+            event.remove(engine, "before_cursor_execute", _count)
+    assert many_count == few, (few, many_count)

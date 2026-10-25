@@ -152,6 +152,9 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
         if r[0] is not None
     }
     single_po = bool(getattr(cfg.reconciliation, "single_po_document", False))
+    shortfalls = _shortfall_shapes(
+        session, [ps.id for ps in pools if ps.status == POSetStatus.mismatched], cfg
+    )
 
     out = []
     for ps in pools:
@@ -170,9 +173,7 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
                 "doc_count": doc_counts.get(ps.id, 0),
                 "has_merged_file": has_merged_file,
                 # Display-only worklist facts (Batch 1 step 8). Nothing is written.
-                "shortfall": _shortfall_shape(session, ps, cfg)
-                if status_val == "mismatched"
-                else "",
+                "shortfall": shortfalls.get(ps.id, ""),
                 "po_doc_count": po_docs,
                 "multi_po_decision": single_po and po_docs > 1,
                 "dn_number_only": ps.id in dn_number_sets,
@@ -697,53 +698,77 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
         )
 
 
-def _shortfall_shape(s: Session, ps: POSet, cfg) -> str:
-    """For a mismatched set: "under" when every disagreeing quantity is below the PO.
+def _shortfall_shapes(s: Session, set_ids: list[int], cfg) -> dict[int, str]:
+    """For mismatched sets: "under" when every disagreeing quantity is below the PO.
 
     "under" means the delivery or the invoice is short, so the set is waiting for
     the rest. Anything else (over-delivery, a line not on the PO) is "review".
     Display only: the same comparison the detail page shows; the engine verdict
     and the status do not change (D16).
+
+    Batched (review A6): the documents and line items of every set are loaded in
+    two queries, however many sets are asked about. The dashboard poll uses this
+    once per refresh, and the set page uses it for one set.
     """
     from app.services.reconciliation import compare_po_set_lines
 
-    doc_type_map = {
-        d.id: (d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type))
-        for d in s.query(Document)
-        .filter(Document.po_set_id == ps.id, Document.archived_at.is_(None))
+    if not set_ids:
+        return {}
+    docs = (
+        s.query(Document.id, Document.po_set_id, Document.doc_type)
+        .filter(Document.po_set_id.in_(set_ids), Document.archived_at.is_(None))
         .all()
+    )
+    type_of = {
+        d_id: (d_type.value if hasattr(d_type, "value") else str(d_type))
+        for d_id, _set_id, d_type in docs
     }
-    if not doc_type_map:
-        return "review"
-    items = s.query(LineItem).filter(LineItem.document_id.in_(list(doc_type_map))).all()
-    enriched = [
-        {
-            "line_item_no": li.line_item_no,
-            "description": li.description,
-            "quantity": li.quantity,
-            "doc_type": doc_type_map.get(li.document_id, ""),
-            "document_id": li.document_id,
-        }
-        for li in items
-    ]
-    comparison = compare_po_set_lines(
-        [li for li in enriched if li["doc_type"] == "PO"],
-        [li for li in enriched if li["doc_type"] == "DN"],
-        [li for li in enriched if li["doc_type"] == "SI"],
-        getattr(cfg.matching, "fuzzy_description_threshold", 85),
-        line_fallback=cfg.matching.line_number_fallback,
-    )
-    flags = comparison["flags"]
-    if any(f.get("type") == "identification" for f in flags):
-        return "review"
-    quantity_flags = [f for f in flags if f.get("type") == "quantity"]
-    if not quantity_flags:
-        return "review"
-    short = all(
-        f.get("po_quantity") is not None and (f.get("vendor_quantity") or 0) < f["po_quantity"]
-        for f in quantity_flags
-    )
-    return "under" if short else "review"
+    set_of = {d_id: set_id for d_id, set_id, _d_type in docs}
+    items_by_set: dict[int, list[dict]] = {set_id: [] for set_id in set_ids}
+    if type_of:
+        for li in s.query(LineItem).filter(LineItem.document_id.in_(list(type_of))).all():
+            set_id = set_of.get(li.document_id)
+            if set_id is None:
+                continue
+            items_by_set[set_id].append(
+                {
+                    "line_item_no": li.line_item_no,
+                    "description": li.description,
+                    "quantity": li.quantity,
+                    "doc_type": type_of.get(li.document_id, ""),
+                    "document_id": li.document_id,
+                }
+            )
+
+    threshold = getattr(cfg.matching, "fuzzy_description_threshold", 85)
+    shapes: dict[int, str] = {}
+    sets_with_docs = set(set_of.values())
+    for set_id in set_ids:
+        if set_id not in sets_with_docs:
+            shapes[set_id] = "review"
+            continue
+        enriched = items_by_set[set_id]
+        comparison = compare_po_set_lines(
+            [li for li in enriched if li["doc_type"] == "PO"],
+            [li for li in enriched if li["doc_type"] == "DN"],
+            [li for li in enriched if li["doc_type"] == "SI"],
+            threshold,
+            line_fallback=cfg.matching.line_number_fallback,
+        )
+        flags = comparison["flags"]
+        quantity_flags = [f for f in flags if f.get("type") == "quantity"]
+        identification = any(f.get("type") == "identification" for f in flags)
+        short = bool(quantity_flags) and all(
+            f.get("po_quantity") is not None and (f.get("vendor_quantity") or 0) < f["po_quantity"]
+            for f in quantity_flags
+        )
+        shapes[set_id] = "under" if (short and not identification) else "review"
+    return shapes
+
+
+def _shortfall_shape(s: Session, ps: POSet, cfg) -> str:
+    """One set's shortfall shape (the set page). Same rule as the batch version."""
+    return _shortfall_shapes(s, [ps.id], cfg).get(ps.id, "review")
 
 
 def _packet_has_customs(s: Session, ps: POSet, docs: list[Document]) -> bool:
