@@ -45,183 +45,179 @@
 
 ---
 
-## 2. The CA Persona: Friction Points & Mental Model
+## 2. Operational Reality & Role Dynamics (Small-to-Mid Scale CA Firm)
 
-Chartered Accountants and commercial audit managers evaluate the software against **statutory audit standards**:
-1. **Mathematical Proof & Deltas:** A CA requires explicit variance calculations ($PO - DN$ and $DN - SI$). Mental subtraction on raw quantities is unacceptable in high-volume reconciliation.
-2. **Substance vs Form (Fidelity):** CAs fear vendor material substitution (e.g. delivering Grade B goods with the same quantity as Grade A). The UI must show both the PO description and the vendor’s printed description side-by-side.
-3. **Statutory Gating:** Customs Bill of Entry and Transshipment Air Waybills (AWB) are legal prerequisites for payment release. They must be presented as a clear compliance checklist.
-4. **Defensible Accountability:** Management overrides ("Force Merge") must not look like reckless developer bypasses; they must serve as **Authorized Exception Certificates** complete with variance logs, business justification, and authorizer attribution.
+### 2.1 The Two-Tier User Hierarchy
+* **Article Trainees / Audit Assistants (Day-to-Day Operators):**
+  * Primary users sitting in front of the screen. They monitor incoming files, attach Customs Bills of Entry & Air Waybills, route unclassified documents, and verify initial 3-way line matches.
+  * *UX Requirement:* **Foolproof, guard-railed, zero cognitive ambiguity.** Clear next steps, obvious dropzones, and zero risk of accidental data destruction.
+* **Senior CAs / Audit Partners (Exception Approvers):**
+  * Only inspect sets flagged with discrepancies or requiring a Management Override (Force Merge).
+  * *UX Requirement:* **A 15-second decision view.** An executive finding box stating the exact variance delta, an audit justification box, and 1-click authorization.
 
-### 2.1 Operational Reality & Role Dynamics (Small-to-Mid Scale CA Firm)
-* **The Trainee vs Partner Split:**
-  * **Article Trainees / Audit Assistants:** Primary day-to-day operators. They monitor the input folder, route unclassified documents, attach Customs Bills of Entry & Air Waybills, and review initial 3-way line matches. *UI Requirement:* Foolproof, guard-railed, zero cognitive ambiguity, clear next steps.
-  * **Senior CAs / Audit Partners:** Inspect exceptions, check flagged discrepancies, and authorize overrides (Force Merges). *UI Requirement:* A Partner needs to review an exception packet, read the discrepancy delta, approve or reject, and exit in under 30 seconds.
-* **The Pipeline Reality (Verification & Gatekeeper Terminal):**
-  * **Input:** Unsorted PDF streams dumped directly into `data/input`.
-  * **Engine:** Autonomous grouping by PO digits, VLM extraction, and 3-way quantity matching.
-  * **UI Terminal Role:** The UI is *not* a heavy ERP; it is a **Verification, Customs Gating, and Approval Cockpit**. Its primary jobs:
-    1. Verify automated 3-way match.
-    2. Upload missing Customs Clearance and Shipping documents.
-    3. Resolve holding/unclassified files.
-    4. Authorize final packet compilation.
-  * **Output:** Merged, statutory-compliant PDF packets delivered to `data/output`.
-* **Discrepancy Treatment (Under-Delivery vs Over-Billing):**
-  * **Partial Shipments ($DN < PO$):** Routine commercial hold. The firm expects to wait for subsequent shipments. *UI must display this calmly as "Awaiting balance (20 units)", not as a scary red error.*
-  * **Over-Billing ($SI > DN$ or un-ordered lines):** High-risk audit exception. Must be visually isolated for client notification or credit note request.
-* **Firm Scale (Multi-Client Operation):**
-  * The firm services **many clients**. While the engine groups by PO digits, the UI should minimize cross-client confusion by prominently displaying vendor/client names and providing fast search/filtering.
+### 2.2 The Pipeline & Tool Reality (Verification Cockpit)
+* **Input:** Unsorted PDF streams dumped directly into `data/input`.
+* **Engine:** Autonomous grouping by PO digits, VLM extraction, and 3-way quantity matching.
+* **UI Role:** A **Verification, Customs Gating, and Approval Cockpit**. Its primary jobs:
+  1. Verify automated 3-way match.
+  2. Upload missing Customs Clearance and Shipping documents.
+  3. Resolve holding/unclassified files.
+  4. Authorize final packet compilation.
+* **Output:** Merged, statutory-compliant PDF packets delivered to `data/output`.
 
 ---
 
-## 3. Screen-by-Screen Audit & Redesign Blueprint
+## 3. Heading & Section Naming Master Taxonomy
 
-### Screen 1: Global Shell & Header (`templates/base.html`)
-* **Eliminate:**
-  * Separate "🚨 Quarantine" link in top navbar (fold into the Dashboard's "Exceptions" view).
-  * Duplicate "Merge PDFs" button from dashboard header.
-* **Add:**
-  * Live **Sync State Pill** in header: `🟢 Ready (Last scan: 12m ago)` or `🔄 Scanning input (Doc 2 of 5)...`.
-  * Contextual metadata and zoom/rotate controls inside the slide-over PDF drawer header.
-* **Relocate:**
-  * Group navbar into: **Worklists (Dashboard)** | **Unclassified Ingest (Badge)** | **Audit Trail** | **Tools ▾ (Manual Merger, Settings)**.
-
----
-
-### Screen 2: Main Dashboard (`templates/dashboard.html`, `_dashboard_table.html`, `_dashboard_kpi_grid.html`)
-* **Eliminate:**
-  * Redundant `<select id="status-filter">` dropdown (keep clean horizontal tab pills).
-  * Long wrapped sentences in the "Why" column.
-* **Add:**
-  * Multi-select row checkboxes + Batch Action Bar: `[📥 Download Selected Packets (ZIP)]` and `[🖨️ Print Reconciliation Summaries]`.
-  * Commercial context in KPI cards:
-    * `24 Sets Ready to Authorize (100% Match)`
-    * `12 Sets Short Deliveries (Awaiting Supplier Balance)`
-    * `5 Sets Audit Exceptions (Discrepancies / Action Needed)`
-    * `8 Sets Customs Hold (Missing AWB / Bill of Entry)`
-* **Relocate:**
-  * Replace the raw "Why" column with structured, high-contrast status tags:
-    * `🟡 -20 Qty (Line 1)` (Short delivery)
-    * `🔴 Overbilled +10 (Line 4)` (Invoice exceeds GRN)
-    * `🛃 Missing Bill of Entry` (Customs required)
-    * `⚠️ Multiple POs Attached` (Contractual conflict)
-
----
-
-### Screen 3: PO Set Detail & 3-Way Reconciliation (`templates/po_set_detail.html`)
-* **Eliminate:**
-  * Vertical clutter: Remove separate bottom cards for "Archive Quarantined PO Set" and "Move to quarantine and remove set".
-  * Developer-centric justification note: *"The matrix below compares line quantities only... check above stopped it first."*
-* **Add (The 3-Way Reconciliation Schedule):**
-  * **Delivery Variance Column:** $DN - PO$ (Highlight negative in Amber: *Short Delivery*).
-  * **Invoicing Variance Column:** $SI - DN$ (Highlight positive in Red: *Overbilled / Credit Note Required*).
-  * **Vendor Item Description Column:** Displays what was actually printed on the vendor's delivery note alongside the PO baseline description.
-  * **Formal Totals Row:** Sum of PO Qty, Sum of DN Qty, Sum of SI Qty, Net Variance.
-  * **Statutory Compliance Checklist:** Clean side-by-side card showing:
-    * `[☑] Purchase Order (Verified)`
-    * `[☑] Delivery Challan / GRN (Verified)`
-    * `[☑] Tax Invoice (Verified)`
-    * `[☒] Bill of Entry (Customs) ── [📎 Attach PDF]`
-    * `[☒] Air Waybill (Shipping) ── [📎 Attach PDF]`
-  * **Export Workpaper Button:** `[🖨️ Export 3-Way Reconciliation Certificate (PDF / CSV)]`.
-* **Relocate:**
-  * Danger actions: Consolidate "Force Merge" and "Remove Set" under a collapsed **Supervisor Controls / Management Exceptions** section.
-
----
-
-### Screen 4: Unclassified Ingest Area (`templates/unclassified.html`)
-* **Eliminate:**
-  * Technical SHA-256 strings in table rows (`SHA: e7f8a9b0c1...`).
-  * Repetitive text: *"Server key: 210851"*.
-* **Add:**
-  * Accordion categorization by problem type:
-    1. 📂 **Missing PO Number** (Clean files needing order assignment)
-    2. 🔀 **Conflicting References** (Files with multiple PO references)
-    3. ⚠️ **Corrupt / Unreadable Files** (Password-protected, damaged)
-  * **Batch Assign Bar:** Select 5 files → `[ Assign Type: DN ▾ ]` `[ PO #: 210851 ]` `[ 🚀 Route All ]`.
-  * **Vendor Rejection Helper:** 1-click button to copy email notice explaining why an invoice was rejected.
-
----
-
-### Screen 5: System Audit Log (`templates/audit.html`)
-* **Eliminate:**
-  * Raw JSON disclosure blocks (`<details><summary>Raw JSON</summary><pre>...</pre></details>`).
-* **Add:**
-  * Clean, formatted **Audit Attribute Grid** showing authorizer, reason, affected documents, and waived line items.
-  * Filter pills: `[ All Events ]` `[ ⚡ Management Overrides ]` `[ 🚨 Set Removals ]` `[ ⚙️ Settings Changes ]`.
-  * Export options: `[ 📊 Export to Excel (.xlsx) ]` and `[ 📄 Export Statutory Audit Report (.PDF) ]`.
-
----
-
-## 4. Design Frameworks & Industry UI/UX Inspirations
-
-### A. The Core Design Frameworks
-
-#### 1. Management by Exception (MBE) Architecture
-* **The Rule:** *Never make an accountant review data that the machine has already mathematically verified.*
-* In commercial accounts payable, 80–90% of line items match cleanly.
-* **Application to AAM:**
-  * Clean matches ($PO = DN = SI$) are visually muted (soft green/slate) or grouped into batch-approvable states.
-  * Anomalies (shortages, over-billing, missing documents) are aggressively spotlighted using semantic colors.
-
-#### 2. Nielsen Norman Group (NN/g) Enterprise Heuristics
-* **Match Between System & Real World (Heuristic #2):** Replace internal developer terms (`VLM`, `quarantined`, `hashes`, `tokens`, `mapped`) with standard accounting language (`PO Baseline`, `Goods Receipt Note`, `Tax Invoice`, `Bill of Entry`, `Delivery Variance`).
-* **Recognition Rather than Recall (Heuristic #6):** Do not force operators to calculate mental math deltas. Display calculated variance columns ($DN - PO$ and $SI - DN$) and compare descriptions side-by-side.
-* **Error Prevention & Graceful Recovery (Heuristics #5 & #9):** Provide plain-language recommendations (e.g. *"Vendor overbilled on Line 2. Request credit note before authorizing packet"* instead of raw failure codes like `po_reference_mismatch`).
-
-#### 3. Ant Design Pro & Salesforce Lightning (SLDS) Data Grid Patterns
-* **Grouped Header Hierarchy:** Multi-level table headers that segment comparative columns:
-  * `[ Contract Baseline (PO) ]` | `[ Physical Fulfillment (DN) ]` | `[ Financial Claim (SI) ]` | `[ Reconciliation Audit ]`
-* **Strict Alignment Standards:**
-  * Text and descriptions: **Left-aligned**.
-  * Numerical quantities and variances: **Right-aligned** with monospace font.
-  * Status badges, dates, and icons: **Centered**.
-* **Zero Cell Overload:** Keep table cells clean and scannable. Never overload table rows with nested forms; offload complex edits into split drawers or inspection modals.
-
----
-
-### B. Industry UI/UX Benchmarks & Direct Inspirations
-
-| System | Core UI/UX Pattern | What AAM Merger Should Adopt |
+| Current System Name | Proposed CA-Friendly Name | Commercial / Accounting Rationale |
 | :--- | :--- | :--- |
-| **Stampli** | **Central Split-Pane Verification**<br>Digitized source document pinned side-by-side with extracted line items. | Clicking any discrepancy in the matrix opens the PDF preview drawer focused directly on that line's page. Eliminates tab switching. |
-| **Vic.ai** | **Autonomous Matching & Confidence Scoring**<br>Confidence badges guide eyes straight to low-confidence anomalies. | Tag vendor lines with confidence indicators: `Exact Match (100%)` vs `Matched by Description (Needs Check)`. |
-| **Coupa & Tipalti** | **3-Way Match Delta Grids**<br>Explicit *Ordered, Received, and Invoiced* columns with delta chips (`-20 short`). | The 3-Way Reconciliation matrix must feature dedicated variance columns and a formal totals summary row. |
-| **Ramp / Bill.com** | **Consumer-Grade Fintech Simplicity**<br>Sleek Inter typography, high-contrast badges, progressive disclosure. | Remove harsh developer boxes and raw JSON; adopt clean cards, rounded badges, and clear action hierarchies. |
-| **Xero / QuickBooks** | **Two-Column Clearing Workflow**<br>Clear visual balance of matched vs unmatched items. | The Unclassified holding area adopts a clean "Match / Assign / Split" clearing view rather than an unorganized table. |
+| **AAM Merger v3** | **AAM Document Reconciler** <small>v3</small> | Focuses on statutory reconciliation rather than mechanical merging. |
+| **📊 Dashboard** | **📊 Reconciliation Worklists** | Standard audit firm structure where daily tasks are worklists to be cleared. |
+| **❓ Unclassified** | **📥 Unassigned Documents** | Plain language for unplaced files needing a PO reference. |
+| **🚨 Quarantine** | **🚨 Audit Exceptions Queue** | Professional accounting term for sets failing automated reconciliation rules. |
+| **📜 Audit Log** | **📜 Compliance Audit Trail** | Standard statutory accounting title for read-only regulatory event logs. |
+| **🧩 Merge PDFs** | **🧩 Manual Document Utility** | Clarifies that this is a standalone tool separate from the pipeline. |
+| **PO Sets (X records)** | **Purchase Order Packets** `(X Active)` | Eliminates database jargon ("Sets", "Records"). |
+| **✅ Merged & Ready** | **✅ Reconciled & Ready** | Confirms 100% mathematical and statutory match. |
+| **⚠️ Needs Review** | **⚠️ Quantity Discrepancies** | Specific to line-item delivery/invoicing deltas. |
+| **🔒 Awaiting Customs** | **🛃 Missing Customs / Shipping Docs** | Action-oriented: tells trainees exactly what is missing. |
+| **Why (Column)** | **Audit Finding / Engine Verdict** | Professional audit report terminology. |
+| **3-Way Reconciliation Matrix** | **3-Way Reconciliation Schedule** | Accounting convention for 3-way comparison schedules. |
+| **Attach Supporting Document** | **📎 Attach Customs Clearance & Air Waybill** | Directly names the two required statutory documents. |
+| **Confirm Force Merge** | **⚠️ Authorize Management Override** | Reflects supervisory authorization with an immutable audit record. |
+| **Move to quarantine and remove set** | **🗑️ Move Files to Exception Folder & Remove Packet** | Accurately describes the two-step safety guarantee. |
 
 ---
 
-## 5. Implementation Phasing & Next Steps
+## 4. The 7 CA Approval & Review Touchpoints (How to Tackle Each)
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                   THE 7 CA APPROVAL & REVIEW TOUCHPOINTS               │
+├───────────────────────────────────┬────────────────────────────────────┤
+│ JUNIOR TRAINEE VERIFICATIONS      │ SENIOR CA / PARTNER SIGN-OFFS      │
+│ 1. Confirm DN-Only Placement      │ 5. Management Override (Force Merge)│
+│ 2. Description Match Review       │ 6. Multi-PO Document Decision      │
+│ 3. Line Numbering Rule Review     │ 7. Permanent Packet Removal        │
+│ 4. Routine Partial Delivery Hold  │                                    │
+└───────────────────────────────────┴────────────────────────────────────┘
+```
+
+### 1. Document Matched by DN Number Only (`po_no_source == 'dn_number'`)
+* *What the DB has:* Document attached because its DN number matched another document in the set.
+* *How the UI tackles it:* Trainee sees an advisory context pill: *"Document INV-44 does not cite a PO, but matches Delivery Note #102 in this set."* Button remains: **[ ✔ Confirm Document Belongs to PO ]**.
+
+### 2. Description Match Fallback Review (`description_match_count > 0`, `r.desc_matched`)
+* *What the DB has:* Lines matched by text similarity because the vendor printed no line numbers.
+* *How the UI tackles it:* Affected table rows feature a crisp audit disclosure chip: `[ 🔍 Matched by description fallback — verify item text ]`. Trainee inspects the description and confirms.
+
+### 3. Line Numbering Mapping Rule Review (`line_mapping_rule`, `r.mapped_from`)
+* *What the DB has:* Vendor lines numbered 10, 20, 30 mapped by rule to PO lines 1, 2, 3.
+* *How the UI tackles it:* Table header displays an explanatory banner: *"Line Numbering Standardized: Vendor lines (10x) aligned to PO lines (1, 2, 3)."* Column displays `#1 [Vendor Line 10]`.
+
+### 4. Routine Partial Deliveries (`shortfall == 'under'`)
+* *What the DB has:* Every disagreeing quantity is strictly below the PO ($DN < PO$ and $SI \le DN$).
+* *How the UI tackles it:* Displayed in calm **Warm Amber**: *"🟡 Awaiting Remaining Balance (Partial Delivery: 20 units pending)"*. Trainees understand this is normal commercial waiting, avoiding partner panic.
+
+### 5. Management Override / Force Merge (`action="force_merge"`)
+* *What the DB has:* Override bypassing reconciliation and customs gates with $\ge 20$-char justification.
+* *How the UI tackles it:* Structured **Partner Sign-Off Checklist**:
+  * Automatically summarizes discrepancies being waived (*"Line 1: 20 units delivery shortage; Bill of Entry waived"*).
+  * Mandatory Partner Justification box.
+  * Button: **"Authorize Management Override & Merge Packet"**.
+
+### 6. Multi-PO Document Conflict (`multi_po_decision == True`)
+* *What the DB has:* Two PO files arrived in the same set; auto-merge refuses.
+* *How the UI tackles it:* Partner Decision Box explaining:
+  * *If both files form the full order:* Use **Management Override**.
+  * *If one file is an incorrect duplicate:* Use **Move Files to Exception Folder & Remove Packet**, remove the duplicate from the input folder, and re-scan.
+
+### 7. Packet Removal to Quarantine (`remove_to_quarantine`)
+* *What the DB has:* Copies files to `quarantine/_removed_sets/`, writes JSON exports and `REMOVED.txt`, deletes database rows.
+* *How the UI tackles it:* Clear modal reassuring the user: *"All files and audit history are safely archived in the quarantine folder before database rows are cleared. Nothing is destroyed."*
+
+---
+
+## 5. UI Theme & Visual Design Specifications for CA Firms
+
+### 5.1 Institutional Audit Palette (High Contrast, WCAG AA)
+```css
+:root {
+  /* Brand & Surfaces */
+  --nav-bg: #0f172a;        /* Deep Trust Navy */
+  --primary: #1d4ed8;       /* Corporate Cobalt */
+  --bg: #f8fafc;            /* Crisp Warm Slate */
+  --card-bg: #ffffff;
+  --border: #cbd5e1;        /* High-contrast crisp gridlines */
+
+  /* Audit Statuses */
+  --clr-matched-text: #14532d;   --clr-matched-bg: #dcfce7;
+  --clr-pending-text: #854d0e;   --clr-pending-bg: #fef9c3;
+  --clr-risk-text: #991b1b;      --clr-risk-bg: #fee2e2;
+  --clr-customs-text: #1e40af;   --clr-customs-bg: #dbeafe;
+}
+```
+
+### 5.2 Native Tabular Typography (LAN-Safe, No Web Fonts)
+```css
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+.qty-val, .variance-val, .table-amount {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-variant-numeric: tabular-nums; /* Equal digit widths for perfect column vertical alignment */
+  text-align: right;
+  font-weight: 600;
+}
+```
+
+### 5.3 Information Density: Compact Accounting Grid
+* Row height: Reduced from `48px` to `34px–36px`.
+* Alternating row shading (Zebra striping): `tr:nth-child(even) { background-color: #f8fafc; }`.
+* Result: **15 to 20 line items visible simultaneously** on standard 14" office laptops.
+* Badges: Crisp `4px` rectangular audit chips instead of rounded bubble pills.
+
+### 5.4 Statutory Print Stylesheet (`@media print`)
+When a CA presses `Ctrl + P`:
+1. Navbars, action buttons, and upload forms are hidden (`display: none`).
+2. A formal letterhead appears: `AAM COMMERCIAL RECONCILER — STATUTORY 3-WAY MATCHING WORKPAPER`.
+3. The 3-way matrix prints with a double-underlined Totals row.
+4. Formal signature blocks print:
+   * *Prepared by (Trainee): _______________*
+   * *Reviewed & Approved by (Partner): _______________*
+
+---
+
+## 6. Implementation Phasing & Next Steps
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ PHASE 1: Jargon Removal & Visual Polish (Zero DB / Backend Changes)         │
-│ • Update terminology: "Quarantine" -> "Audit Exception",                    │
-│   "Force Merge" -> "Management Override", "Re-Extract with AI" -> "Re-Parse"│
-│ • Add Variance columns (Delivery Δ and Invoicing Δ) to the matrix           │
-│ • Add formal Totals Row to the reconciliation table                         │
-│ • Add Print Stylesheet (@media print) for physical 3-Way Match Certificates │
+│ PHASE 1: Jargon Removal, Mathematical Deltas & Theme Polish (Zero DB Impact)│
+│ • Update headings and badge labels across templates to CA terminology.      │
+│ • Calculate Delivery Variance (DN - PO) & Invoicing Variance (SI - DN).     │
+│ • Add Totals Summary Row to the 3-Way Reconciliation Schedule.              │
+│ • Apply High-Contrast Audit Palette, Tabular Numbers & Compact Row Padding. │
+│ • Add @media print stylesheet for physical statutory workpaper signing.     │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ PHASE 2: Layout & Workflow Restructuring                                    │
-│ • Consolidate red buttons on PO Set Detail under "Supervisor Controls"      │
-│ • Refactor Dashboard tabs into commercial worklists                         │
-│ • Implement batch routing in Unclassified holding area                      │
+│ PHASE 2: Layout Ergonomics & Workflow Consolidation                         │
+│ • Move Customs Upload form adjacent to Customs Checklist card.              │
+│ • Format Executive Finding Box for Partner 15-second review.                │
+│ • Structure Force Merge modal into an Override Authorization Checklist.     │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ PHASE 3: Audit & Reporting Exports                                          │
-│ • Add Excel/CSV export for Reconciliation Statements & System Audit Log     │
-│ • Deep-link line item clicks directly to target page in the PDF drawer      │
+│ • Add Excel/CSV export for Reconciliation Statements & System Audit Log.    │
+│ • Implement page-accurate PDF preview deep-linking.                         │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 6. Ongoing Session Log & Insights Tracker
+## 7. Ongoing Session Log & Insights Tracker
 
 | Date | Author / Agent | Milestone / Insight Recorded | Status |
 | :--- | :--- | :--- | :--- |
 | **2026-10-25** | Claude & Shawn | Completed Batch 1 features (safe set removal, customs toggle refusal, holding set-aside, IST timestamps, responsive styling). Created PR #5. | Merged to `main` (`bd33eb2`) |
 | **2026-10-26** | Antigravity | Full code audit of PR #5 (27 files, 134 tests verified green). Boot clean-room verified. | Production Ready |
-| **2026-10-26** | Antigravity | Conducted Senior UI/UX Audit for CA clients; created comprehensive screen-by-screen blueprint (`docs/UI_UX_CA_TRANSFORMATION_PLAN.md`). | Blueprint Established |
-| **2026-10-26** | Antigravity | Researched design frameworks (MBE, NN/g, SLDS, Ant Design Pro) and industry inspirations (Stampli, Vic.ai, Coupa, Ramp); added Section 4 to blueprint. | Framework Integrated |
-
+| **2026-10-26** | Antigravity | Senior UI/UX Audit for CA clients (`docs/UI_UX_CA_TRANSFORMATION_PLAN.md`). | Blueprint Established |
+| **2026-10-26** | Antigravity | Research on Design Frameworks (MBE, NN/g, SLDS) & Industry Inspirations (Stampli, Vic.ai, Coupa). | Framework Integrated |
+| **2026-10-26** | Antigravity | Enshrined Core Tenets (DB truth, zero logic change, zero feature discard), Trainee vs Partner dynamics, 7 Review Touchpoints, and Theme/Print specs. | Master Blueprint Complete |
