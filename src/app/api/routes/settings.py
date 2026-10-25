@@ -75,7 +75,10 @@ async def settings_save(request: Request) -> HTMLResponse:
         _start_poller_if_switched_on(request)
     status = 200 if result.ok else 409 if result.general else 422
     return _render(
-        request, submitted=submitted if not result.ok else None, result=result, status=status
+        request,
+        submitted=submitted if not result.ok and not result.stale else None,
+        result=result,
+        status=status,
     )
 
 

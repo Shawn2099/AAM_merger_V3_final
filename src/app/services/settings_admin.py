@@ -646,6 +646,7 @@ class SaveResult:
     backup: str | None = None
     errors: dict[str, str] = field(default_factory=dict)  # field key -> message
     general: str | None = None  # a problem that belongs to no single field
+    stale: bool = False  # the file changed since the page was built: show current values
 
     @property
     def ok(self) -> bool:
@@ -733,6 +734,7 @@ def _save_locked(
 ) -> SaveResult:
     """The save itself; the caller holds the file lock and turns an OSError into a message."""
     if version != file_version(path):
+        result.stale = True
         result.general = (
             "The settings file was changed by someone else after you opened this page. "
             "Your changes were not saved. The page now shows the current values."
