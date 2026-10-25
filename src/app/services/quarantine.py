@@ -8,7 +8,7 @@ import logging
 import re
 import shutil
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import delete, update
@@ -1292,6 +1292,11 @@ def _restore_input_copies(moved: list[tuple[Path, Path]]) -> list[str]:
     return failed
 
 
+def _ist_stamp() -> str:
+    """The current time in IST, for operator-facing text (decision 12)."""
+    return datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _set_row_export(ps: POSet) -> dict:
     out: dict = {}
     for column in POSet.__table__.columns:
@@ -1375,6 +1380,14 @@ def remove_set_to_quarantine(
                 for a in s.query(AuditLog).filter(AuditLog.po_set_id == po_set_id).all()
             ]
             shas = {d["sha256"] for d in doc_rows}
+            # Plan rule: an input copy is moved only when no other ACTIVE document holds its bytes.
+            other_active = {
+                row[0]
+                for row in s.query(Document.sha256_hash)
+                .filter(Document.archived_at.is_(None), ~Document.id.in_(doc_ids or [-1]))
+                .all()
+            }
+            shas -= other_active
 
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         base = Path(cfg.paths.quarantine_folder) / REMOVED_SETS_FOLDER
@@ -1430,7 +1443,7 @@ def remove_set_to_quarantine(
                     f"PO number   : {po_no}",
                     f"PO Set id   : {po_set_id}",
                     f"Status was  : {status_before}",
-                    f"Removed at  : {stamp} (UTC)",
+                    f"Removed at  : {stamp} (UTC) / {_ist_stamp()} (IST)",
                     f"Note        : {note or '-'}",
                     "",
                     "Files (copied from data/stored)",

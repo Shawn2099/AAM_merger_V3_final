@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -285,3 +286,62 @@ def test_a_failed_restore_keeps_the_folder_and_names_the_files(cfg, monkeypatch)
         q.remove_set_to_quarantine(set_id, cfg)
     assert "po.pdf" in exc.value.message
     assert len(_removed_folders(cfg)) == 1, "the folder is kept when a file could not be restored"
+
+
+def test_an_input_copy_held_by_another_active_document_stays_in_the_input_folder(cfg):
+    """Plan rule: an input copy is not moved when a different active document holds its bytes."""
+    set_id, doc_ids, input_copy, _unrelated = _set_with_files(cfg)
+    shared_sha = hashlib.sha256(input_copy.read_bytes()).hexdigest()
+    with Session(get_engine(cfg)) as s:
+        # The set's PO document is archived (so the hash is free for an active row elsewhere),
+        # and an active unattached document holds the same bytes.
+        s.get(Document, doc_ids[0]).archived_at = datetime.now(UTC)
+        s.add(
+            Document(
+                sha256_hash=shared_sha,
+                original_filename="elsewhere.pdf",
+                stored_path=str(Path(cfg.paths.stored_documents_folder) / "elsewhere.pdf"),
+                doc_type=DocType.UNKNOWN,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=None,
+            )
+        )
+        s.commit()
+    result = q.remove_set_to_quarantine(set_id, cfg)
+    assert input_copy.is_file(), "a hash still held by an active document must not be moved"
+    assert result["moved_input_count"] == 0
+
+
+def test_a_locked_set_is_refused_through_the_route(cfg, client):
+    set_id, _doc_ids, input_copy, _unrelated = _set_with_files(cfg)
+    with Session(get_engine(cfg)) as s:
+        s.get(POSet, set_id).locked_by_action = "merge_now"
+        s.get(POSet, set_id).locked_at = datetime.now(UTC)
+        s.commit()
+    resp = client.post(f"/po_sets/{set_id}/remove_to_quarantine", data={})
+    assert resp.status_code == 409
+    assert input_copy.is_file()
+
+
+def test_an_archived_set_is_refused(cfg):
+    from datetime import UTC, datetime
+
+    set_id, _doc_ids, _input, _unrelated = _set_with_files(cfg)
+    with Session(get_engine(cfg)) as s:
+        s.get(POSet, set_id).archived_at = datetime.now(UTC)
+        s.commit()
+    with pytest.raises(q.SetRemovalRefused) as exc:
+        q.remove_set_to_quarantine(set_id, cfg)
+    assert exc.value.status_code == 409
+
+
+def test_a_grouping_sweep_after_removal_does_nothing(cfg):
+    """After removal the removed documents are not re-grouped into a new set by the sweep."""
+    from app.services.grouping import resolve_unattached_documents
+
+    set_id, _doc_ids, _input, _unrelated = _set_with_files(cfg)
+    q.remove_set_to_quarantine(set_id, cfg)
+    resolve_unattached_documents(cfg)
+    with Session(get_engine(cfg)) as s:
+        assert s.get(POSet, set_id) is None
+        assert s.query(POSet).count() == 0

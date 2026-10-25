@@ -28,7 +28,11 @@ business-logic:
 		tests/test_quarantine.py \
 		tests/test_dashboard.py \
 		tests/test_best_case_pipeline.py \
-		tests/test_untested_engine_paths.py
+		tests/test_untested_engine_paths.py \
+		tests/test_set_remove_to_quarantine.py \
+		tests/test_holding_set_aside.py \
+		tests/test_files_set_aside.py \
+		tests/test_quarantine_folder_owner.py
 
 prefect-pool:
 	prefect work-pool create aam-merger-process-pool --type process || true
