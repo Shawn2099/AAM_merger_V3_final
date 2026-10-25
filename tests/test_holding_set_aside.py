@@ -233,3 +233,13 @@ def test_a_rejected_row_whose_stored_file_is_missing_keeps_its_input_copy(cfg, c
     assert exc.value.status_code == 409
     with Session(get_engine(cfg)) as s:
         assert s.get(Document, doc_id).archived_at is None
+
+
+def test_reclassifying_a_moved_document_says_it_was_moved_not_archived(cfg, client):
+    """Review L5: a document moved from the holding page gets the quarantine message."""
+    doc_id, _sha, _input = _held_valid_si(cfg, name="SIV-MOVED-TWICE.pdf")
+    client.post(f"/unclassified/{doc_id}/set_aside", headers={"HX-Request": "true"})
+    resp = client.post(f"/unclassified/{doc_id}/reclassify", data={"doc_type": "DN"})
+    assert resp.status_code == 409
+    assert "moved to the quarantine folder" in resp.text
+    assert "archived" not in resp.text

@@ -345,3 +345,35 @@ def test_a_grouping_sweep_after_removal_does_nothing(cfg):
     with Session(get_engine(cfg)) as s:
         assert s.get(POSet, set_id) is None
         assert s.query(POSet).count() == 0
+
+
+def test_a_browser_refusal_gets_a_page_and_an_api_client_gets_json(cfg, client, monkeypatch):
+    from app.services import sync_lock
+
+    set_id, _doc_ids, _input, _unrelated = _set_with_files(cfg)
+    monkeypatch.setattr(sync_lock, "_is_sync_running", lambda *a, **k: True)
+    browser = client.post(
+        f"/po_sets/{set_id}/remove_to_quarantine",
+        data={},
+        headers={"Accept": "text/html,application/xhtml+xml"},
+    )
+    assert browser.status_code == 409
+    assert "text/html" in browser.headers["content-type"]
+    assert "was not removed" in browser.text
+    api = client.post(
+        f"/po_sets/{set_id}/remove_to_quarantine", data={}, headers={"Accept": "application/json"}
+    )
+    assert api.status_code == 409
+    assert "detail" in api.json()
+
+
+def test_a_browser_success_gets_the_result_page(cfg, client):
+    set_id, _doc_ids, _input, _unrelated = _set_with_files(cfg)
+    resp = client.post(
+        f"/po_sets/{set_id}/remove_to_quarantine",
+        data={},
+        headers={"Accept": "text/html,application/xhtml+xml"},
+    )
+    assert resp.status_code == 200
+    assert "Removed PO Set #" in resp.text
+    assert "Back to dashboard" in resp.text

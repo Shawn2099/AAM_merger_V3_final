@@ -518,6 +518,15 @@ rewritten to `removed:<id>:<stamp>`.
 > Not yet covered by a test: a set that is removed and then re-ingested from the same
 > bytes (the new row is expected, and it should be tested before relying on it).
 
+### O — a removed set's id can be reused (review L1, 2026-10-25)
+
+The `po_sets` id has no AUTOINCREMENT, so after the newest set is removed, the next
+set can take its id. A browser tab still open on the old `/po_sets/<id>` then shows
+the new set, and document ids in old audit JSON can point at new rows. The removal
+keeps the audit row and the export, and the marker in the old quarantine folder is
+rewritten (`removed:<id>:<stamp>`) so the new set does not adopt that folder. A
+migration to AUTOINCREMENT is not made in this batch.
+
 ### L — a PO document cannot be removed from a set
 
 When a PO Set holds several PO documents (D11, Q2), the set page offers no remove

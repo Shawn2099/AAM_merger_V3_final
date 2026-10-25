@@ -704,7 +704,9 @@ def _shortfall_shapes(s: Session, set_ids: list[int], cfg) -> dict[int, str]:
     "under" means the delivery or the invoice is short, so the set is waiting for
     the rest. Anything else (over-delivery, a line not on the PO) is "review".
     Display only: the same comparison the detail page shows; the engine verdict
-    and the status do not change (D16).
+    and the status do not change (D16). Note (review L4): the label only reads
+    quantity flags. If a non-quantity mismatch reason is ever added, it must be
+    checked here, or it would be labelled "Waiting (part delivered)".
 
     Batched (review A6): the documents and line items of every set are loaded in
     two queries, however many sets are asked about. The dashboard poll uses this
@@ -1726,6 +1728,15 @@ def reclassify_document(
         if doc is None:
             raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
         if doc.archived_at is not None:
+            # A document moved from the holding page is not in any set (review L5).
+            if doc.po_set_id is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "This document was moved to the quarantine folder. Put the corrected "
+                        "copy back in the input folder."
+                    ),
+                )
             raise HTTPException(
                 status_code=409,
                 detail="This document belongs to an archived PO Set and is read-only.",

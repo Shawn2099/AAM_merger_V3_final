@@ -19,7 +19,7 @@ import logging
 import re
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Form, HTTPException, Response
+from fastapi import APIRouter, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
@@ -612,41 +612,63 @@ def confirm_placement(po_set_id: int, doc_id: int):
 
 
 @router.post("/{po_set_id}/remove_to_quarantine", response_class=HTMLResponse)
-def remove_to_quarantine(po_set_id: int, note: str = Form("")):
+def remove_to_quarantine(po_set_id: int, request: Request, note: str = Form("")):
     """Copy the set's files to the quarantine folder, then delete its rows (step 13).
 
     Refused while a sync reads documents, and for merged or archived sets. The
-    set's own lock is held for the whole removal.
+    set's own lock is held for the whole removal. A browser form gets a page for
+    both the result and a refusal; API clients get the JSON detail.
     """
+    from app.api.templating import templates
+    from app.core.http_errors import wants_html
     from app.services import sync_lock
     from app.services.quarantine import SetRemovalRefused, remove_set_to_quarantine
 
     cfg = load_config()
+    browser = wants_html(request) and "HX-Request" not in request.headers
+
+    def refuse(status: int, message: str):
+        if browser:
+            return templates.TemplateResponse(
+                request,
+                "error.html",
+                {"code": status, "heading": "The PO Set was not removed", "message": message},
+                status_code=status,
+            )
+        raise HTTPException(status_code=status, detail=message)
+
     if sync_lock._is_sync_running():
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "A sync is currently reading documents; wait for it to finish "
-                "before removing a set."
-            ),
+        return refuse(
+            409,
+            "A sync is currently reading documents; wait for it to finish before removing a set.",
         )
-    _acquire_lock(po_set_id, "remove_set", cfg)
+    try:
+        _acquire_lock(po_set_id, "remove_set", cfg)
+    except HTTPException as exc:
+        return refuse(exc.status_code, str(exc.detail))
     try:
         result = remove_set_to_quarantine(po_set_id, cfg, note=note.strip()[:200])
     except SetRemovalRefused as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        return refuse(exc.status_code, exc.message)
     finally:
         _release_lock(po_set_id, cfg, "remove_set")
 
-    missing = ""
-    if result["missing_files"]:
-        missing = f" {len(result['missing_files'])} stored file(s) were missing and are listed in REMOVED.txt."
+    if browser:
+        return templates.TemplateResponse(
+            request,
+            "remove_set_result.html",
+            {
+                "set_id": po_set_id,
+                "document_count": result["document_count"],
+                "folder": result["folder"],
+                "missing_count": len(result["missing_files"]),
+            },
+        )
     return HTMLResponse(
         content=(
             '<div class="card" data-testid="remove-set-result">'
             f"<p>Removed PO Set #{po_set_id}. {result['document_count']} document(s) were copied to "
-            f"<code>{_html.escape(result['folder'])}</code>.{_html.escape(missing)}</p>"
-            '<p><a href="/dashboard">Back to dashboard</a></p></div>'
+            f"<code>{_html.escape(result['folder'])}</code>.</p></div>"
         )
     )
 
