@@ -326,3 +326,5 @@ WS1 worker finished 11:57; its diff (templates testids, scripts/ui_test_env.py, 
 
 **Owner decisions pending:** S3 (startup fallback to newest valid config_backups copy: small feature, or document only); whether the poller runs during the e2e run (recommend OFF, copy files then press Scan); regenerate this PC's stale config.yaml from config.example.yaml (B4).
 Do not start the e2e run before B1-B4 are done and the install is verified.
+
+Addendum (reviewer's final report): B1 is wider than the one test. Non-UI run was 3 failed / 6505 passed: tests/test_robustness_batch_sync.py:384 and :393 fail every time because of the oldest-first sort; tests/test_best_case_pipeline.py:280 fails only when file times differ; tests/test_settings_page_more.py:291 fails only in the full run (global config state left by earlier tests; fix the test isolation, not the product). Extra should-fix items S4-S8 (age resets on sweep, merged-set matrix recomputed with today's settings, risky Settings keys single_po_document / split_combined / fuzzy threshold / backup_count, install gaps, wording) are in docs/OPUS_REVIEW_2026-10-25.md.
