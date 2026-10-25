@@ -117,7 +117,46 @@ Chartered Accountants and commercial audit managers evaluate the software agains
 
 ---
 
-## 4. Implementation Phasing & Next Steps
+## 4. Design Frameworks & Industry UI/UX Inspirations
+
+### A. The Core Design Frameworks
+
+#### 1. Management by Exception (MBE) Architecture
+* **The Rule:** *Never make an accountant review data that the machine has already mathematically verified.*
+* In commercial accounts payable, 80–90% of line items match cleanly.
+* **Application to AAM:**
+  * Clean matches ($PO = DN = SI$) are visually muted (soft green/slate) or grouped into batch-approvable states.
+  * Anomalies (shortages, over-billing, missing documents) are aggressively spotlighted using semantic colors.
+
+#### 2. Nielsen Norman Group (NN/g) Enterprise Heuristics
+* **Match Between System & Real World (Heuristic #2):** Replace internal developer terms (`VLM`, `quarantined`, `hashes`, `tokens`, `mapped`) with standard accounting language (`PO Baseline`, `Goods Receipt Note`, `Tax Invoice`, `Bill of Entry`, `Delivery Variance`).
+* **Recognition Rather than Recall (Heuristic #6):** Do not force operators to calculate mental math deltas. Display calculated variance columns ($DN - PO$ and $SI - DN$) and compare descriptions side-by-side.
+* **Error Prevention & Graceful Recovery (Heuristics #5 & #9):** Provide plain-language recommendations (e.g. *"Vendor overbilled on Line 2. Request credit note before authorizing packet"* instead of raw failure codes like `po_reference_mismatch`).
+
+#### 3. Ant Design Pro & Salesforce Lightning (SLDS) Data Grid Patterns
+* **Grouped Header Hierarchy:** Multi-level table headers that segment comparative columns:
+  * `[ Contract Baseline (PO) ]` | `[ Physical Fulfillment (DN) ]` | `[ Financial Claim (SI) ]` | `[ Reconciliation Audit ]`
+* **Strict Alignment Standards:**
+  * Text and descriptions: **Left-aligned**.
+  * Numerical quantities and variances: **Right-aligned** with monospace font.
+  * Status badges, dates, and icons: **Centered**.
+* **Zero Cell Overload:** Keep table cells clean and scannable. Never overload table rows with nested forms; offload complex edits into split drawers or inspection modals.
+
+---
+
+### B. Industry UI/UX Benchmarks & Direct Inspirations
+
+| System | Core UI/UX Pattern | What AAM Merger Should Adopt |
+| :--- | :--- | :--- |
+| **Stampli** | **Central Split-Pane Verification**<br>Digitized source document pinned side-by-side with extracted line items. | Clicking any discrepancy in the matrix opens the PDF preview drawer focused directly on that line's page. Eliminates tab switching. |
+| **Vic.ai** | **Autonomous Matching & Confidence Scoring**<br>Confidence badges guide eyes straight to low-confidence anomalies. | Tag vendor lines with confidence indicators: `Exact Match (100%)` vs `Matched by Description (Needs Check)`. |
+| **Coupa & Tipalti** | **3-Way Match Delta Grids**<br>Explicit *Ordered, Received, and Invoiced* columns with delta chips (`-20 short`). | The 3-Way Reconciliation matrix must feature dedicated variance columns and a formal totals summary row. |
+| **Ramp / Bill.com** | **Consumer-Grade Fintech Simplicity**<br>Sleek Inter typography, high-contrast badges, progressive disclosure. | Remove harsh developer boxes and raw JSON; adopt clean cards, rounded badges, and clear action hierarchies. |
+| **Xero / QuickBooks** | **Two-Column Clearing Workflow**<br>Clear visual balance of matched vs unmatched items. | The Unclassified holding area adopts a clean "Match / Assign / Split" clearing view rather than an unorganized table. |
+
+---
+
+## 5. Implementation Phasing & Next Steps
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -141,10 +180,12 @@ Chartered Accountants and commercial audit managers evaluate the software agains
 
 ---
 
-## 5. Ongoing Session Log & Insights Tracker
+## 6. Ongoing Session Log & Insights Tracker
 
 | Date | Author / Agent | Milestone / Insight Recorded | Status |
 | :--- | :--- | :--- | :--- |
 | **2026-10-25** | Claude & Shawn | Completed Batch 1 features (safe set removal, customs toggle refusal, holding set-aside, IST timestamps, responsive styling). Created PR #5. | Merged to `main` (`bd33eb2`) |
 | **2026-10-26** | Antigravity | Full code audit of PR #5 (27 files, 134 tests verified green). Boot clean-room verified. | Production Ready |
 | **2026-10-26** | Antigravity | Conducted Senior UI/UX Audit for CA clients; created comprehensive screen-by-screen blueprint (`docs/UI_UX_CA_TRANSFORMATION_PLAN.md`). | Blueprint Established |
+| **2026-10-26** | Antigravity | Researched design frameworks (MBE, NN/g, SLDS, Ant Design Pro) and industry inspirations (Stampli, Vic.ai, Coupa, Ramp); added Section 4 to blueprint. | Framework Integrated |
+
