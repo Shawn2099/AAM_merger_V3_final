@@ -9,6 +9,23 @@
 
 ## 1. Project Background & System Context (For Future Sessions)
 
+### Non-Negotiable Core Tenets (Ground Truth & Scope Boundaries)
+* **1. The Database is the Single Source of Truth:**
+  * Every number, status, badge, and reason shown on the UI must be 100% verified against SQLite database rows.
+  * No hallucinated or fabricated columns (e.g. `unit_price`, `uom`, or separate `vendor_printed_desc` do NOT exist in `line_items`; do not display or promise them).
+* **2. Zero Changes to Core Logic:**
+  * No modifications to reconciliation algorithms, VLM prompts, grouping schemas, poller flows, or locking mechanisms.
+  * Only presentation-layer UI/UX refinements (HTML templates, CSS styles, ergonomic layouts, and micro-interactions) are in scope, and only with explicit permission.
+* **3. Zero Feature / Signal Discard:**
+  * Every single signal and feature in the current UI exists for a verified operational reason and MUST BE PRESERVED:
+    * The exact engine `reconcile_reason` must always be visible.
+    * Advisory badges: `description_match_count` and per-line `desc_matched` must remain prominent.
+    * Line mapping rules: `line_mapping_rule` and per-line `mapped_from` must remain prominent.
+    * Document placement sources: `po_no_source == 'dn_number'` and "Confirm it belongs here" buttons.
+    * Customs facts: `has_customs_toggle`, `packet_has_customs`, `customs_append_pending`, and supporting doc delete buttons (`remove_supporting`).
+    * All operational actions: `Merge Now`, `Re-Match`, `Re-Extract`, `Toggle Customs`, `Force Merge`, `Move to quarantine and remove set`, `Archive`.
+  * The goal is **not to subtract or invent features**, but to make every existing database truth **100% clear, mathematically readable, and self-explanatory for CA clients**.
+
 ### Architectural Truths & Non-Negotiable Engine Invariants
 * **The Core Formula:** Quantities are the **sole signal** for matching and reconciliation.
   * Every quantity in SQLite is stored as an integer scaled $\times 1000$ (e.g., $10.5 \to 10500$). Comparisons are strictly integer math; no floats.
