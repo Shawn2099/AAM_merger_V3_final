@@ -546,6 +546,11 @@ def quarantine_document(doc_id: int, cfg, reason: str, *, source: str = "system"
             "Fix or split the file, then put it back in the input folder.",
             "It is read again on the next scan.",
         )
+    elif reason.startswith(("combined_document", "child_recombined", "split_failed")):
+        what_to_do = (
+            "Split this file into single documents (one PO, one DN or one SI each),",
+            "then put the parts in the input folder. They are read on the next scan.",
+        )
     else:
         what_to_do = (
             "Enter its PO number on the Unclassified page to attach it to a PO Set,",

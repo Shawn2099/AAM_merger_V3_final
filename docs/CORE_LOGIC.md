@@ -119,8 +119,9 @@ belonging to another set is never overwritten — that set quarantines as
   the PO number.
 - **A combined PDF (several documents in one file) is quarantined whole.**
   `extraction.split_combined` is `false` by default: nothing is cut, no child
-  documents exist, and the file waits in the holding area and in
-  `quarantine/_documents`. The splitter (`services/splitting.py`) is kept and
+  documents exist, and the file is set aside: it is copied to
+  `quarantine/_documents` and listed under Files set aside on the Quarantine page.
+  It is not on the holding list and cannot be reclassified (D9, D17). The splitter (`services/splitting.py`) is kept and
   can be re-enabled by setting the flag. Pinned by `tests/test_combined_quarantine.py`.
 
 ## 6b. How a document is read (FR-6.1, amended 2026-10-23)

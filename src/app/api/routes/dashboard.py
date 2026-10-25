@@ -92,6 +92,9 @@ def _holding_area_query(session: Session):
         # set's detail page; listing it here invited the operator to reclassify
         # it out of a merged set.
         Document.po_set_id.is_(None),
+        # An unsplit COMBINED bundle is set aside to the Files set aside list (D9):
+        # its content was never used, so it is not waiting for a human here.
+        ~and_(Document.doc_type == DocType.COMBINED, Document.is_split_parent.is_(False)),
     )
 
 
@@ -1736,6 +1739,16 @@ def reclassify_document(
         # it forever left a readable packet in no set and on no page — the
         # operator's only recovery is to reclassify it here, so that case is
         # allowed (and the row stops pretending to be a parent).
+        # An unsplit COMBINED bundle holds several documents and its content was never
+        # used, so it cannot be placed as one document. It is in the quarantine folder.
+        if doc.doc_type == DocType.COMBINED and not getattr(doc, "is_split_parent", False):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This file holds several documents in one PDF. It is in the "
+                    "quarantine folder; split it and put the parts in the input folder."
+                ),
+            )
         if getattr(doc, "is_split_parent", False):
             if getattr(doc, "split_completed_at", None) is not None:
                 raise HTTPException(

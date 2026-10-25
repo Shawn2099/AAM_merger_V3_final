@@ -112,3 +112,32 @@ def test_refused_reclassify_writes_no_row(client, tmp_cfg):
     )
     assert resp.status_code >= 400
     assert _reclassify_rows(tmp_cfg) == []
+
+
+def test_an_unsplit_combined_bundle_cannot_be_reclassified_and_stays_unchanged(client, tmp_cfg):
+    """Step 12 (D17): a multi-document PDF is refused, and the row is not touched."""
+    with Session(get_engine(tmp_cfg)) as s:
+        doc = Document(
+            sha256_hash="f" * 64,
+            original_filename="BUNDLE-2DNS.pdf",
+            stored_path=str(Path(tmp_cfg.paths.stored_documents_folder) / "f.pdf"),
+            doc_type=DocType.COMBINED,
+            extraction_status=ExtractionStatus.valid,
+            is_split_parent=False,
+            po_set_id=None,
+        )
+        s.add(doc)
+        s.commit()
+        s.refresh(doc)
+        doc_id = doc.id
+
+    resp = client.post(
+        f"/unclassified/{doc_id}/reclassify", data={"doc_type": "DN", "po_no": "PO6666"}
+    )
+    assert resp.status_code == 409
+    assert "several documents in one PDF" in resp.text
+    with Session(get_engine(tmp_cfg)) as s:
+        row = s.get(Document, doc_id)
+        assert row.doc_type == DocType.COMBINED
+        assert row.po_set_id is None
+    assert _reclassify_rows(tmp_cfg) == []

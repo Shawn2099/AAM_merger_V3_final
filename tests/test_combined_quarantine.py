@@ -12,7 +12,7 @@ from pathlib import Path
 from pypdf import PdfWriter
 from sqlalchemy.orm import Session
 
-from app.api.routes.dashboard import _holding_area_query
+from app.api.routes.dashboard import _holding_area_query, _set_aside_query
 from app.core.config import load_config
 from app.core.database import get_engine
 from app.models import DocType, Document, ExtractionStatus, POSet
@@ -96,7 +96,10 @@ def test_a_combined_pdf_is_quarantined_whole_and_never_split(tmp_path, monkeypat
         assert d.line_items == []
         assert s.query(Document).count() == 1  # no child documents
         assert s.query(POSet).count() == 0  # a combined file never mints a set
-        assert [x.id for x in _holding_area_query(s).all()] == [doc_id]
+        # Step 12 (D9): an unsplit combined bundle leaves the holding list and is set
+        # aside, so it is listed on Quarantine instead.
+        assert _holding_area_query(s).all() == []
+        assert [x.id for x in _set_aside_query(s).all()] == [doc_id]
     assert not pdf.exists()  # input copy removed, so the next sync does not re-hash it
     assert list(Path(cfg.paths.input_folder).glob("*.pdf")) == []  # nothing was cut
     assert not Path(cfg.paths.combined_folder).exists()
