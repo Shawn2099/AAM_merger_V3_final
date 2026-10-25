@@ -319,10 +319,21 @@ def test_st_03_dirty_tracking(page: Page, settings_env):
     expect(save).to_be_enabled()
     expect(notice).to_be_visible()
 
+    # Discard asks first (step 4); accept the confirmation to reach the reset.
+    page.once("dialog", lambda d: d.accept())
     with page.expect_navigation():
         page.click(RESET)
     expect(save).to_be_disabled()
     expect(page.locator(_field(INTERVAL))).to_have_value("60")
+
+
+def test_st_03b_discard_dismissed_keeps_the_edit(page: Page, settings_env):
+    page.goto(_url(settings_env, "/settings"))
+    page.fill(_field(INTERVAL), "75")
+    page.once("dialog", lambda d: d.dismiss())
+    page.click(RESET)
+    expect(page.locator(_field(INTERVAL))).to_have_value("75")
+    expect(page.get_by_text("You have unsaved changes.")).to_be_visible()
 
 
 # ------------------------------------------------------------------------ ST-04

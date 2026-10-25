@@ -362,7 +362,8 @@ def test_ui_s_13_rematch_reloads_and_keeps_the_reason(page: Page, manifest, db):
         page.get_by_test_id("btn-rematch").click()
     assert resp.value.status == 200, resp.value.text()
     # The page reloads itself; the confirmation must survive that reload.
-    expect(page.locator(".toast-success")).to_contain_text("re-matched", timeout=15000)
+    # The toast now states what matching decided, not only that it ran (I-43).
+    expect(page.locator(".toast")).to_contain_text("Re-matched", timeout=15000)
     expect(page.get_by_test_id("reason-card")).to_contain_text(before["reconcile_reason"][:40])
     after = db.execute(
         "select status, reconcile_reason from po_sets where id=?", (sc["id"],)
