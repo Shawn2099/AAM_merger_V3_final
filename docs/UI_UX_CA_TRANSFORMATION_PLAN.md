@@ -212,12 +212,70 @@ When a CA presses `Ctrl + P`:
 
 ---
 
-## 7. Ongoing Session Log & Insights Tracker
+## 7. Deployment Findings & Defect Register (From FINDINGS_REGISTER_2026-10-26.md)
+
+The following 17 specific findings from the latest deployment test run (`Desktop\deployment\FINDINGS_REGISTER_2026-10-26.md`) are explicitly targeted and resolved in this UI/UX transformation:
+
+### A. Core UX & Robustness Fixes (P2)
+* **P2-01 (Under-Delivery Page Inconsistency):**
+  * *Bug:* Set detail page contradicts itself: top badge says *"Needs Review (Discrepancy)"*, heading says *"Why this set is waiting"*, matrix shows red mismatch; but dashboard table says *"Waiting (part delivered)"*.
+  * *Fix:* In `dashboard.py:660`, pass `set_status="pending"` to `build_matrix_rows` when `shortfall == "under"`; in `po_set_detail.html:71`, display the calm amber *"Waiting (part delivered)"* badge on the detail page.
+* **P2-02 (Set-Aside Report Accuracy):**
+  * *Bug:* Operator set-aside report claims *"Attempts: N/3 (cap reached, no further automatic attempts)"* even when it was manually set aside before reaching the cap.
+  * *Fix:* Clear `attempts_line` in `quarantine.py:535` for operator-initiated set-aside.
+* **P2-03 & P2-04 (Removal Failure Paths & Permissions):**
+  * *Bug:* Disk/permission failures on `REMOVED.txt` after commit or before the try block raise generic 500s.
+  * *Fix:* Wrap post-commit report writes so committed removals don't fail, and wrap initial `mkdir` calls in friendly refusal handlers.
+* **P2-05 (Removal Path Traversal Sanitization):**
+  * *Bug:* Crafted or legacy `original_filename` containing path separators (`..\..\evil.pdf`) could write outside `<final>/files/`.
+  * *Fix:* Sanitize removal copy names with `_safe_filename` and reject separators in `_unique_name`.
+
+### B. UI Presentation, Toasts, 404s & Wording (P3)
+* **P3-01 (Removal Result Displays PO Number & Relative Path):**
+  * *Bug:* Result page shows internal ID (`Removed PO Set #30`) and absolute server path (`C:\AAM\...`).
+  * *Fix:* Pass `po_no_normalized` to `remove_set_result.html` (`Removed PO Set PO-210851`) and scrub absolute paths to relative paths (`quarantine/_removed_sets/...`).
+* **P3-02 (Missing-Set 404 Text):**
+  * *Bug:* Missing-set 404 says only *"may have been archived"*, omitting *"or removed"*.
+  * *Fix:* Update copy in `dashboard.py:486` to *"may have been archived or removed"*.
+* **P3-03 (Audit Page Shows Old ID for Removed Sets):**
+  * *Bug:* PO Set column shows `—` because `po_set_id` was set to NULL on delete.
+  * *Fix:* In `audit.html:54-56`, if `po_set_id` is null but the audit detail JSON contains `old_set_id` or `set_id`, display `#<id> (removed)` instead of `—`.
+* **P3-04 (Quarantine Page Set-Aside Redirect):**
+  * *Bug:* Moving a file to quarantine from `_files_set_aside.html` redirects to `/unclassified` instead of staying on `/quarantine`.
+  * *Fix:* Return an HTMX outerHTML swap or preserve current page referrer.
+* **P3-05 (Set-Aside Double-Click):**
+  * *Bug:* A second click still says *"Moved to quarantine folder"*.
+  * *Fix:* Return *"Already moved to quarantine folder"* if document was already set aside.
+* **P3-06 (Multi-PO Badge & Limitation L Truthfulness):**
+  * *Bug:* Badge says *"choose the right one"*, which is misleading because a PO document cannot be removed individually (Product Limitation L). Reason omits the *"Move to quarantine and remove set"* option.
+  * *Fix:* Update badge copy: *"Needs a decision: multiple PO files. Authorize with Management Override (Force Merge) if both apply, or Move to Quarantine & Remove Set to replace."*
+* **P3-07 & P3-08 (Human-Readable Toasts for Re-Match and Merge Now):**
+  * *Bug:* Toasts leak raw snake_case reason codes: e.g. *"Re-matched: still waiting - missing_dn_document"*.
+  * *Fix:* In `static/js/app.js`, map raw codes to human accounting terms:
+    * `missing_dn_document` $\to$ *"Awaiting Delivery Note (DN)"*
+    * `missing_si_document` $\to$ *"Awaiting Sales Invoice (SI)"*
+    * `multiple_po_documents` $\to$ *"Multiple PO files attached"*
+    * `po_reference_mismatch` $\to$ *"Conflicting PO reference"*
+* **P3-09 (Set-Detail 404 API/HTMX Contract):**
+  * *Bug:* Set-detail 404 returns HTML even for `Accept: application/json` and `HX-Request: true`.
+  * *Fix:* Check `wants_html(request)` and `"HX-Request" not in request.headers`, returning JSON for API/HTMX callers.
+* **P3-10 (Post/Redirect/Get on Removal):**
+  * *Bug:* Refreshing the removal result page re-submits the removal POST request.
+  * *Fix:* Implement PRG (Post/Redirect/Get) with flash/session message or HTMX target swap.
+* **P3-11 (Global Path Scrubbing):**
+  * *Bug:* Absolute paths leak in set-aside toasts and removal result pages.
+  * *Fix:* Run all displayed folder paths through the app's `_scrub_paths` helper.
+
+---
+
+## 8. Ongoing Session Log & Insights Tracker
 
 | Date | Author / Agent | Milestone / Insight Recorded | Status |
 | :--- | :--- | :--- | :--- |
 | **2026-10-25** | Claude & Shawn | Completed Batch 1 features (safe set removal, customs toggle refusal, holding set-aside, IST timestamps, responsive styling). Created PR #5. | Merged to `main` (`bd33eb2`) |
 | **2026-10-26** | Antigravity | Full code audit of PR #5 (27 files, 134 tests verified green). Boot clean-room verified. | Production Ready |
 | **2026-10-26** | Antigravity | Senior UI/UX Audit for CA clients (`docs/UI_UX_CA_TRANSFORMATION_PLAN.md`). | Blueprint Established |
-| **2026-10-26** | Antigravity | Research on Design Frameworks (MBE, NN/g, SLDS) & Industry Inspirations (Stampli, Vic.ai, Coupa). | Framework Integrated |
+| **2026-10-26** | Antigravity | Researched Design Frameworks (MBE, NN/g, SLDS) & Industry Inspirations (Stampli, Vic.ai, Coupa). | Framework Integrated |
 | **2026-10-26** | Antigravity | Enshrined Core Tenets (DB truth, zero logic change, zero feature discard), Trainee vs Partner dynamics, 7 Review Touchpoints, and Theme/Print specs. | Master Blueprint Complete |
+| **2026-10-26** | Antigravity | Integrated 17 deployment test findings (P2-01..05, P3-01..12) from `FINDINGS_REGISTER_2026-10-26.md` into Section 7. | Defect Register Linked |
+
