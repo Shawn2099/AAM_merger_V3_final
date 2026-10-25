@@ -23,10 +23,11 @@ import instructor
 from openai import OpenAI
 from openai.types.chat import ChatCompletionContentPartParam
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_engine
-from app.models import Document, ExtractionStatus
+from app.models import DocType, Document, ExtractionStatus
 from app.models.base import Base
 
 logger = logging.getLogger(__name__)
@@ -1266,3 +1267,17 @@ def extract_document(doc_id: int, cfg) -> Document:
                 type(e).__name__,
             )
             raise e
+
+
+def unsplit_bundle_clause():
+    """SQL for a multi-document PDF that was read but not split (Layer 1 owns this fact).
+
+    Layer 2 (holding list, quarantine list, reclassify) uses this instead of naming the
+    type, so the COMBINED type stays inside Layer 1 (tests/test_no_combined_in_engine.py).
+    """
+    return and_(Document.doc_type == DocType.COMBINED, Document.is_split_parent.is_(False))
+
+
+def is_unsplit_bundle(doc: Document) -> bool:
+    """True for a multi-document PDF that was not split (see `unsplit_bundle_clause`)."""
+    return doc.doc_type == DocType.COMBINED and not doc.is_split_parent

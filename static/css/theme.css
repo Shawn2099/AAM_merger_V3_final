@@ -160,7 +160,7 @@ nav.app-navbar {
 }
 
 .nav-counter-badge {
-  background: #f59e0b;
+  background: #b45309;
   color: #fff;
   font-size: 0.72rem;
   font-weight: 700;
@@ -506,7 +506,7 @@ nav.app-navbar {
 
 .tab-count {
   background: #e2e8f0;
-  color: #475569;
+  color: #334155;
   font-size: 0.72rem;
   padding: 1px 6px;
   border-radius: var(--radius-full);
@@ -862,4 +862,16 @@ table.data-table tbody tr:hover td {
   font-size: 0.85rem;
   line-height: 1.35;
   max-width: 32ch;
+}
+
+/* Narrow windows: stack and wrap instead of scrolling the whole page sideways (I-50). */
+@media (max-width: 900px) {
+  .nav-links { flex-wrap: wrap; }
+  .card-header { flex-wrap: wrap; gap: 8px; }
+  .toolbar { flex-wrap: wrap; }
+  .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .table-container { overflow-x: auto; }
+}
+@media (max-width: 600px) {
+  .nav-links { flex-wrap: wrap; }
 }

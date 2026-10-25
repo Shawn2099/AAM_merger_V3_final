@@ -33,6 +33,14 @@ def is_blocked(po_set: POSet) -> bool:
     return not (has_customs and has_shipping)
 
 
+class CustomsToggleRefused(Exception):
+    """Turning the customs requirement OFF was refused: customs files are still attached."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
 def toggle_customs(po_set_id: int, cfg) -> POSet:
     """Flip has_customs_toggle without hiding the set's real verdict.
 
@@ -57,6 +65,20 @@ def toggle_customs(po_set_id: int, cfg) -> POSet:
             raise ValueError(f"POSet {po_set_id} not found")
         if ps.archived_at is not None:
             raise ValueError(f"POSet {po_set_id} is archived and read-only")
+        # Turning the requirement OFF on an UNMERGED set is refused while CUSTOMS or
+        # SHIPPING files are attached: remove them first (decision 2026-10-25). ON is
+        # always allowed. A merged set keeps its switch rule (D5/D18).
+        if ps.has_customs_toggle and ps.status != POSetStatus.merged:
+            attached = [
+                d.original_filename
+                for d in ps.documents or []
+                if d.archived_at is None and d.doc_type in (DocType.CUSTOMS, DocType.SHIPPING)
+            ]
+            if attached:
+                raise CustomsToggleRefused(
+                    "Customs is required for this set, and these files are attached: "
+                    f"{', '.join(attached)}. Delete them first, then turn the requirement off."
+                )
         # flip
         ps.has_customs_toggle = not ps.has_customs_toggle
 

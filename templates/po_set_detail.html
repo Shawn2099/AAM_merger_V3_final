@@ -16,7 +16,7 @@
 <div class="card" style="border-left:4px solid #6b7280; margin-bottom:16px; background:#f9fafb;">
   <div data-testid="archived-banner" style="font-weight:700; color:#374151; margin-bottom:4px;">📦 Archived PO Set — read-only</div>
   <div class="muted" style="font-size:0.9rem;">
-    Archived {{ po_set.archived_at.strftime('%Y-%m-%d %H:%M:%S UTC') if po_set.archived_at else '—' }}
+    Archived {{ po_set.archived_at | ist('%Y-%m-%d %H:%M:%S') }}
     by {{ po_set.archived_by or 'unknown' }}. The records and files are kept for audit and analysis.
     Export: <code>{{ po_set.archive_path or '—' }}</code>
   </div>
@@ -49,7 +49,7 @@
           {% if (po_set.description_match_count or 0) > 0 %}
           <span class="badge badge-desc" style="font-size:0.8rem;"
                 title="Vendor lines linked by the description fallback, not a printed line number.">
-            description match ×{{ po_set.description_match_count }}
+            Matched by description - needs a second check ({{ po_set.description_match_count }} lines)
           </span>
           {% endif %}
           {% if po_set.line_mapping_rule %}<span class="badge badge-desc" style="font-size:0.8rem;" title="Line numbers were paired by a numbering rule, not as printed.">lines mapped ({{ po_set.line_mapping_rule }})</span>{% endif %}
@@ -100,9 +100,15 @@
   </div>
 
   <div style="display:flex; gap:20px; flex-wrap:wrap; font-size:0.85rem; color:var(--text-muted); border-top:1px solid var(--border); padding-top:12px; align-items:center;">
-    <div><strong>Created:</strong> {{ po_set.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') if po_set.created_at else '—' }}</div>
-    <div title="The system touches a set on every check, so this is not when the documents changed."><strong>Last checked:</strong> {{ po_set.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC') if po_set.updated_at else '—' }}</div>
+    <div><strong>Created:</strong> {{ po_set.created_at | ist('%Y-%m-%d %H:%M:%S') }}</div>
+    <div title="The system touches a set on every check, so this is not when the documents changed."><strong>Last checked:</strong> {{ po_set.updated_at | ist('%Y-%m-%d %H:%M:%S') }}</div>
     <div><strong>Customs Requirement:</strong> <span style="font-weight:600; color:{{ 'var(--primary)' if po_set.has_customs_toggle else 'var(--text-muted)' }};">{{ 'ENABLED (CUSTOMS + SHIPPING Required)' if po_set.has_customs_toggle else 'DISABLED' }}</span></div>
+    {% if is_merged %}
+    <div data-testid="packet-customs-facts"><strong>Packet contains customs pages:</strong> {{ 'Yes' if packet_has_customs else 'No' }}</div>
+    {% if not po_set.has_customs_toggle and packet_has_customs %}
+    <div data-testid="customs-off-packet-note" style="width:100%;">Customs is switched off, but the delivered packet still contains customs pages. The packet is kept as it is.</div>
+    {% endif %}
+    {% endif %}
     {% if po_set.has_customs_toggle %}
       <div><strong>Customs Clearance:</strong> <span style="font-weight:600;">{% if 'CUSTOMS' in documents|map(attribute='doc_type')|map(attribute='value')|list %}✅ Attached{% else %}❌ Missing{% endif %}</span></div>
       <div><strong>Shipping (AWB):</strong> <span style="font-weight:600;">{% if 'SHIPPING' in documents|map(attribute='doc_type')|map(attribute='value')|list %}✅ Attached{% else %}❌ Missing{% endif %}</span></div>
@@ -111,10 +117,19 @@
 
   <!-- Quick Action Controls (hidden for archived sets) -->
   {% if not is_archived %}
+  {% if not is_merged %}
+  <p class="muted" data-testid="merge-instruction" style="width:100%; margin:0 0 4px; font-size:0.85rem;">
+    To merge: press <strong>Merge Now</strong>. If a check blocks it, the reason is shown on this page.
+    <strong>Force Merge</strong> merges without the checks and needs a written reason.
+    {% if po_set.has_customs_toggle %}
+    While the customs requirement is on, its files stay attached; to turn the requirement off, delete them first.
+    {% endif %}
+  </p>
+  {% endif %}
   <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border); display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
     {% if sync_running %}
     <div class="muted" data-testid="sync-running-note" style="width:100%; font-size:0.85rem;">
-      A sync is running. Actions on this set are disabled until it finishes (a few seconds to minutes).
+      A sync is running (a scan of the input folder). Actions on this set are paused while it runs and resume when it finishes. A large batch can take an hour or more; reload this page after the scan ends.
     </div>
     {% endif %}
     <!-- Customs Toggle -->
@@ -211,6 +226,7 @@
        an operator force-merged it. Hiding it behind "not merged" left a green
        "Merged & Ready" header over a ❌ matrix with no explanation. #}
     {% if status_str == 'quarantined' %}Why this set is quarantined
+    {% elif status_str == 'mismatched' and set_shortfall == 'under' %}Why this set is waiting
     {% elif status_str == 'mismatched' %}Why this set needs review
     {% elif status_str == 'blocked_customs' %}Why this set is blocked
     {% elif status_str == 'merged' %}Packet note
@@ -423,13 +439,13 @@
               class="btn btn-secondary btn-sm"
               data-filename="{{ d.original_filename }}"
               hx-post="/po_sets/{{ po_set.id }}/documents/{{ d.id }}/remove_supporting"
-              hx-confirm="Remove {{ d.original_filename }}? You can upload the right one afterwards."
+              hx-confirm="Delete {{ d.original_filename }}? You can upload the right one afterwards."
               hx-swap="none"
               hx-on::after-request="if (event.detail.successful) { Alpine.store('toasts').success('Removed ' + this.dataset.filename + '.', true); location.reload() }"
               title="Take this file out of the packet. Upload the right one afterwards, then press Merge Now."
               {% if is_locked or sync_running %}disabled{% endif %}
             >
-              <span>🗑 Remove</span>
+              <span>🗑 Delete</span>
             </button>
             {% endif %}
           </td>
@@ -450,7 +466,10 @@
     </h3>
     <p class="muted" style="font-size:0.82rem; margin-bottom:12px;">
       Attached as-is without AI extraction. To clear the <strong>Awaiting Customs</strong> gate, upload both a <strong>CUSTOMS</strong> and a <strong>SHIPPING</strong> document.
-      Upload both, check the file names, then press Merge Now. A wrong file can be removed here until the set is merged; keep Customs Check ON while you replace a file.
+      Upload both, check the file names, then press Merge Now.
+      {% if status_str != 'merged' %}
+        A wrong file can be removed here until the set is merged; keep Customs Check ON while you replace a file.
+      {% endif %}
       {% if status_str == 'merged' %}
         With the customs requirement <strong>ON</strong>, uploading both documents rebuilds the packet so they are included (the set stays merged). With it <strong>OFF</strong>, the documents are attached but the packet is not rebuilt.
       {% endif %}
@@ -495,7 +514,7 @@
 <div class="card" style="border-color:var(--clr-quarantined-border); background:#fff5f5;">
   <h3 style="color:#991b1b; font-size:1.1rem; margin-bottom:4px;">📦 Archive Quarantined PO Set</h3>
   <p class="muted" style="margin-bottom:14px; font-size:0.85rem;">
-    Moves this PO Set to <code>{{ archive_folder }}</code> and hides it from the active
+    Moves this PO Set to the archive folder and hides it from the active
     worklists. The database rows, every stored PDF and the audit trail are kept. Nothing is destroyed.
   </p>
   <button 
@@ -513,7 +532,7 @@
   <div class="modal-dialog" role="dialog" aria-modal="true">
     <h3 style="margin-bottom:8px; color:#991b1b;">Archive this quarantined PO Set?</h3>
     <p class="muted" style="margin-bottom:16px;">
-      This moves the set to <code>{{ archive_folder }}</code> and hides it from the
+      This moves the set to the archive folder and hides it from the
       worklists. Its database rows, documents, line items, stored PDFs and audit trail are kept.
       An audit log entry records the archive.
     </p>
@@ -570,6 +589,26 @@
       </button>
     </div>
   </div>
+</div>
+{% endif %}
+
+{% if not is_archived and status_str in ['pending', 'mismatched', 'quarantined', 'blocked_customs'] %}
+<div class="card" style="margin-top:20px; border-color:var(--clr-quarantined-border);" data-testid="remove-set-card">
+  <h3 style="font-size:1rem; margin-bottom:6px;">Move to quarantine and remove set</h3>
+  <p class="muted" style="font-size:0.85rem; margin-bottom:12px;">
+    Copies every PDF of this set to the quarantine folder (with a JSON export and a
+    REMOVED.txt), then deletes this set's rows, so corrected documents can form a new set.
+    Stored copies and the audit trail are kept. Use this only when the set cannot be
+    completed as it is.
+  </p>
+  <form method="post" action="/po_sets/{{ po_set.id }}/remove_to_quarantine"
+        onsubmit="return confirm('Remove this PO Set? Its rows are deleted. Its files are copied to the quarantine folder first.');">
+    <label class="muted" style="font-size:0.85rem; display:block; margin-bottom:8px;">
+      Note (optional)
+      <input name="note" maxlength="200" style="width:100%; max-width:420px; padding:6px 8px;">
+    </label>
+    <button type="submit" class="btn btn-danger" data-testid="btn-confirm-remove-set">Move to quarantine and remove set</button>
+  </form>
 </div>
 {% endif %}
 

@@ -18,11 +18,11 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException
 
+from app.api.templating import templates
 from app.core.config import ManualMergeConfig, load_config
 from app.core.http_errors import BodyTooLarge, error_response, wants_html
 from app.services.manual_merge import (
@@ -38,9 +38,6 @@ from app.services.manual_merge import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/manual", tags=["manual"])
-
-# templates isolated from the pipeline dashboard
-templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[4] / "templates"))
 
 _MAX_FORM_FIELD_BYTES = 64 * 1024
 _MAX_FORM_FIELDS = 8

@@ -271,7 +271,25 @@ document.addEventListener('htmx:afterRequest', function (event) {
         store.success('Re-read ' + results.length + ' document(s).', true);
       }
     } else if (path.endsWith('/redo_match')) {
-      store.success('🔄 Line-item reconciliation re-matched.', true);
+      // Say what matching decided, not only that it ran (I-43).
+      let body = {};
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch (e) {
+        /* non-JSON response; fall through to the generic message */
+      }
+      const rec = body.reconciliation || {};
+      const why = rec.detail || rec.reason || '';
+      if (rec.status === 'merged') {
+        store.success('Re-matched: the packet is merged.', true);
+      } else if (rec.status === 'pending') {
+        store.info('Re-matched: still waiting' + (why ? ' - ' + why : '') + '.', true);
+      } else if (rec.status === 'mismatched' || rec.status === 'quarantined') {
+        store.warning('Re-matched: ' + rec.status.replace('_', ' ') +
+          (why ? ' - ' + why : '') + '.', true);
+      } else {
+        store.success('Re-matched.', true);
+      }
     } else if (/\/merge$/.test(path)) {
       // Gated merge, not Force Merge: report the outcome the server decided.
       let body = {};
