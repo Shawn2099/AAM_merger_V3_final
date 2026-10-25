@@ -114,7 +114,7 @@
   <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border); display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
     {% if sync_running %}
     <div class="muted" data-testid="sync-running-note" style="width:100%; font-size:0.85rem;">
-      A sync is running. Actions on this set are disabled until it finishes (a few seconds to minutes).
+      A sync is running (a scan of the input folder). Actions on this set are paused while it runs and resume when it finishes. A large batch can take an hour or more; reload this page after the scan ends.
     </div>
     {% endif %}
     <!-- Customs Toggle -->
@@ -450,7 +450,10 @@
     </h3>
     <p class="muted" style="font-size:0.82rem; margin-bottom:12px;">
       Attached as-is without AI extraction. To clear the <strong>Awaiting Customs</strong> gate, upload both a <strong>CUSTOMS</strong> and a <strong>SHIPPING</strong> document.
-      Upload both, check the file names, then press Merge Now. A wrong file can be removed here until the set is merged; keep Customs Check ON while you replace a file.
+      Upload both, check the file names, then press Merge Now.
+      {% if status_str != 'merged' %}
+        A wrong file can be removed here until the set is merged; keep Customs Check ON while you replace a file.
+      {% endif %}
       {% if status_str == 'merged' %}
         With the customs requirement <strong>ON</strong>, uploading both documents rebuilds the packet so they are included (the set stays merged). With it <strong>OFF</strong>, the documents are attached but the packet is not rebuilt.
       {% endif %}
@@ -495,7 +498,7 @@
 <div class="card" style="border-color:var(--clr-quarantined-border); background:#fff5f5;">
   <h3 style="color:#991b1b; font-size:1.1rem; margin-bottom:4px;">📦 Archive Quarantined PO Set</h3>
   <p class="muted" style="margin-bottom:14px; font-size:0.85rem;">
-    Moves this PO Set to <code>{{ archive_folder }}</code> and hides it from the active
+    Moves this PO Set to the archive folder and hides it from the active
     worklists. The database rows, every stored PDF and the audit trail are kept. Nothing is destroyed.
   </p>
   <button 
@@ -513,7 +516,7 @@
   <div class="modal-dialog" role="dialog" aria-modal="true">
     <h3 style="margin-bottom:8px; color:#991b1b;">Archive this quarantined PO Set?</h3>
     <p class="muted" style="margin-bottom:16px;">
-      This moves the set to <code>{{ archive_folder }}</code> and hides it from the
+      This moves the set to the archive folder and hides it from the
       worklists. Its database rows, documents, line items, stored PDFs and audit trail are kept.
       An audit log entry records the archive.
     </p>

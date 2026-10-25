@@ -74,8 +74,10 @@ def _acquire_lock(po_set_id: int, action: str, cfg) -> POSet:
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    "A sync is currently running; wait for it to finish before "
-                    "changing this PO Set."
+                    "A sync is currently running (a scan of the input folder). Actions "
+                    "on PO Sets are paused while it runs and resume when it finishes; "
+                    "a large batch can take an hour or more. Reload this page after "
+                    "the scan ends."
                 ),
             )
         # Archived sets are read-only. The archive action is the one exception:
