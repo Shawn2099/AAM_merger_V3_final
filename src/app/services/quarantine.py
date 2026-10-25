@@ -541,6 +541,7 @@ def quarantine_document(doc_id: int, cfg, reason: str, *, source: str = "system"
             "It has been removed from the input folder so it is not retried nightly.",
         )
     if reason.startswith(SET_ASIDE_REASON_PREFIX):
+        attempts_line = []
         what_happened = (
             "An operator moved this file from the holding page.",
             "It is no longer in the input folder, so the nightly scan will not read it.",
@@ -1266,7 +1267,10 @@ def _safe_po_name(po_no: str | None) -> str:
 
 def _unique_name(folder: Path, name: str) -> str:
     """A file name not yet used in `folder`: `a.pdf`, then `a (2).pdf`, and so on."""
-    candidate, stem, suffix, n = name, Path(name).stem, Path(name).suffix, 2
+    base_name = Path(name).name
+    if not base_name or base_name in (".", ".."):
+        base_name = "document.pdf"
+    candidate, stem, suffix, n = base_name, Path(base_name).stem, Path(base_name).suffix, 2
     while (folder / candidate).exists():
         candidate = f"{stem} ({n}){suffix}"
         n += 1
@@ -1434,11 +1438,14 @@ def remove_set_to_quarantine(
 
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         base = Path(cfg.paths.quarantine_folder) / REMOVED_SETS_FOLDER
-        base.mkdir(parents=True, exist_ok=True)
-        stage = base / f".tmp-{uuid.uuid4().hex}"
-        final = base / f"{_safe_po_name(po_no)}_{stamp}_{po_set_id}"
-        files_dir = stage / "files"
-        files_dir.mkdir(parents=True)
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+            stage = base / f".tmp-{uuid.uuid4().hex}"
+            final = base / f"{_safe_po_name(po_no)}_{stamp}_{po_set_id}"
+            files_dir = stage / "files"
+            files_dir.mkdir(parents=True)
+        except OSError as exc:
+            raise SetRemovalRefused(500, f"Could not create removal staging directory: {exc}") from exc
         moved: list[tuple[Path, Path]] = []
         missing: list[str] = []
         try:
@@ -1625,8 +1632,11 @@ def remove_set_to_quarantine(
             raise SetRemovalRefused(500, detail) from exc
 
         # The commit is done: the completion report replaces the in-progress note.
-        (final / "REMOVED.txt").write_text(report_text, encoding="utf-8")
-        (final / "REMOVAL_IN_PROGRESS.txt").unlink(missing_ok=True)
+        try:
+            (final / "REMOVED.txt").write_text(report_text, encoding="utf-8")
+            (final / "REMOVAL_IN_PROGRESS.txt").unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not write REMOVED.txt after commit", exc_info=True)
 
         # A future set with this id must not adopt the old quarantine folder (id reuse).
         for marker in Path(cfg.paths.quarantine_folder).glob("*/.po_set_id"):
@@ -1639,6 +1649,7 @@ def remove_set_to_quarantine(
         return {
             "folder": str(final),
             "folder_name": f"{REMOVED_SETS_FOLDER}/{final.name}",
+            "po_no_normalized": po_no,
             "document_count": len(doc_ids),
             "line_item_count": len(item_rows),
             "moved_input_count": len(moved),

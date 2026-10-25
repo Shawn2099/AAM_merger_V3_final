@@ -48,7 +48,6 @@ def test_ui_remove_set_card_visibility(page: Page, manifest):
         expect(page.get_by_test_id("remove-set-card")).to_have_count(0)
 
 
-@pytest.mark.xfail(strict=True, reason="P3: result shows absolute path; 404 says only archived; audit column '-'")
 def test_ui_remove_set_result_404_audit(page: Page, manifest):
     sc = _open(page, manifest, "remove_set_target")
     expect(page.get_by_test_id("remove-set-card")).to_be_visible()
@@ -114,7 +113,6 @@ def test_ui_files_set_aside_lists_failed_only(page: Page, manifest):
     expect(card.locator(f'[data-testid="set-aside-row"][data-doc-id="{valid["id"]}"]')).to_have_count(0)
 
 
-@pytest.mark.xfail(strict=True, reason="P2: report says Attempts 0/3 (cap reached) for a valid document")
 def test_ui_set_aside_report_is_true(page: Page, manifest, db):
     held = manifest["held"]["held_set_aside_target"]
     page.goto("/unclassified")
@@ -138,7 +136,6 @@ def test_ui_set_aside_report_is_true(page: Page, manifest, db):
     assert "cap reached" not in text
 
 
-@pytest.mark.xfail(strict=True, reason="P3: quarantine-page move redirects to /unclassified")
 def test_ui_set_aside_from_quarantine_stays(page: Page, manifest):
     held = manifest["held"]["held_set_aside_failed_target"]
     page.goto("/quarantine")
@@ -153,7 +150,6 @@ def test_ui_set_aside_from_quarantine_stays(page: Page, manifest):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="P2: top badge and matrix still say Needs Review/Mismatch")
 def test_ui_under_delivery_is_consistent(page: Page, manifest):
     sc = _open(page, manifest, "needs_review_quantity")
     expect.soft(page.locator("body")).to_contain_text("Waiting (part delivered)")
@@ -231,14 +227,12 @@ def test_ui_audit_reclassify_row(page: Page, manifest):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="P3: 404 text still says only 'may have been archived'")
 def test_ui_missing_set_404_says_archived_or_removed(page: Page):
     response = page.goto("/po_sets/999999/view")
     assert response is not None and response.status == 404
     expect(page.locator("body")).to_contain_text("archived or removed")
 
 
-@pytest.mark.xfail(strict=True, reason="P3: Re-Match toast shows the raw reason code")
 def test_ui_re_match_toast_is_human(page: Page, manifest):
     _open(page, manifest, "rematch_toast_target")
     with page.expect_response(re.compile(r"/po_sets/\d+/redo_match")) as resp:

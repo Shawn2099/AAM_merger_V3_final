@@ -67,7 +67,7 @@
           {% elif status_str == 'pending' %}
             <span class="badge badge-pending">Pending / Waiting</span>
             {% if ps.multi_po_decision %}
-            <span class="badge badge-mismatched" style="font-size:0.72rem; margin-left:4px;" title="The PO arrived as several files. Reconciliation will not choose between them.">Needs a decision: {{ ps.po_doc_count }} PO files - choose the right one (Force Merge if both are needed)</span>
+            <span class="badge badge-mismatched" style="font-size:0.72rem; margin-left:4px;" title="The PO arrived as several files. Reconciliation will not choose between them.">Needs a decision: {{ ps.po_doc_count }} PO files (Force Merge if both apply, or Remove Set to replace)</span>
             {% endif %}
             {% if ps.dn_number_only %}
             <span class="badge badge-mismatched" style="font-size:0.72rem; margin-left:4px;" title="A document was placed by its DN number only. Confirm it belongs to this PO.">Needs a decision: matched by DN number only</span>

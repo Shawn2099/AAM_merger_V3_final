@@ -209,6 +209,25 @@ document.addEventListener('htmx:beforeOnLoad', function (event) {
   }
 });
 
+function formatReason(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  const REASONS = {
+    missing_dn_document: 'Awaiting Delivery Note (DN)',
+    missing_si_document: 'Awaiting Sales Invoice (SI)',
+    missing_po_document: 'Awaiting Purchase Order (PO)',
+    multiple_po_documents: 'Multiple PO files attached',
+    multiple_dn_documents: 'Multiple Delivery Notes attached',
+    multiple_si_documents: 'Multiple Sales Invoices attached',
+    po_reference_mismatch: 'Conflicting PO reference',
+    quantity_mismatch: 'Quantity discrepancy between documents',
+    blocked_customs: 'Missing Customs / Shipping documents',
+    unmatched_vendor_line: 'Vendor line not found in Purchase Order',
+  };
+  const trimmed = raw.trim();
+  if (REASONS[trimmed]) return REASONS[trimmed];
+  return trimmed.replace(/_/g, ' ');
+}
+
 document.addEventListener('htmx:afterRequest', function (event) {
   const xhr = event.detail.xhr;
   if (!xhr) return;
@@ -234,10 +253,6 @@ document.addEventListener('htmx:afterRequest', function (event) {
         store.info('🛡️ Customs requirement setting updated.', true);
       }
     } else if (path.endsWith('/redo_extract')) {
-      // Report what the server actually read, not that the request was
-      // accepted. The route has always returned per-document results
-      // (`extractions: [{doc_id, status | error}]`); ignoring them turned a
-      // total failure into "Document extraction queued" (F-01).
       let body = {};
       try {
         body = JSON.parse(xhr.responseText);
@@ -245,9 +260,6 @@ document.addEventListener('htmx:afterRequest', function (event) {
         /* non-JSON: fall through to the generic message */
       }
       const results = Array.isArray(body.extractions) ? body.extractions : [];
-      // The route emits two shapes: `{doc_id, error}` when the call raised,
-      // and `{doc_id, status}` when it returned. A returned "failed" is still
-      // a failed read.
       const failed = results.filter(
         (item) => item && (item.error || item.status !== 'valid')
       );
@@ -279,14 +291,14 @@ document.addEventListener('htmx:afterRequest', function (event) {
         /* non-JSON response; fall through to the generic message */
       }
       const rec = body.reconciliation || {};
-      const why = rec.detail || rec.reason || '';
+      const why = formatReason(rec.detail || rec.reason || '');
       if (rec.status === 'merged') {
         store.success('Re-matched: the packet is merged.', true);
       } else if (rec.status === 'pending') {
-        store.info('Re-matched: still waiting' + (why ? ' - ' + why : '') + '.', true);
+        store.info('Re-matched: still waiting' + (why ? ' (' + why + ')' : '') + '.', true);
       } else if (rec.status === 'mismatched' || rec.status === 'quarantined') {
         store.warning('Re-matched: ' + rec.status.replace('_', ' ') +
-          (why ? ' - ' + why : '') + '.', true);
+          (why ? ' (' + why + ')' : '') + '.', true);
       } else {
         store.success('Re-matched.', true);
       }
@@ -298,21 +310,19 @@ document.addEventListener('htmx:afterRequest', function (event) {
       } catch (e) {
         /* non-JSON response; fall through to the generic message */
       }
+      const why = formatReason(body.detail || body.reason || '');
       if (body.status === 'merged') {
         // The operator needs the file name, not a server path (F-20).
         const name = String(body.merged_output_path || '').split(/[\\/]/).pop();
         store.success('Merged: ' + (name || 'packet written'), true);
       } else if (body.status === 'quarantined') {
-        store.warning('Still quarantined: ' + (body.detail || body.reason || 'open the set for the reason') +
+        store.warning('Still quarantined: ' + (why || 'open the set for the reason') +
           '. Use Re-Match to re-enter reconciliation, or Force Merge to override.', true);
       } else if (body.status === 'pending') {
-        store.info('Still pending: ' + (body.detail || body.reason || 'waiting on a document') +
+        store.info('Still pending: ' + (why || 'waiting on a document') +
           '. Add the missing document, then press Merge Now again.', true);
       } else {
-        // This branch used to name only the status: the server's explanation
-        // is the useful part (F-17).
-        const why = body.detail || body.reason || 'open the set for the reason';
-        store.warning('Not merged - still ' + (body.status || 'unresolved') + ': ' + why +
+        store.warning('Not merged - still ' + (body.status || 'unresolved') + ': ' + (why || 'open the set for the reason') +
           '. Review the reason on the set page.', true);
       }
     } else if (path.endsWith('/force_merge')) {
