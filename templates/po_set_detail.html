@@ -103,6 +103,12 @@
     <div><strong>Created:</strong> {{ po_set.created_at | ist('%Y-%m-%d %H:%M:%S') }}</div>
     <div title="The system touches a set on every check, so this is not when the documents changed."><strong>Last checked:</strong> {{ po_set.updated_at | ist('%Y-%m-%d %H:%M:%S') }}</div>
     <div><strong>Customs Requirement:</strong> <span style="font-weight:600; color:{{ 'var(--primary)' if po_set.has_customs_toggle else 'var(--text-muted)' }};">{{ 'ENABLED (CUSTOMS + SHIPPING Required)' if po_set.has_customs_toggle else 'DISABLED' }}</span></div>
+    {% if is_merged %}
+    <div data-testid="packet-customs-facts"><strong>Packet contains customs pages:</strong> {{ 'Yes' if packet_has_customs else 'No' }}</div>
+    {% if not po_set.has_customs_toggle and packet_has_customs %}
+    <div data-testid="customs-off-packet-note" style="width:100%;">Customs is switched off, but the delivered packet still contains customs pages. The packet is kept as it is.</div>
+    {% endif %}
+    {% endif %}
     {% if po_set.has_customs_toggle %}
       <div><strong>Customs Clearance:</strong> <span style="font-weight:600;">{% if 'CUSTOMS' in documents|map(attribute='doc_type')|map(attribute='value')|list %}✅ Attached{% else %}❌ Missing{% endif %}</span></div>
       <div><strong>Shipping (AWB):</strong> <span style="font-weight:600;">{% if 'SHIPPING' in documents|map(attribute='doc_type')|map(attribute='value')|list %}✅ Attached{% else %}❌ Missing{% endif %}</span></div>

@@ -626,6 +626,7 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
             and _resolve_db_path(ps.merged_output_path, cfg.paths.output_folder)
         )
         unclassified_count = _holding_area_query(s).count()
+        packet_has_customs = _packet_has_customs(s, ps, docs)
 
         return _templates.TemplateResponse(
             request,
@@ -647,9 +648,35 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
                 "unclassified_count": unclassified_count,
                 "notice": notice,
                 "is_archived": ps.archived_at is not None,
+                "is_merged": ps.status == POSetStatus.merged,
+                "packet_has_customs": packet_has_customs,
                 "archive_folder": str(cfg.paths.archive_folder),
             },
         )
+
+
+def _packet_has_customs(s: Session, ps: POSet, docs: list[Document]) -> bool:
+    """True when a delivered packet contains customs or shipping pages.
+
+    Worked out from the app's own records, not by reading the PDF: a customs or
+    shipping document attached before the packet was merged is in it, and a
+    recorded customs append added the rest. Not meaningful for other statuses.
+    """
+    if ps.status != POSetStatus.merged or ps.merged_at is None:
+        return False
+    attached = [
+        d
+        for d in docs
+        if d.archived_at is None and d.doc_type in (DocType.CUSTOMS, DocType.SHIPPING)
+    ]
+    if any(d.created_at is not None and d.created_at <= ps.merged_at for d in attached):
+        return True
+    appended = (
+        s.query(AuditLog.id)
+        .filter(AuditLog.po_set_id == ps.id, AuditLog.action == AuditAction.customs_append)
+        .first()
+    )
+    return appended is not None
 
 
 def _resolve_db_path(path: str | Path, root: str | Path) -> Path | None:
