@@ -304,3 +304,25 @@ Known not covered: browser-side Alpine/HTMX beyond tests/ui, Windows services (N
 3. **E2E run:** archive (do not delete) the old `data/aam_merger.db*`, `data/input`, `data/output`, `data/stored`, `data/quarantine` into `data/prev_run_<date>/`; fresh DB via `uv run python scripts/migrate_db.py`; copy `real_samples/*.pdf` into `data/input`; run the sync with the API key; guard the cost (695 PDFs ~3.5x the 200-file run; HTTP-400 halt stays on). Add a slow-copy check.
 4. Verify: every merged packet vs its source PDFs; every non-merged set has a visible reason; UI figures vs DB; write `REAL_RUN_2026-10-25_*.md`.
 5. WS7 docs/runbook, WS8 licence, WS9 on the target PC.
+
+## 2026-10-25 12:15 - Work split after the Opus whole-project review (usage limits close)
+
+Review: `docs/OPUS_REVIEW_2026-10-25.md` (verdict GO WITH FIXES; read it for evidence and file:line).
+State: settings page and tests, WS6, installer changes are committed and pushed (f083bd9, 20d5e9e, 4689a53, b895cb6).
+WS1 worker finished 11:57; its diff (templates testids, scripts/ui_test_env.py, tests/ui/*) is NOT yet reviewed or committed.
+
+**Claude does (judgment, wrong-merge risk, Opus-reviewed areas; small and tight):**
+1. B1 test fix: tests/test_best_case_pipeline.py:280 expects path order; change to oldest-mtime-first, path tie-break.
+2. B2 duplicate-DN/SI guard (reconciliation.py ~680-708): number-less or confusable (O/0, I/L/1) copy clashes with every same-pool doc sharing a line key; add tests (None,"DN-77") and O/0.
+3. B3 grouping: skip docs carrying their own PO in resolve_unattached_documents; update test_known_limitations.py:82 and PRODUCT section 8 M; run make business-logic.
+4. Review and commit the WS1 diff; final gates (ruff, ty, full pytest, make business-logic).
+5. B4/B5 and the install on this PC with the owner (Administrator step), then supervise and verify the 695-PDF run.
+
+**DeepSeek does (mechanical, with a detailed plan from Claude, reviewed after):**
+1. S1: trip the provider breaker on 401/402/403 and "not configured"; do not re-extract in recovery_flow a document the main loop already tried this pass (extraction.py ~807, flows/sync.py ~285/453). Tests first.
+2. S2: copy-safety: require now-mtime >= 30-60 s and unchanged mtime across samples, and re-check (size, mtime) right before ingest_file; slow-copy test.
+3. Docs only: RUNBOOK lines for O-2..O-5, B5 preconditions (power plan never sleep, one-file smoke test, copy then scan, expect 409 during a pass), PRODUCT/D5 note that oldest-first uses the source file's mtime.
+4. Installer script: powercfg standby never (AC), VC++ 2015-2022 x64 preflight warning. Not on this dev PC without owner OK (Install.cmd runs uv sync --no-dev which removes test tools from the shared .venv).
+
+**Owner decisions pending:** S3 (startup fallback to newest valid config_backups copy: small feature, or document only); whether the poller runs during the e2e run (recommend OFF, copy files then press Scan); regenerate this PC's stale config.yaml from config.example.yaml (B4).
+Do not start the e2e run before B1-B4 are done and the install is verified.
