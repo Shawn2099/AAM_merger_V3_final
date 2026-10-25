@@ -1275,14 +1275,21 @@ def _same_bytes(path: Path, data: bytes) -> bool:
     return hashlib.sha256(path.read_bytes()).digest() == hashlib.sha256(data).digest()
 
 
-def _restore_input_copies(moved: list[tuple[Path, Path]]) -> None:
-    """Put back input-folder files that were moved out by a removal that did not finish."""
+def _restore_input_copies(moved: list[tuple[Path, Path]]) -> list[str]:
+    """Put back input-folder files that were moved out by a removal that did not finish.
+
+    Returns the names that could not be put back. The caller must keep the copies on
+    disk when any name is returned (review M2).
+    """
+    failed: list[str] = []
     for copy, original in moved:
         try:
             original.write_bytes(copy.read_bytes())
             copy.unlink(missing_ok=True)
         except OSError:
+            failed.append(original.name)
             logger.warning("Could not restore input copy %s", original, exc_info=True)
+    return failed
 
 
 def _set_row_export(ps: POSet) -> dict:
@@ -1461,8 +1468,16 @@ def remove_set_to_quarantine(
                 pdf.unlink(missing_ok=True)
                 moved.append((copy, pdf))
         except Exception:
-            _restore_input_copies(moved)
+            failed = _restore_input_copies(moved)
             shutil.rmtree(stage, ignore_errors=True)
+            if failed:
+                # Keep the folder: it holds the only copy of the files not put back (M2).
+                raise SetRemovalRefused(
+                    500,
+                    "The removal failed and nothing was deleted. Files could not be put back "
+                    f"in the input folder ({', '.join(failed)}); they are in "
+                    f"{REMOVED_SETS_FOLDER}/{final.name}.",
+                ) from None
             shutil.rmtree(final, ignore_errors=True)
             raise
 
@@ -1521,6 +1536,17 @@ def remove_set_to_quarantine(
         except SetRemovalRefused:
             _restore_input_copies(moved)
             raise
+        except Exception as exc:
+            # The transaction rolled back, so no row changed. Put the input files back
+            # and keep the folder, so the operator can see where the copies are (A2).
+            failed = _restore_input_copies(moved)
+            detail = (
+                "The removal failed and nothing was deleted. "
+                f"The copies are in {REMOVED_SETS_FOLDER}/{final.name}."
+            )
+            if failed:
+                detail += f" These input files could not be put back: {', '.join(failed)}."
+            raise SetRemovalRefused(500, detail) from exc
 
         # A future set with this id must not adopt the old quarantine folder (id reuse).
         for marker in Path(cfg.paths.quarantine_folder).glob("*/.po_set_id"):

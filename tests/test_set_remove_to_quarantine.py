@@ -248,3 +248,40 @@ def test_a_removed_set_card_is_shown_only_on_open_sets(cfg, client):
     assert "remove-set-card" in client.get(f"/po_sets/{set_id}/view").text
     merged_id, _d, _i, _u = _set_with_files(cfg, po="PO8301", status=POSetStatus.merged)
     assert "remove-set-card" not in client.get(f"/po_sets/{merged_id}/view").text
+
+
+def test_a_failed_delete_restores_the_input_files_and_deletes_nothing(cfg):
+    """Review A2: a real database error in the delete transaction puts the input files back."""
+    from sqlalchemy import text
+
+    set_id, doc_ids, input_copy, _unrelated = _set_with_files(cfg)
+    with get_engine(cfg).begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TRIGGER block_po_set_delete BEFORE DELETE ON po_sets BEGIN SELECT RAISE(ABORT, 'blocked'); END;"
+            )
+        )
+    with pytest.raises(q.SetRemovalRefused) as exc:
+        q.remove_set_to_quarantine(set_id, cfg)
+    assert exc.value.status_code == 500
+    assert "nothing was deleted" in exc.value.message
+    assert input_copy.is_file(), "the input file must be put back"
+    with Session(get_engine(cfg)) as s:
+        assert s.get(POSet, set_id) is not None
+        assert len(s.scalars(select(Document).where(Document.id.in_(doc_ids))).all()) == 2
+    folders = _removed_folders(cfg)
+    assert len(folders) == 1, "the copies stay on disk for the operator"
+    with get_engine(cfg).begin() as conn:
+        conn.execute(text("DROP TRIGGER block_po_set_delete"))
+
+
+def test_a_failed_restore_keeps_the_folder_and_names_the_files(cfg, monkeypatch):
+    """Review A4: when a moved input file cannot be put back, its only copy is kept."""
+    set_id, _doc_ids, _input, _unrelated = _set_with_files(cfg)
+    # Fail only the input-copy check: that happens after the folder is in place.
+    monkeypatch.setattr(q, "_same_bytes", lambda path, data: path.parent.name != "input")
+    monkeypatch.setattr(q, "_restore_input_copies", lambda moved: ["po.pdf"])
+    with pytest.raises(q.SetRemovalRefused) as exc:
+        q.remove_set_to_quarantine(set_id, cfg)
+    assert "po.pdf" in exc.value.message
+    assert len(_removed_folders(cfg)) == 1, "the folder is kept when a file could not be restored"
