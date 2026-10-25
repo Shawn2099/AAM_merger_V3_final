@@ -3,40 +3,7 @@
 
 {% block content %}
 <!-- Executive KPI Summary Cards -->
-<div class="kpi-grid">
-  <a href="/dashboard" class="kpi-card kpi-all" title="View all PO Sets">
-    <span class="kpi-title">Total PO Sets</span>
-    <span class="kpi-value">{{ stats.total if stats else po_sets|length }}</span>
-    <span class="kpi-desc">Managed across pipeline</span>
-  </a>
-
-  <a href="/dashboard?status=merged" class="kpi-card kpi-merged" title="Filter by Merged (Ready)">
-    <span class="kpi-title">✅ Merged &amp; Ready</span>
-    <span class="kpi-value" style="color:var(--clr-merged-text);">
-      {{ stats.merged if stats else 0 }}
-      <small style="font-size:0.9rem; font-weight:600; opacity:0.8;">({{ stats.merged_pct if stats else 0 }}%)</small>
-    </span>
-    <span class="kpi-desc">Fully reconciled packets</span>
-  </a>
-
-  <a href="/dashboard?status=mismatched" class="kpi-card kpi-mismatched" title="Filter by Mismatched (Needs Review)">
-    <span class="kpi-title">⚠️ Needs Review</span>
-    <span class="kpi-value" style="color:var(--clr-mismatch-text);">{{ stats.mismatched if stats else 0 }}</span>
-    <span class="kpi-desc">Quantity discrepancies</span>
-  </a>
-
-  <a href="/dashboard?status=blocked_customs" class="kpi-card kpi-blocked" title="Filter by Awaiting Customs">
-    <span class="kpi-title">🔒 Awaiting Customs</span>
-    <span class="kpi-value" style="color:var(--clr-blocked-text);">{{ stats.blocked_customs if stats else 0 }}</span>
-    <span class="kpi-desc">Needs customs/shipping docs</span>
-  </a>
-
-  <a href="/dashboard?status=quarantined" class="kpi-card kpi-quarantined" title="Filter by Quarantined">
-    <span class="kpi-title">🚨 Quarantined</span>
-    <span class="kpi-value" style="color:var(--clr-quarantined-text);">{{ stats.quarantined if stats else 0 }}</span>
-    <span class="kpi-desc">Zero qty or critical conflict</span>
-  </a>
-</div>
+{% include "_dashboard_kpi_grid.html" %}
 
 <!-- Main Table Card -->
 <div class="card" x-data="tableSearch()">
@@ -51,6 +18,11 @@
 
     <!-- Sync Trigger & Live State -->
     <div style="display:flex; align-items:center; gap:12px;">
+      <a href="/manual/merger" class="btn btn-secondary" title="Standalone PDF merger — no AI, no database">
+        <span style="font-size:1rem;">🧩</span>
+        <span>Merge PDFs</span>
+      </a>
+
       <span id="sync-spinner" class="htmx-indicator" style="align-items:center; gap:6px; color:var(--text-muted); font-size:0.85rem;">
         <span class="spinner" style="border-color:#6366f1; border-top-color:transparent;"></span>
         <span>Scanning &amp; Extracting…</span>
@@ -58,6 +30,7 @@
 
       <button
         id="sync-btn"
+        data-testid="btn-scan-input"
         class="btn btn-primary"
         hx-post="/sync"
         hx-swap="none"
@@ -77,7 +50,7 @@
       <span class="search-icon">🔍</span>
       <input 
         type="text" 
-        placeholder="Filter by PO number, vendor, or status…" 
+        placeholder="Filter by PO number or status…"
         x-model="query" 
         @input="filterRows()"
       >
@@ -96,49 +69,12 @@
     </form>
 
     <!-- Status Tabs -->
-    <div class="status-tabs">
-      <a href="/dashboard" class="tab-btn {% if not current_status %}active{% endif %}">
-        <span>All</span>
-        <span class="tab-count">{{ stats.total if stats else po_sets|length }}</span>
-      </a>
-
-      <a href="/dashboard?status=pending" class="tab-btn {% if current_status == 'pending' %}active{% endif %}">
-        <span>Pending</span>
-        {% if stats %}<span class="tab-count">{{ stats.pending }}</span>{% endif %}
-      </a>
-
-      <a href="/dashboard?status=mismatched" class="tab-btn {% if current_status == 'mismatched' %}active{% endif %}">
-        <span>Needs Review</span>
-        {% if stats %}<span class="tab-count">{{ stats.mismatched }}</span>{% endif %}
-      </a>
-
-      <a href="/dashboard?status=blocked_customs" class="tab-btn {% if current_status == 'blocked_customs' %}active{% endif %}">
-        <span>Awaiting Customs</span>
-        {% if stats %}<span class="tab-count">{{ stats.blocked_customs }}</span>{% endif %}
-      </a>
-
-      <a href="/dashboard?status=merged" class="tab-btn {% if current_status == 'merged' %}active{% endif %}">
-        <span>Merged</span>
-        {% if stats %}<span class="tab-count">{{ stats.merged }}</span>{% endif %}
-      </a>
-
-      <a href="/dashboard?status=quarantined" class="tab-btn {% if current_status == 'quarantined' %}active{% endif %}">
-        <span>Quarantined</span>
-        {% if stats %}<span class="tab-count">{{ stats.quarantined }}</span>{% endif %}
-      </a>
-    </div>
+    {% include "_dashboard_tabs.html" %}
   </div>
 
   <!-- Data Table Container -->
   <div class="table-container">
-    <div 
-      id="po-table"
-      hx-get="/dashboard/table{% if current_status %}?status={{ current_status }}{% endif %}"
-      hx-trigger="every 2s"
-      hx-swap="outerHTML"
-    >
-      {% include "_dashboard_table.html" %}
-    </div>
+    {% include "_dashboard_table.html" %}
   </div>
 
 </div>

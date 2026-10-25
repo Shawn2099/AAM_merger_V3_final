@@ -5,17 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}AAM Merger V3 — Smart Document Reconciler{% endblock %}</title>
   
-  <!-- Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- No external font/script requests: the client LAN has no internet.
+       The theme falls back to system-ui / Segoe UI (static/css/theme.css). -->
   
   <!-- CSS Theme -->
   <link rel="stylesheet" href="/static/css/theme.css">
   
-  <!-- HTMX & Alpine.js -->
-  <script src="https://unpkg.com/htmx.org@1.9.12" crossorigin="anonymous"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/cdn.min.js"></script>
+  <!-- HTMX & Alpine.js — vendored under static/js so the dashboard works on a
+       LAN with no internet access. The server still needs internet for VLM
+       extraction; the users' browsers must not. -->
+  <script src="/static/js/htmx.min.js"></script>
+  <script defer src="/static/js/alpine.min.js"></script>
   <script src="/static/js/app.js"></script>
   
   {% block head %}{% endblock %}
@@ -30,27 +30,31 @@
     </a>
     
     <div class="nav-links">
-      <a href="/dashboard" class="nav-link {% if request.url.path.startswith('/dashboard') or request.url.path == '/' or request.url.path.startswith('/po_sets') %}active{% endif %}">
+      <a href="/dashboard" data-testid="nav-dashboard" class="nav-link {% if request.url.path.startswith('/dashboard') or request.url.path == '/' or request.url.path.startswith('/po_sets') %}active{% endif %}">
         <span>📊 Dashboard</span>
       </a>
       
-      <a href="/unclassified" class="nav-link {% if request.url.path.startswith('/unclassified') %}active{% endif %}">
+      <a href="/unclassified" data-testid="nav-unclassified" class="nav-link {% if request.url.path.startswith('/unclassified') %}active{% endif %}">
         <span>❓ Unclassified</span>
         {% if unclassified_count and unclassified_count > 0 %}
           <span class="nav-counter-badge">{{ unclassified_count }}</span>
         {% endif %}
       </a>
       
-      <a href="/quarantine" class="nav-link {% if request.url.path.startswith('/quarantine') %}active{% endif %}">
+      <a href="/quarantine" data-testid="nav-quarantine" class="nav-link {% if request.url.path.startswith('/quarantine') %}active{% endif %}">
         <span>🚨 Quarantine</span>
       </a>
       
-      <a href="/audit" class="nav-link {% if request.url.path.startswith('/audit') %}active{% endif %}">
+      <a href="/audit" data-testid="nav-audit" class="nav-link {% if request.url.path.startswith('/audit') %}active{% endif %}">
         <span>📜 Audit Log</span>
       </a>
       
-      <a href="/manual/merger" class="nav-link {% if request.url.path.startswith('/manual') %}active{% endif %}">
-        <span>🛠️ Manual Merger</span>
+      <a href="/manual/merger" data-testid="nav-merger" class="nav-link {% if request.url.path.startswith('/manual') %}active{% endif %}" title="Standalone PDF merger — no AI, no database">
+        <span>🧩 Merge PDFs</span>
+      </a>
+
+      <a href="/settings" data-testid="nav-settings" class="nav-link {% if request.url.path.startswith('/settings') %}active{% endif %}" title="Review and change how the service runs">
+        <span>⚙️ Settings</span>
       </a>
     </div>
 
@@ -69,7 +73,7 @@
 
   <!-- Global Slide-Over PDF Preview Drawer -->
   <div 
-    class="drawer-backdrop" 
+    data-testid="pdf-drawer" class="drawer-backdrop" 
     :class="{ 'open': $store.pdfDrawer.isOpen }" 
     @click.self="$store.pdfDrawer.close()"
     x-cloak
@@ -83,7 +87,7 @@
         <button 
           class="btn btn-secondary btn-sm" 
           @click="$store.pdfDrawer.close()" 
-          title="Close (Esc)"
+          data-testid="btn-drawer-close" title="Close (Esc)"
         >
           ✕ Close
         </button>

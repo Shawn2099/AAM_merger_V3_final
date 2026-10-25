@@ -4,75 +4,260 @@ Cross-platform via pathlib. No hardcoded paths. Sync def handlers."""
 
 from __future__ import annotations
 
+import json
+import logging
+from datetime import UTC, datetime
+from html import escape
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, func, or_
+from sqlalchemy.orm import Session, selectinload
 
+from app.api.routes.po_sets import _scrub_paths
 from app.core.config import load_config
 from app.core.database import get_engine
-from app.models import AuditLog, DocType, Document, LineItem, POSet, POSetStatus
+from app.models import (
+    AuditLog,
+    DocType,
+    Document,
+    ExtractionStatus,
+    LineItem,
+    POSet,
+    POSetStatus,
+)
 from app.models.base import Base
+from app.services.locking import acquire_lock, is_locked, release_if_stale, release_lock
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
+
+#: Document types an operator may assign by hand on the unclassified page.
+#: Mirrors the `<select>` in `templates/unclassified.html`. The multi-document
+#: packaging type is intentionally absent: Layer 1's split decides it, and it is
+#: not something a human can assert about a single document.
+_HAND_ASSIGNABLE_DOC_TYPES = frozenset(
+    {
+        DocType.PO,
+        DocType.DN,
+        DocType.SI,
+        DocType.CUSTOMS,
+        DocType.SHIPPING,
+    }
+)
+
 # Jinja templates — directory = "templates" (cross-platform, not hardcoded absolute)
-_templates = Jinja2Templates(directory="templates")
+_templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[4] / "templates"))
 
 # 5 statuses as defined in SPEC §6.3 — enum values are the source of truth
 _ALLOWED_STATUSES = {s.value for s in POSetStatus}
 
 
-def _is_locked(ps: POSet, cfg) -> bool:
-    if ps.locked_by_action is None:
-        return False
-    from datetime import UTC, datetime
+def _holding_area_query(session: Session):
+    """Every document waiting for a human, in one place.
 
-    updated = ps.updated_at
-    if updated is None:
-        return True
-    if updated.tzinfo is None:
-        updated = updated.replace(tzinfo=UTC)
-    now = datetime.now(UTC)
-    timeout = cfg.concurrency.po_set_lock_timeout_seconds
-    return (now - updated).total_seconds() <= timeout
+    The holding area is more than "UNKNOWN documents": it also holds documents
+    that failed permanently, documents showing more than one PO number, and
+    documents read successfully but attached to no set. The dashboard badge
+    used to count only UNKNOWN, so it said "2" while the page held 37 — the
+    exact way work goes unseen. Every count must use this query.
+    """
+    # A split parent whose split COMPLETED is sterile: its children own the
+    # content, and listing it would duplicate the whole packet. A parent whose
+    # split FAILED — or never finished — is a loss, not a duplicate. Excluding
+    # every parent (audit P0-3) hid exactly that loss from the only list an
+    # operator can act on: it was in no set, on no page, and could not be
+    # reclassified. A `valid` incomplete parent is excluded because
+    # `extract_document` re-reads it on the next pass; it is not waiting.
+    visible = or_(
+        Document.is_split_parent.is_(False),
+        and_(
+            Document.is_split_parent.is_(True),
+            Document.split_completed_at.is_(None),
+            Document.extraction_status == ExtractionStatus.failed,
+        ),
+    )
+    return session.query(Document).filter(
+        Document.archived_at.is_(None),
+        visible,
+        # The holding area is every document NOT in a PO Set. That includes
+        # valid unplaced documents, failures, unknowns and ambiguous PO
+        # numbers. An attached document (even a failed one) belongs to its
+        # set's detail page; listing it here invited the operator to reclassify
+        # it out of a merged set.
+        Document.po_set_id.is_(None),
+    )
 
 
 def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) -> list[dict]:
-    q = session.query(POSet)
+    q = session.query(POSet).filter(POSet.archived_at.is_(None))
     if status_filter:
         if status_filter not in _ALLOWED_STATUSES:
             return []
-        all_sets = q.all()
-        pools = [
-            ps
-            for ps in all_sets
-            if (ps.status.value if hasattr(ps.status, "value") else str(ps.status)) == status_filter
-        ]
-    else:
-        pools = q.all()
+        try:
+            target_status = POSetStatus(status_filter)
+            q = q.filter(POSet.status == target_status)
+        except ValueError:
+            return []
+    pools = q.all()
+
+    if not pools:
+        return []
+
+    po_set_ids = [ps.id for ps in pools]
+    doc_count_rows = (
+        session.query(Document.po_set_id, func.count(Document.id))
+        .filter(
+            Document.po_set_id.in_(po_set_ids),
+            Document.archived_at.is_(None),
+        )
+        .group_by(Document.po_set_id)
+        .all()
+    )
+    doc_counts = {r[0]: r[1] for r in doc_count_rows if r[0] is not None}
+
     out = []
     for ps in pools:
-        docs = session.query(Document).filter_by(po_set_id=ps.id).all()
         status_val = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
-        has_merged_file = bool(ps.merged_output_path and Path(ps.merged_output_path).exists())
+        has_merged_file = bool(
+            ps.merged_output_path
+            and _resolve_db_path(ps.merged_output_path, cfg.paths.output_folder)
+        )
         out.append(
             {
                 "id": ps.id,
                 "po_no_normalized": ps.po_no_normalized,
                 "status": ps.status,
                 "status_val": status_val,
-                "doc_count": len(docs),
+                "doc_count": doc_counts.get(ps.id, 0),
                 "has_merged_file": has_merged_file,
                 "updated_at": ps.updated_at,
+                # Age is the set's age (created_at). updated_at is bumped by every
+                # lock/unlock in every sweep, so it would read "just now" forever.
+                "created_at": ps.created_at,
+                "age_seconds": _age_seconds(ps.created_at),
+                "reconcile_reason": ps.reconcile_reason,
                 "locked_by_action": ps.locked_by_action,
-                "is_locked": _is_locked(ps, cfg),
+                "is_locked": is_locked(ps, cfg),
+                "has_customs_toggle": ps.has_customs_toggle,
+                "customs_doc_count": ps.customs_doc_count or 0,
+                "customs_append_pending": bool(ps.customs_append_pending),
+                "description_match_count": ps.description_match_count or 0,
+                "line_mapping_rule": ps.line_mapping_rule,
             }
         )
-    out.sort(key=lambda x: x["updated_at"] or x["id"], reverse=True)  # type: ignore[no-matching-overload]
+
+    def _sort_key(x: dict) -> tuple[datetime, int]:
+        dt = x.get("created_at")
+        if dt is None:
+            return (datetime.min, x.get("id") or 0)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(UTC).replace(tzinfo=None)
+        return (dt, x.get("id") or 0)
+
+    out.sort(key=_sort_key, reverse=True)
     return out
+
+
+def _now_ts() -> float:
+    """Current epoch seconds, passed to templates so relative ages render
+    server-side (no client clock, no layout shift on refresh)."""
+    import time
+
+    return time.time()
+
+
+def _age_seconds(dt: datetime | None) -> int | None:
+    """Age in seconds for a DB timestamp.
+
+    SQLite hands back naive datetimes even for `DateTime(timezone=True)`; they
+    are UTC. Calling `.timestamp()` on a naive value interprets it as local
+    time and inflates every age by the host's UTC offset (4h in the UAE, 5.5h
+    here). Normalise to UTC explicitly; this mirrors `locking.is_locked`.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return max(0, int((datetime.now(UTC) - dt).total_seconds()))
+
+
+def build_matrix_rows(
+    po_lines: list[dict],
+    dn_lines: list[dict],
+    si_lines: list[dict],
+    comparison: dict,
+    set_status: str | None = None,
+) -> list[dict]:
+    """One matrix row per comparison key, using the engine's own totals.
+
+    The old code iterated raw PO rows and looked up the vendor aggregate: a PO
+    printing line 1 twice (40 + 60) produced two rows that each compared 40/60
+    against the vendor's 100 and showed a false mismatch on a merged set.
+    """
+    from app.services.matching import display_line_key, po_item_key
+
+    po_first: dict[str, dict] = {}
+    for p in po_lines:
+        po_first.setdefault(po_item_key(p), p)
+
+    # Lines the engine attached by the description fallback. The flag carries
+    # the displayed key, which is what the matrix shows.
+    desc_keys = {
+        str(f.get("line_item_no"))
+        for f in comparison.get("flags", [])
+        if f.get("type") == "description_match"
+    }
+
+    # Vendor numbers a line-number rule paired with each PO line, for the matrix.
+    mapped_from: dict[str, list[str]] = {}
+    for pool in ("DN", "SI"):
+        pool_map = (comparison.get("line_mapping") or {}).get(pool, {}).get("map", {})
+        for vkey, pkey in pool_map.items():
+            mapped_from.setdefault(pkey, []).append(f"{pool} {vkey}")
+
+    rows: list[dict] = []
+    for key, po_scaled in comparison["po_totals"].items():
+        p = po_first.get(key, {})
+        dn_scaled = comparison["dn_totals"].get(key, 0)
+        si_scaled = comparison["si_totals"].get(key, 0)
+        agg_dn = dn_scaled / 1000
+        agg_si = si_scaled / 1000
+        po_q = po_scaled / 1000
+        missing_pool = "DN" if not dn_lines else ("SI" if not si_lines else None)
+        reconciled = not missing_pool and dn_scaled == po_scaled and si_scaled == po_scaled
+        if reconciled:
+            row_class, badge, verdict = "row-match", "badge-merged", "\u2705 Match"
+        elif missing_pool:
+            row_class, badge = "row-pending", "badge-pending"
+            verdict = f"Awaiting {missing_pool}"
+        elif set_status == "pending":
+            # A pending set is waiting on a vendor, not failing. Painting the
+            # row red made 33 real pending sets look like mismatches.
+            row_class, badge = "row-pending", "badge-pending"
+            verdict = f"Awaiting (PO: {po_q:g}, DN: {agg_dn:g}, SI: {agg_si:g})"
+        else:
+            row_class, badge = "row-mismatch", "badge-mismatched"
+            verdict = f"\u274c Mismatch (PO: {po_q:g}, DN: {agg_dn:g}, SI: {agg_si:g})"
+        rows.append(
+            {
+                "line_item_no": display_line_key(key) or "—",
+                "description": p.get("description") or "",
+                "po_qty": po_q,
+                "dn_agg_qty": agg_dn,
+                "si_agg_qty": agg_si,
+                "row_class": row_class,
+                "badge": badge,
+                "verdict": verdict,
+                "desc_matched": (display_line_key(key) or "—") in desc_keys,
+                "mapped_from": " · ".join(mapped_from.get(key, [])),
+            }
+        )
+    return rows
 
 
 def _sync_running_state() -> bool:
@@ -85,30 +270,30 @@ def _sync_running_state() -> bool:
 
 
 def _get_stats(session: Session) -> dict:
-    all_sets = session.query(POSet).all()
-    unclassified_count = (
-        session.query(Document).filter(Document.doc_type == DocType.UNKNOWN).count()
+    rows = (
+        session.query(POSet.status, func.count(POSet.id))
+        .filter(POSet.archived_at.is_(None))
+        .group_by(POSet.status)
+        .all()
     )
+    counts = {}
+    for st, cnt in rows:
+        st_val = st.value if hasattr(st, "value") else str(st)
+        counts[st_val] = cnt
 
-    def count_status(s_name: str) -> int:
-        return sum(
-            1
-            for ps in all_sets
-            if (ps.status.value if hasattr(ps.status, "value") else str(ps.status)) == s_name
-        )
-
-    merged_c = count_status("merged")
-    total_c = len(all_sets)
+    total_c = sum(counts.values())
+    merged_c = counts.get("merged", 0)
     pct = round(merged_c / total_c * 100) if total_c > 0 else 0
+    unclassified_count = _holding_area_query(session).count()
 
     return {
         "total": total_c,
         "merged": merged_c,
         "merged_pct": pct,
-        "mismatched": count_status("mismatched"),
-        "blocked_customs": count_status("blocked_customs"),
-        "quarantined": count_status("quarantined"),
-        "pending": count_status("pending"),
+        "mismatched": counts.get("mismatched", 0),
+        "blocked_customs": counts.get("blocked_customs", 0),
+        "quarantined": counts.get("quarantined", 0),
+        "pending": counts.get("pending", 0),
         "unclassified": unclassified_count,
     }
 
@@ -130,14 +315,34 @@ def root() -> RedirectResponse:
 
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, status: str | None = None):
+    # The select's "All statuses" option submits `?status=`; an empty value
+    # means no filter, not an unknown status.
+    if status and status not in _ALLOWED_STATUSES:
+        # A browser navigation, not an API call: render the app with a way
+        # back instead of `{"detail": ...}` on a blank page (F-04).
+        return _templates.TemplateResponse(
+            request,
+            "error.html",
+            {
+                "request": request,
+                "code": 422,
+                "heading": "Unknown status filter",
+                "message": (
+                    f"That status filter is not recognised: {status!r}. "
+                    "Use the tabs or the status list on the dashboard."
+                ),
+            },
+            status_code=422,
+        )
     cfg = load_config()
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     with Session(eng) as s:
-        for ps in s.query(POSet).all():
-            if ps.locked_by_action is not None and not _is_locked(ps, cfg):
-                ps.locked_by_action = None
-        s.commit()
+        for ps in s.query(POSet).filter(POSet.archived_at.is_(None)).all():
+            if ps.locked_by_action is not None:
+                # Conditional on the observed lock: a fresh lock acquired in
+                # the gap must not be cleared by this poll.
+                release_if_stale(ps, s, cfg)
         po_sets = _po_sets_with_doc_count(s, status, cfg)
         sync_running = _sync_running_state()
         stats = _get_stats(s)
@@ -150,6 +355,9 @@ def dashboard(request: Request, status: str | None = None):
                     "request": request,
                     "po_sets": po_sets,
                     "current_status": status if status in _ALLOWED_STATUSES else None,
+                    "now_ts": _now_ts(),
+                    "stats": stats,
+                    "oob_stats": True,
                 },
             )
         return _templates.TemplateResponse(
@@ -162,12 +370,15 @@ def dashboard(request: Request, status: str | None = None):
                 "sync_running": sync_running,
                 "stats": stats,
                 "unclassified_count": stats["unclassified"],
+                "now_ts": _now_ts(),
             },
         )
 
 
 @router.get("/dashboard/table", response_class=HTMLResponse)
 def dashboard_table(request: Request, status: str | None = None):
+    if status and status not in _ALLOWED_STATUSES:
+        raise HTTPException(status_code=422, detail=f"Unknown status filter: {status}")
     cfg = load_config()
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
@@ -180,6 +391,11 @@ def dashboard_table(request: Request, status: str | None = None):
                 "request": request,
                 "po_sets": po_sets,
                 "current_status": status if status in _ALLOWED_STATUSES else None,
+                "now_ts": _now_ts(),
+                # The KPI cards and tabs are refreshed with the rows (out-of-band), so a
+                # merge done in the background never leaves the page showing two truths.
+                "stats": _get_stats(s),
+                "oob_stats": True,
             },
         )
 
@@ -189,235 +405,310 @@ def dashboard_table(request: Request, status: str | None = None):
 # ---------------------------------------------------------------------------
 
 
+def _fallback_from_stored_label(label: str | None):
+    """Rebuild the line-number rules a set used from its stored `line_mapping_rule`.
+
+    The label names every rule that re-keyed a pool ("x10", or "DN x10, SI as
+    printed"); no label means exact matching only. Only those rules are
+    switched on, which reproduces the mapping the engine used at merge time.
+    """
+    from app.core.config import LineNumberFallbackConfig
+    from app.services.matching import LINE_MAPPING_RULES
+
+    used = {r for r in LINE_MAPPING_RULES if label and r in label.replace(",", " ").split()}
+    return LineNumberFallbackConfig(
+        step10="x10" in used,
+        step10_reverse="div10" in used,
+        release_suffix="add_rel" in used,
+        release_suffix_reverse="strip_rel" in used,
+    )
+
+
 @router.get("/po_sets/{po_set_id}/view", response_class=HTMLResponse)
-def po_set_detail_view(po_set_id: int, request: Request):
+def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = None):
     cfg = load_config()
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     with Session(eng) as s:
         ps = s.get(POSet, po_set_id)
         if ps is None:
-            raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
-        if ps.locked_by_action is not None and not _is_locked(ps, cfg):
-            ps.locked_by_action = None
-            s.commit()
+            return _templates.TemplateResponse(
+                request,
+                "error.html",
+                {
+                    "request": request,
+                    "code": 404,
+                    "heading": "PO Set not found",
+                    "message": (
+                        f"That PO Set does not exist (#{po_set_id}). "
+                        "It may have been archived — the dashboard lists every active set."
+                    ),
+                },
+                status_code=404,
+            )
+        if ps.locked_by_action is not None:
+            release_if_stale(ps, s, cfg)
             s.refresh(ps)
-        is_locked = _is_locked(ps, cfg)
-        docs = s.query(Document).filter_by(po_set_id=po_set_id).all()
+        locked = is_locked(ps, cfg)
+        docs = (
+            s.query(Document)
+            .options(selectinload(Document.line_items))
+            .filter_by(po_set_id=po_set_id)
+            .all()
+        )
         doc_ids = [d.id for d in docs]
         flags = []
+        enriched = []
+        matrix_rows = []
+        has_any_lines = False
+        has_po_lines = False
+        matrix_pinned = False
         if doc_ids:
             items = s.query(LineItem).filter(LineItem.document_id.in_(doc_ids)).all()
             doc_type_map = {
                 d.id: (d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type))
                 for d in docs
             }
-            enriched = []
-            for li in items:
-                enriched.append(
-                    {
-                        "line_item_no": li.line_item_no,
-                        "description": li.description,
-                        "quantity": li.quantity,
-                        "unit_price": li.unit_price,
-                        "doc_type": doc_type_map.get(li.document_id, ""),
-                    }
-                )
+            enriched = [
+                {
+                    "line_item_no": li.line_item_no,
+                    "description": li.description,
+                    "quantity": li.quantity,
+                    "doc_type": doc_type_map.get(li.document_id, ""),
+                    "document_id": li.document_id,
+                }
+                for li in items
+            ]
 
-            # compute reconciliation flags in priority order (FR-11.2)
-            from app.services.matching import _norm, find_unmatched, match_line
-            from app.services.reconciliation import check_price, reconcile
+            # The detail view runs the SAME comparison the engine runs, so the
+            # verdict on screen is the verdict that set the status. It is a
+            # preview only: nothing here writes state.
+            from app.services.reconciliation import REASON_TEXT, compare_po_set_lines
 
             po_lines = [li for li in enriched if li["doc_type"] == "PO"]
             dn_lines = [li for li in enriched if li["doc_type"] == "DN"]
             si_lines = [li for li in enriched if li["doc_type"] == "SI"]
+            has_any_lines = bool(enriched)
+            has_po_lines = bool(po_lines)
             thr = getattr(cfg.matching, "fuzzy_description_threshold", 85)
 
-            # (1) Identification flags
-            unmatched = find_unmatched(po_lines, dn_lines, si_lines, thr=thr)
-            for u in unmatched:
-                u_item = u.get("line_item_no") or "—"
+            set_status_value = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
+            # A merged set keeps the line-number rules it merged under (stored
+            # label); a Settings change must not make it read as a mismatch.
+            # The description threshold is NOT stored, so it stays live.
+            line_fallback = cfg.matching.line_number_fallback
+            if set_status_value == "merged":
+                line_fallback = _fallback_from_stored_label(ps.line_mapping_rule)
+                matrix_pinned = True
+
+            comparison = compare_po_set_lines(
+                po_lines,
+                dn_lines,
+                si_lines,
+                thr,
+                line_fallback=line_fallback,
+            )
+
+            # A pending set is waiting, not failing. Comparing a set whose DN
+            # has not arrived yet produces vendor-line "identifications" that
+            # are really just the missing side; painting them red made 33 real
+            # pending sets look like quarantines. The matrix rows say what is
+            # missing; the reason card explains it.
+            if comparison["po_fail"] and set_status_value != "pending":
                 flags.append(
                     {
                         "priority": 1,
                         "badge": "badge-quarantined",
                         "type": "Identification Mismatch",
-                        "message": f"Unmatched line item #{u_item}: {u.get('description')}",
+                        "message": REASON_TEXT[comparison["po_fail"]],
                     }
                 )
-            for p in po_lines:
-                m_res = match_line(p, dn_lines, si_lines, thr=thr)
-                if m_res.get("quarantine"):
-                    p_item = p.get("line_item_no") or "—"
+
+            for f in comparison["flags"]:
+                if set_status_value == "pending" and f["type"] in (
+                    "identification",
+                    "quantity",
+                ):
+                    if f["type"] == "identification":
+                        # Not painted as a failure (the set is only waiting), but the
+                        # quantity must stay visible: the matrix totals leave it out,
+                        # and a page that hides a delivered or invoiced line is wrong.
+                        vendor_qty = (f.get("vendor_quantity") or 0) / 1000
+                        flags.append(
+                            {
+                                "priority": 3,
+                                "badge": "badge-gray",
+                                "type": "Not on the PO",
+                                "message": (
+                                    f"{f['pool']} line {f.get('line_item_no') or '?'} "
+                                    f"(qty {vendor_qty:g}) matches no PO line yet; it is not "
+                                    "counted in the matrix below"
+                                ),
+                            }
+                        )
+                    continue
+                if f["type"] == "identification":
+                    vendor_qty = (f.get("vendor_quantity") or 0) / 1000
+                    line_label = f.get("line_item_no") or "?"
                     flags.append(
                         {
                             "priority": 1,
                             "badge": "badge-quarantined",
-                            "type": "Identification Conflict",
-                            "message": f"Conflicting line item #{p_item}: {p.get('description')}",
+                            "type": "Identification Mismatch",
+                            "message": (
+                                f"{f['pool']} line {line_label} "
+                                f"(qty {vendor_qty:g}) has no matching PO line"
+                            ),
                         }
                     )
-
-            # (2) Quantity flags & (3) Price flags
-            for p in po_lines:
-                p_no = p.get("line_item_no")
-                p_desc = p.get("description") or ""
-                if p_no:
-                    matching_dn = [d for d in dn_lines if d.get("line_item_no") == p_no]
-                    matching_si = [s for s in si_lines if s.get("line_item_no") == p_no]
-                else:
-                    from rapidfuzz import fuzz
-
-                    matching_dn = [
-                        d
-                        for d in dn_lines
-                        if not d.get("line_item_no")
-                        and fuzz.token_sort_ratio(_norm(p_desc), _norm(d.get("description") or ""))
-                        >= thr
-                    ]
-                    matching_si = [
-                        s
-                        for s in si_lines
-                        if not s.get("line_item_no")
-                        and fuzz.token_sort_ratio(_norm(p_desc), _norm(s.get("description") or ""))
-                        >= thr
-                    ]
-
-                agg_dn = sum(d["quantity"] for d in matching_dn)
-                agg_si = sum(s["quantity"] for s in matching_si)
-                rec = reconcile(p["quantity"], agg_dn, agg_si)
-                if not rec["ok"]:
-                    po_q = p["quantity"] / 1000
-                    dn_q = agg_dn / 1000
-                    si_q = agg_si / 1000
+                elif f["type"] == "quantity":
+                    po_q = (f["po_quantity"] or 0) / 1000
+                    v_q = (f["vendor_quantity"] or 0) / 1000
+                    verb = "delivered" if f["pool"] == "DN" else "invoiced"
                     flags.append(
                         {
                             "priority": 2,
                             "badge": "badge-mismatched",
                             "type": "Quantity Mismatch",
-                            "message": (
-                                f"Line #{p_no or '—'}: PO ({po_q:g}) != "
-                                f"DN ({dn_q:g}) or SI ({si_q:g})"
+                            "message": f"Line #{f['line_item_no']}: {verb} {v_q:g} of {po_q:g}",
+                        }
+                    )
+                elif f["type"] == "line_mapping":
+                    flags.append(
+                        {
+                            "priority": 2,
+                            "badge": "badge-desc",
+                            "type": "Line Numbers Mapped",
+                            "message": f["message"],
+                        }
+                    )
+                elif f["type"] == "line_mapping_rejected":
+                    flags.append(
+                        {
+                            "priority": 1,
+                            "badge": "badge-quarantined",
+                            "type": "Line Numbers Not Mapped",
+                            "message": f["message"],
+                        }
+                    )
+                elif f["type"] == "description_match":
+                    flags.append(
+                        {
+                            "priority": f.get("priority", 2),
+                            "badge": "badge-desc",
+                            "type": "Description Match",
+                            "message": f.get("message")
+                            or (
+                                f"{f.get('pool')} line '{f.get('vendor_description')}' was "
+                                f"matched to PO line {f.get('line_item_no')} by description"
                             ),
                         }
                     )
-                if matching_si:
-                    p_check = check_price(p["unit_price"], matching_si[0]["unit_price"])
-                    if p_check["flag"]:
-                        po_pr = p["unit_price"] / 1000
-                        si_pr = matching_si[0]["unit_price"] / 1000
-                        flags.append(
-                            {
-                                "priority": 3,
-                                "badge": "badge-pending",
-                                "type": "Price Flag",
-                                "message": (
-                                    f"Line #{p_no or '—'}: PO price ({po_pr:g}) != "
-                                    f"SI price ({si_pr:g})"
-                                ),
-                            }
-                        )
 
-            # Compute 3-Way Reconciliation Comparison Matrix rows
-            matrix_rows = []
-            combined_lines = [li for li in enriched if li["doc_type"] == "COMBINED"]
-            base_lines = po_lines if po_lines else combined_lines
-
-            for p in base_lines:
-                p_no = p.get("line_item_no")
-                p_desc = p.get("description") or ""
-                if p_no:
-                    matching_dn = [d for d in dn_lines if d.get("line_item_no") == p_no]
-                    matching_si = [s for s in si_lines if s.get("line_item_no") == p_no]
-                else:
-                    from rapidfuzz import fuzz
-
-                    matching_dn = [
-                        d
-                        for d in dn_lines
-                        if not d.get("line_item_no")
-                        and fuzz.token_sort_ratio(_norm(p_desc), _norm(d.get("description") or ""))
-                        >= thr
-                    ]
-                    matching_si = [
-                        s
-                        for s in si_lines
-                        if not s.get("line_item_no")
-                        and fuzz.token_sort_ratio(_norm(p_desc), _norm(s.get("description") or ""))
-                        >= thr
-                    ]
-
-                agg_dn = sum(d["quantity"] for d in matching_dn)
-                agg_si = sum(s["quantity"] for s in matching_si)
-                rec = reconcile(p["quantity"], agg_dn, agg_si) if po_lines else {"ok": True}
-                price_flag = False
-                si_pr = None
-                if matching_si:
-                    p_check = check_price(p["unit_price"], matching_si[0]["unit_price"])
-                    price_flag = p_check["flag"]
-                    si_pr = matching_si[0]["unit_price"] / 1000
-
-                if not rec["ok"]:
-                    row_class = "row-mismatch"
-                    v_badge = "badge-mismatched"
-                    po_g = p["quantity"] / 1000
-                    dn_g = agg_dn / 1000
-                    si_g = agg_si / 1000
-                    v_text = f"❌ Mismatch (PO: {po_g:g}, DN: {dn_g:g}, SI: {si_g:g})"
-                elif price_flag:
-                    row_class = "row-match"
-                    v_badge = "badge-pending"
-                    v_text = "⚠️ Price Difference"
-                else:
-                    row_class = "row-match"
-                    v_badge = "badge-merged"
-                    v_text = "✅ Match"
-
-                matrix_rows.append(
-                    {
-                        "line_item_no": p_no or "—",
-                        "description": p_desc,
-                        "po_qty": p["quantity"] / 1000,
-                        "dn_agg_qty": (agg_dn / 1000) if dn_lines else (p["quantity"] / 1000),
-                        "si_agg_qty": (agg_si / 1000) if si_lines else (p["quantity"] / 1000),
-                        "dn_count": len(matching_dn),
-                        "si_count": len(matching_si),
-                        "po_price": p["unit_price"] / 1000,
-                        "si_price": si_pr,
-                        "row_class": row_class,
-                        "badge": v_badge,
-                        "verdict": v_text,
-                    }
-                )
+            # Per-line 3-way matrix, built from the same totals the comparison
+            # just used. One row per comparison key: a PO that prints the same
+            # line number twice is summed by the engine, so comparing each raw
+            # row to the summed vendor total (the old code) showed a false
+            # mismatch on a set that had already merged.
+            matrix_rows = build_matrix_rows(
+                po_lines,
+                dn_lines,
+                si_lines,
+                comparison,
+                set_status=set_status_value,
+            )
 
             flags.sort(key=lambda f: f["priority"])
 
-        else:
-            enriched = []
-            matrix_rows = []
-
-        has_merged_file = bool(ps.merged_output_path and Path(ps.merged_output_path).exists())
-        unclassified_count = s.query(Document).filter(Document.doc_type == DocType.UNKNOWN).count()
+        has_merged_file = bool(
+            ps.merged_output_path
+            and _resolve_db_path(ps.merged_output_path, cfg.paths.output_folder)
+        )
+        unclassified_count = _holding_area_query(s).count()
 
         return _templates.TemplateResponse(
             request,
             "po_set_detail.html",
             {
                 "request": request,
+                "sync_running": _sync_running_state(),
                 "po_set": ps,
                 "documents": docs,
                 "line_items": enriched,
                 "matrix_rows": matrix_rows,
+                "has_any_lines": has_any_lines,
+                "has_po_lines": has_po_lines,
+                "matrix_pinned": matrix_pinned,
+                "attempt_cap": int(getattr(cfg.extraction, "max_retries", 3) or 3),
                 "flags": flags,
-                "is_locked": is_locked,
+                "is_locked": locked,
                 "has_merged_file": has_merged_file,
                 "unclassified_count": unclassified_count,
+                "notice": notice,
+                "is_archived": ps.archived_at is not None,
+                "archive_folder": str(cfg.paths.archive_folder),
             },
         )
 
 
+def _resolve_db_path(path: str | Path, root: str | Path) -> Path | None:
+    """Resolve a path stored in the DB, including the legacy relative form.
+
+    Early runs stored `data\\stored\\...` and `data\\output\\...`; the config
+    file (not the process CWD) is the authority for where `data/` lives. Try
+    the stored value first, then CWD, then the project root derived from the
+    configured folder, so a service started elsewhere still serves the file.
+    """
+    raw = Path(path)
+    candidates: list[Path] = []
+    if raw.is_absolute():
+        candidates.append(raw)
+    else:
+        candidates.append(Path.cwd() / raw)
+        root_path = Path(root).resolve()
+        # <project>/data/stored -> <project>
+        candidates.append(root_path.parent.parent / raw)
+        candidates.append(root_path / raw)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
+def _served_file(path: str | None, root: str | Path, error: str) -> Path:
+    """Resolve a DB-stored file and confine it to its configured folder.
+
+    Every writer today uses the configured folders, so this is hardening - but
+    serving whatever a DB string happens to contain (including a symlink that
+    escaped the folder) is not a property the app should rely on.
+    """
+    if not path:
+        raise HTTPException(status_code=404, detail=error)
+    root_path = Path(root).resolve()
+    p = _resolve_db_path(path, root)
+    if p is None or not p.is_relative_to(root_path):
+        raise HTTPException(status_code=404, detail=error)
+    return p
+
+
+def _preview_error(request: Request, status_code: int, detail: str):
+    """A drawer iframe is a browser: render a page, not `{"detail": ...}`.
+
+    API clients (curl, TestClient, HTMX) do not send `Accept: text/html`, so
+    their JSON contract is unchanged (D4/F-02).
+    """
+    if not _wants_html(request):
+        raise HTTPException(status_code=status_code, detail=detail)
+    return _templates.TemplateResponse(
+        request,
+        "preview_error.html",
+        {"request": request, "code": status_code, "message": detail},
+        status_code=status_code,
+    )
+
+
 @router.get("/documents/{doc_id}/preview")
-def preview_document(doc_id: int):
+def preview_document(doc_id: int, request: Request):
     """Stream stored document PDF for inline preview drawer."""
     from fastapi.responses import FileResponse
 
@@ -425,11 +716,32 @@ def preview_document(doc_id: int):
     eng = get_engine(cfg)
     with Session(eng) as s:
         doc = s.get(Document, doc_id)
-        if not doc or not doc.stored_path:
-            raise HTTPException(status_code=404, detail="Document not found")
-        p = Path(doc.stored_path)
-        if not p.exists():
-            raise HTTPException(status_code=404, detail="Stored PDF file missing from disk")
+        if not doc:
+            return _preview_error(request, 404, "Document not found")
+        if doc.ingest_reject_reason:
+            return _preview_error(
+                request,
+                422,
+                f"Rejected on arrival, no preview: {doc.ingest_reject_reason}",
+            )
+        try:
+            p = _served_file(
+                doc.stored_path,
+                cfg.paths.stored_documents_folder,
+                "Stored PDF file missing from disk",
+            )
+        except HTTPException as exc:
+            return _preview_error(request, exc.status_code, str(exc.detail))
+        # Two real rows (164/165) are all-NUL files that were read as failed.
+        # Serving them as application/pdf gave the drawer an empty document
+        # with no explanation; say the file is not a PDF instead.
+        with p.open("rb") as fh:
+            if fh.read(4) != b"%PDF":
+                return _preview_error(
+                    request,
+                    422,
+                    "Stored file is not a readable PDF; re-extract this document.",
+                )
         return FileResponse(p, media_type="application/pdf")
 
 
@@ -442,73 +754,180 @@ def download_merged_pdf(po_set_id: int):
     eng = get_engine(cfg)
     with Session(eng) as s:
         ps = s.get(POSet, po_set_id)
-        if not ps or not ps.merged_output_path:
+        if not ps:
             raise HTTPException(status_code=404, detail="Merged PDF not available")
-        p = Path(ps.merged_output_path)
-        if not p.exists():
-            raise HTTPException(status_code=404, detail="Merged output PDF missing from disk")
+        p = _served_file(
+            ps.merged_output_path,
+            cfg.paths.output_folder,
+            "Merged output PDF missing from disk",
+        )
         return FileResponse(p, media_type="application/pdf", filename=p.name)
 
 
 # ---------------------------------------------------------------------------
-# Manual document upload (CUSTOMS/SHIPPING/COMMERCIAL_INVOICE) — cross-platform
+# Manual document upload (CUSTOMS/SHIPPING) — cross-platform
 # ---------------------------------------------------------------------------
 
 
+def _wants_html(request: Request) -> bool:
+    """True for a browser form navigation (not an API/HTMX client).
+
+    A plain HTML form POST that fails used to replace the page with raw JSON
+    (`{"detail":"..."}`) — for a routine case such as re-uploading a file that
+    is already attached. Browsers send `Accept: text/html`; TestClient/curl and
+    HTMX do not, so their contract is unchanged.
+    """
+    return "text/html" in (request.headers.get("accept") or "")
+
+
 @router.post("/po_sets/{po_set_id}/upload", response_class=HTMLResponse)
-async def upload_manual_doc(
+def upload_manual_doc(
     po_set_id: int,
     request: Request,
     file: UploadFile = File(...),  # noqa: B008
     doc_type: str = Form(...),
 ):
+    try:
+        return _upload_manual_doc_impl(po_set_id, request, file, doc_type)
+    except HTTPException as exc:
+        # A missing set has no page to redirect to; keep the 404 contract
+        # instead of redirecting the browser to a JSON 404.
+        if exc.status_code == 404:
+            raise
+        if _wants_html(request) and request.headers.get("HX-Request") != "true":
+            return RedirectResponse(
+                url=(f"/po_sets/{po_set_id}/view?notice=" + quote(str(exc.detail))),
+                status_code=302,
+            )
+        raise
+
+
+def _upload_manual_doc_impl(
+    po_set_id: int,
+    request: Request,
+    file: UploadFile,
+    doc_type: str,
+):
     cfg = load_config()
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
+    from app.services import sync_lock
+
+    if sync_lock._is_sync_running():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A sync is currently reading documents; wait for it to finish "
+                "before uploading a document."
+            ),
+        )
+    should_rebuild = False
     # validate doc_type
     if doc_type not in (
         DocType.CUSTOMS.value,
         DocType.SHIPPING.value,
-        DocType.COMMERCIAL_INVOICE.value,
     ):
         raise HTTPException(
             status_code=422,
-            detail=f"doc_type must be CUSTOMS/SHIPPING/COMMERCIAL_INVOICE, got {doc_type}",
+            detail=f"doc_type must be CUSTOMS or SHIPPING, got {doc_type}",
         )
     # lock check (per-PO)
     with Session(eng) as s:
         ps = s.get(POSet, po_set_id)
         if ps is None:
             raise HTTPException(status_code=404, detail=f"POSet {po_set_id} not found")
-        if ps.locked_by_action is not None and _is_locked(ps, cfg):
+        if ps.archived_at is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="This PO Set is archived and read-only; uploads are not allowed.",
+            )
+        if not acquire_lock(ps, "manual_upload", s, cfg):
             raise HTTPException(
                 status_code=409,
                 detail=f"action already in progress on this PO Set: {ps.locked_by_action}",
             )
-        ps.locked_by_action = "manual_upload"
-        s.commit()
         try:
-            data = await file.read()
+            # Bounded read (W-12): cap enforced on the stream, not after.
+            from app.core.limits import MAX_UPLOAD_BYTES
+
+            data = file.file.read(MAX_UPLOAD_BYTES + 1)
             if not data:
                 raise HTTPException(status_code=422, detail="empty file")
+            if len(data) > MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"file exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)}MB upload cap",
+                )
             import hashlib
 
             sha = hashlib.sha256(data).hexdigest()
-            # cross-platform stored path via pathlib
-            stored = (
-                Path(cfg.paths.stored_documents_folder)
-                / f"{sha}{Path(file.filename or 'upload.pdf').suffix or '.pdf'}"
+            # sanitize filename + extension allowlist (W-18)
+            safe_name = Path(file.filename or "upload.pdf").name
+            if Path(safe_name).suffix.lower() != ".pdf":
+                raise HTTPException(status_code=422, detail="only .pdf uploads accepted")
+            # Dedup by hash BEFORE writing (W-12). Identical bytes are ONE
+            # document: `documents.sha256_hash` is unique, so a second upload
+            # of the same file cannot create a second row, and re-uploading to
+            # the same set is idempotent.
+            #
+            # The case that used to be a silent no-op: the same PDF already
+            # exists as a document belonging to a DIFFERENT PO Set. The row was
+            # left exactly as it was, not attached here, no error, HTTP 302 to
+            # a page that still showed the gate as unsatisfied. The operator had
+            # no way to tell a working upload from a discarded one, and the
+            # customs gate could never clear. It is now a 409 that names the
+            # owning PO Set.
+            existing = (
+                s.query(Document)
+                .filter_by(sha256_hash=sha)
+                .filter(Document.archived_at.is_(None))
+                .first()
             )
-            stored.parent.mkdir(parents=True, exist_ok=True)
-            stored.write_bytes(data)
-            # check dedup by hash
-            existing = s.query(Document).filter_by(sha256_hash=sha).first()
+            if existing is not None and existing.po_set_id == po_set_id:
+                already_attached = True
+            else:
+                already_attached = False
+            if existing is not None and existing.po_set_id not in (None, po_set_id):
+                owner = existing.po_set_id
+                owner_po = None
+                if owner is not None:
+                    owner_ps = s.get(POSet, owner)
+                    owner_po = owner_ps.po_no_normalized if owner_ps else None
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "This exact file is already attached to another PO Set"
+                        + (f" ({owner_po})" if owner_po else f" (id {owner})")
+                        + ". Documents are deduplicated by content, so the same"
+                        " file cannot be attached twice. Remove it from that set"
+                        " first, or upload the correct document."
+                    ),
+                )
             if existing is None:
+                # PDF content sniff (W-12): magic header + readable pages
+                if not data.startswith(b"%PDF"):
+                    raise HTTPException(status_code=422, detail="not a PDF file")
+                try:
+                    import io
+
+                    from pypdf import PdfReader
+
+                    if len(PdfReader(io.BytesIO(data)).pages) < 1:
+                        raise HTTPException(status_code=422, detail="PDF has no pages")
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=422, detail=f"unreadable PDF: {_scrub_paths(str(e))}"
+                    ) from e
+                stored = Path(cfg.paths.stored_documents_folder) / f"{sha}.pdf"
+                stored.parent.mkdir(parents=True, exist_ok=True)
+                stored.write_bytes(data)
                 from app.models import ExtractionStatus as ES
 
                 doc = Document(
                     sha256_hash=sha,
-                    original_filename=file.filename or "upload.pdf",
+                    original_filename=safe_name,
                     stored_path=str(stored),
                     doc_type=DocType(doc_type),
                     extraction_status=ES.valid,
@@ -516,37 +935,257 @@ async def upload_manual_doc(
                 )
                 s.add(doc)
                 s.flush()
-            else:
-                # reuse existing hash; keep original association, just ensure file exists  # noqa: E501
-                pass
-            # update customs_doc_count if applicable
-            if doc_type in (DocType.CUSTOMS.value, DocType.SHIPPING.value):
-                # recount
-                docs = s.query(Document).filter_by(po_set_id=po_set_id).all()
-                cnt = sum(
-                    1
-                    for d in docs
-                    if (d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type))
-                    in (DocType.CUSTOMS.value, DocType.SHIPPING.value)
+            elif existing.po_set_id is None:
+                # The same bytes are already in the system, attached to
+                # nothing. The file the operator is uploading IS this set's
+                # customs/shipping document, so it is attached to the set
+                # rather than left where it is: the gate could otherwise
+                # never be satisfied and the operator had no way to tell a
+                # working upload from a discarded one.
+                #
+                # A row that already carries pipeline data is refused: it is
+                # a PO, DN or SI, or the parent of a multi-document split.
+                # Re-typing it as a customs document would corrupt a real
+                # document. The split parent is recognised by the generic
+                # hierarchy column, not by naming the packaging type.
+                if existing.ingest_reject_reason:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            "This file was rejected on arrival and cannot be used: "
+                            f"{existing.ingest_reject_reason}. Upload a valid PDF instead."
+                        ),
+                    )
+                pipeline_types = {DocType.PO.value, DocType.DN.value, DocType.SI.value}
+                existing_type = (
+                    existing.doc_type.value
+                    if hasattr(existing.doc_type, "value")
+                    else str(existing.doc_type)
                 )
-                ps.customs_doc_count = cnt
+                has_lines = bool(list(existing.line_items or []))
+                is_split_parent = bool(getattr(existing, "is_split_parent", False))
+                if existing_type in pipeline_types or has_lines or is_split_parent:
+                    label = "multi-document PDF" if is_split_parent else existing_type
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "This exact file is already in the system as a "
+                            f"{label} document"
+                            + (f" (document #{existing.id})" if existing.id else "")
+                            + ". It carries pipeline data, so it cannot be re-typed as a "
+                            f"{doc_type} document. Attach it to this set from the "
+                            "Unclassified page instead."
+                        ),
+                    )
+                from app.models import ExtractionStatus as ES
+
+                existing.po_set_id = po_set_id
+                existing.doc_type = DocType(doc_type)
+                existing.extraction_status = ES.valid
+                s.flush()
+            # update customs_doc_count (distinct required types: CUSTOMS and SHIPPING)
+            docs = (
+                s.query(Document)
+                .filter_by(po_set_id=po_set_id)
+                .filter(Document.archived_at.is_(None))
+                .all()
+            )
+            types_present = {
+                d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type) for d in docs
+            }
+            cnt = (1 if DocType.CUSTOMS.value in types_present else 0) + (
+                1 if DocType.SHIPPING.value in types_present else 0
+            )
+            ps.customs_doc_count = cnt
+            if ps.has_customs_toggle and cnt == 2 and ps.status == POSetStatus.blocked_customs:
+                ps.status = POSetStatus.pending
+            # A merged packet can still receive customs/shipping documents.
+            # The rebuild runs below while this same per-PO lock is still held;
+            # releasing it first let two concurrent uploads write the same
+            # temporary file and race `os.replace`.
+            rebuild_flag = ps.status == POSetStatus.merged and ps.has_customs_toggle and cnt == 2
             s.commit()
+            should_rebuild = rebuild_flag
+            if already_attached and not should_rebuild:
+                # Same file, same set, and nothing to rebuild: say so rather
+                # than redirecting as if a document had been added. No session
+                # middleware exists, so this rides the query string the way
+                # the other POST routes report outcomes.
+                return RedirectResponse(
+                    url=(
+                        f"/po_sets/{po_set_id}/view?notice="
+                        + quote(
+                            f"That file is already attached to this PO Set "
+                            f"({safe_name}); nothing was changed."
+                        )
+                    ),
+                    status_code=302,
+                )
         except HTTPException:
             raise
         except Exception as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
         finally:
-            # release lock
-            ps2 = s.get(POSet, po_set_id)
-            if ps2 is not None and ps2.locked_by_action == "manual_upload":
-                ps2.locked_by_action = None
-                s.commit()
+            if not should_rebuild:
+                release_lock(ps, s, "manual_upload")
+
+    if should_rebuild:
+        try:
+            from app.services.merge import append_customs_to_merged_packet
+
+            append_customs_to_merged_packet(po_set_id, cfg)
+            return RedirectResponse(
+                url=(
+                    f"/po_sets/{po_set_id}/view?notice="
+                    + quote("Customs and shipping were appended to the merged packet.")
+                ),
+                status_code=302,
+            )
+        except Exception as e:
+            logger.warning(
+                "Customs documents attached to PO Set %s but the packet could not be rebuilt",
+                po_set_id,
+                exc_info=True,
+            )
+            from app.services.merge import set_customs_append_pending
+
+            set_customs_append_pending(po_set_id, cfg, True)
+            return RedirectResponse(
+                url=(
+                    f"/po_sets/{po_set_id}/view?notice="
+                    + quote(
+                        "Documents attached, but the merged packet was not rebuilt: "
+                        f"{_scrub_paths(str(e)) or type(e).__name__}. "
+                        "It will retry on the next sync."
+                    )
+                ),
+                status_code=302,
+            )
+        finally:
+            # Release the lock only after the rebuild, using a fresh session:
+            # the upload session is closed and the lock is a row, not a
+            # connection. This is what stops a second upload racing the same
+            # packet while the first is rebuilding it.
+            with Session(get_engine(cfg)) as s_rel:
+                ps_rel = s_rel.get(POSet, po_set_id)
+                if ps_rel is not None:
+                    release_lock(ps_rel, s_rel, "manual_upload")
     return RedirectResponse(url=f"/po_sets/{po_set_id}/view", status_code=302)
 
 
 # ---------------------------------------------------------------------------
 # Audit log — read-only (GET only, no POST/PUT/DELETE)
 # ---------------------------------------------------------------------------
+
+
+_AUDIT_ACTION_LABELS = {
+    "force_merge": "Force Merge",
+    "quarantine_delete": "Quarantine Archive",
+    "manual_status_change": "Manual Status Change",
+    "customs_append": "Customs Appended",
+    "line_mapping_applied": "Line Mapping Applied",
+    "quarantined": "Quarantined",
+    "settings_changed": "Settings Changed",
+}
+
+
+def _audit_detail(entry: AuditLog) -> dict:
+    """The event's JSON detail as a dict; a malformed row must not break the page."""
+    try:
+        parsed = json.loads(entry.detail or "{}")
+    except (TypeError, ValueError, RecursionError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _last_path_segment(raw: object) -> str:
+    """The final segment of a stored path, whichever separator wrote it."""
+    return str(raw).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+
+
+def _audit_summary(action: str, detail: dict) -> str:
+    """One readable sentence. The raw JSON stays available behind `<details>`.
+
+    A quarantine report is several KB of escaped newlines; showing it as the
+    cell text made the audit page unreadable and hid the fact that the row is
+    about one reason and one folder.
+    """
+    if action == "quarantined":
+        reason = str(detail.get("reason") or "quarantined").replace("_", " ")
+        folder = detail.get("folder")
+        document_id = detail.get("document_id")
+        if folder:
+            return f"{reason} · {_last_path_segment(folder)}"
+        if document_id:
+            return f"{reason} · document #{document_id}"
+        return reason
+    if action == "force_merge":
+        name = detail.get("output_name")
+        return f"Packet {name}" if name else ""
+    if action == "quarantine_delete":
+        archive = detail.get("archive_path")
+        return f"Archived to {_last_path_segment(archive)}" if archive else "Archived"
+    if action == "customs_append":
+        name = detail.get("output_name")
+        appended = detail.get("appended")
+        count = f"{len(appended)} document(s)" if isinstance(appended, list) and appended else ""
+        return " · ".join(part for part in (f"Packet {name}" if name else "", count) if part)
+    if action == "line_mapping_applied":
+        rules = [
+            f"{pool} {detail[pool].get('rule')}"
+            for pool in ("DN", "SI")
+            if isinstance(detail.get(pool), dict) and detail[pool].get("rule")
+        ]
+        return "Line numbers mapped: " + ", ".join(rules) if rules else "Line numbers mapped"
+    if action == "settings_changed":
+        changes = detail.get("changes")
+        if isinstance(changes, dict) and changes:
+            return "; ".join(
+                f"{key}: {value.get('old')} → {value.get('new')}"
+                for key, value in changes.items()
+                if isinstance(value, dict)
+            )
+        return ""
+    if action == "manual_status_change":
+        note = detail.get("note")
+        if note:
+            return str(note)
+        if detail.get("filename"):
+            return f"Placement of {detail['filename']} confirmed"
+        return ""
+    return ""
+
+
+def _audit_entries(rows: list[AuditLog]) -> list[dict]:
+    """View models for the template: label + short summary + the raw detail.
+
+    A detail this code does not understand (or cannot parse) still renders:
+    the action label is the summary. The audit page exists to show rows, so a
+    future event shape must never break it.
+    """
+    views: list[dict] = []
+    for entry in rows:
+        action = entry.action.value if hasattr(entry.action, "value") else str(entry.action)
+        label = _AUDIT_ACTION_LABELS.get(action, action.replace("_", " ").title())
+        detail = _audit_detail(entry)
+        try:
+            summary = _audit_summary(action, detail)
+        except Exception:  # pragma: no cover - defence against a future shape
+            logger.warning("Could not summarise audit row %s", entry.id, exc_info=True)
+            summary = ""
+        views.append(
+            {
+                "action": action,
+                "label": label,
+                "summary": summary or label,
+                "detail": entry.detail or "",
+                "timestamp": entry.timestamp,
+                "po_set_id": entry.po_set_id,
+                "justification": entry.justification,
+                "source": entry.source,
+            }
+        )
+    return views
 
 
 @router.get("/audit", response_class=HTMLResponse)
@@ -556,13 +1195,13 @@ def audit_log(request: Request):
     Base.metadata.create_all(eng)
     with Session(eng) as s:
         entries = s.query(AuditLog).order_by(AuditLog.timestamp.desc()).all()
-        unclassified_count = s.query(Document).filter(Document.doc_type == DocType.UNKNOWN).count()
+        unclassified_count = _holding_area_query(s).count()
         return _templates.TemplateResponse(
             request,
             "audit.html",
             {
                 "request": request,
-                "entries": entries,
+                "entries": _audit_entries(entries),
                 "unclassified_count": unclassified_count,
             },
         )
@@ -579,14 +1218,43 @@ def quarantine_view(request: Request):
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     with Session(eng) as s:
-        qs = s.query(POSet).filter(POSet.status == POSetStatus.quarantined).all()
-        enriched = []
-        for ps in qs:
-            cnt = s.query(Document).filter_by(po_set_id=ps.id).count()
-            enriched.append(
-                {"id": ps.id, "po_no_normalized": ps.po_no_normalized, "doc_count": cnt}
+        qs = (
+            s.query(POSet)
+            .filter(
+                POSet.status == POSetStatus.quarantined,
+                POSet.archived_at.is_(None),
             )
-        unclassified_count = s.query(Document).filter(Document.doc_type == DocType.UNKNOWN).count()
+            .all()
+        )
+        po_set_ids = [ps.id for ps in qs]
+        doc_counts = (
+            {
+                r[0]: r[1]
+                for r in (
+                    s.query(Document.po_set_id, func.count(Document.id))
+                    .filter(
+                        Document.po_set_id.in_(po_set_ids),
+                        Document.archived_at.is_(None),
+                    )
+                    .group_by(Document.po_set_id)
+                    .all()
+                )
+                if r[0] is not None
+            }
+            if po_set_ids
+            else {}
+        )
+        enriched = [
+            {
+                "id": ps.id,
+                "po_no_normalized": ps.po_no_normalized,
+                "doc_count": doc_counts.get(ps.id, 0),
+                "reconcile_reason": ps.reconcile_reason,
+                "updated_at": ps.updated_at,
+            }
+            for ps in qs
+        ]
+        unclassified_count = _holding_area_query(s).count()
         return _templates.TemplateResponse(
             request,
             "quarantine.html",
@@ -594,6 +1262,8 @@ def quarantine_view(request: Request):
                 "request": request,
                 "po_sets": enriched,
                 "unclassified_count": unclassified_count,
+                "now_ts": _now_ts(),
+                "archive_folder": str(cfg.paths.archive_folder),
             },
         )
 
@@ -604,17 +1274,51 @@ def quarantine_table(request: Request):
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     with Session(eng) as s:
-        qs = s.query(POSet).filter(POSet.status == POSetStatus.quarantined).all()
-        enriched = []
-        for ps in qs:
-            cnt = s.query(Document).filter_by(po_set_id=ps.id).count()
-            enriched.append(
-                {"id": ps.id, "po_no_normalized": ps.po_no_normalized, "doc_count": cnt}
+        qs = (
+            s.query(POSet)
+            .filter(
+                POSet.status == POSetStatus.quarantined,
+                POSet.archived_at.is_(None),
             )
+            .all()
+        )
+        po_set_ids = [ps.id for ps in qs]
+        doc_counts = (
+            {
+                r[0]: r[1]
+                for r in (
+                    s.query(Document.po_set_id, func.count(Document.id))
+                    .filter(
+                        Document.po_set_id.in_(po_set_ids),
+                        Document.archived_at.is_(None),
+                    )
+                    .group_by(Document.po_set_id)
+                    .all()
+                )
+                if r[0] is not None
+            }
+            if po_set_ids
+            else {}
+        )
+        enriched = [
+            {
+                "id": ps.id,
+                "po_no_normalized": ps.po_no_normalized,
+                "doc_count": doc_counts.get(ps.id, 0),
+                "reconcile_reason": ps.reconcile_reason,
+                "updated_at": ps.updated_at,
+            }
+            for ps in qs
+        ]
         return _templates.TemplateResponse(
             request,
             "_quarantine_table.html",
-            {"request": request, "po_sets": enriched},
+            {
+                "request": request,
+                "po_sets": enriched,
+                "now_ts": _now_ts(),
+                "archive_folder": str(cfg.paths.archive_folder),
+            },
         )
 
 
@@ -629,7 +1333,45 @@ def unclassified_view(request: Request):
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
     with Session(eng) as s:
-        docs = s.query(Document).filter(Document.doc_type == DocType.UNKNOWN).all()
+        # The holding area shows every document that is not in the pipeline
+        # yet, because every one of them is waiting for something:
+        #
+        #   - untyped documents (nothing could identify them)
+        #   - documents whose extraction failed permanently (a loss — they
+        #     will never be read again)
+        #   - documents that show more than one PO number (both attach
+        #     sweeps refuse them on purpose)
+        #   - documents that were read successfully but carry no PO
+        #     reference, and are in no PO Set. They are not broken: they
+        #     wait for the content to place them, or for a human to name
+        #     their PO.
+        #
+        # A document nothing can place must not wait unseen: a document
+        # waiting for a human the human cannot see waits forever.
+        docs = _holding_area_query(s).all()
+        # A document whose extraction has permanently failed is NOT waiting for
+        # a human to classify it — it is a loss. It stays in this view (its
+        # doc_type was never advanced off UNKNOWN) and must be countable
+        # separately, or the holding area reports a clean sheet while holding
+        # files that will never be read.
+        failed_count = sum(1 for d in docs if d.extraction_status == ExtractionStatus.failed)
+        ambiguous_count = sum(1 for d in docs if d.po_reference_ambiguous)
+        unplaced_count = sum(
+            1 for d in docs if d.extraction_status == ExtractionStatus.valid and d.po_set_id is None
+        )
+        # Documents held away from an open set because their PO letters differ
+        # from the set's (same digits, different PO). Say so on the row.
+        from app.services.grouping import HOLD_REASON_TEXT, held_letters_conflict
+
+        hold_notes: dict[int, str] = {}
+        for d in docs:
+            clash = held_letters_conflict(s, d)
+            if clash is not None:
+                hold_notes[d.id] = (
+                    f"Held: {HOLD_REASON_TEXT['po_letters_conflict']} "
+                    f"(open PO Set #{clash.id}, key {clash.po_no_normalized}, "
+                    f"letters {clash.po_no_letters or 'none'})"
+                )
         return _templates.TemplateResponse(
             request,
             "unclassified.html",
@@ -637,8 +1379,73 @@ def unclassified_view(request: Request):
                 "request": request,
                 "documents": docs,
                 "unclassified_count": len(docs),
+                "failed_count": failed_count,
+                "ambiguous_count": ambiguous_count,
+                "unplaced_count": unplaced_count,
+                "hold_notes": hold_notes,
+                "attempt_cap": int(getattr(cfg.extraction, "max_retries", 3) or 3),
             },
         )
+
+
+@router.get("/unclassified/normalize")
+def normalize_po_preview(po_no: str = ""):
+    """The exact key the server will store for a typed PO number.
+
+    The old Alpine preview stripped non-alphanumerics itself, so it disagreed
+    with `normalize_po_no` on labels and the comma revision counter — the one
+    field that decides which set a document joins.
+    """
+    from app.services.grouping import normalize_po_no
+
+    try:
+        return {"normalized": normalize_po_no(po_no)}
+    except Exception:
+        return {"normalized": ""}
+
+
+def _refuse_if_target_busy(s, raw: str, norm: str, cfg) -> None:
+    """409 when an existing set this PO would join holds a per-PO lock.
+
+    Read-only: autoflush is off so the caller's pending document edits are not written
+    (and no write lock is taken) before the later, separate-session set creation.
+    """
+    from app.services.grouping import PoLettersConflict, get_or_create_po_set
+
+    with s.no_autoflush:
+        ids = {
+            ps.id
+            for ps in s.query(POSet)
+            .filter(POSet.po_no_normalized == norm, POSet.archived_at.is_(None))
+            .all()
+            if ps.status == POSetStatus.merged
+        }
+        try:
+            open_ps = get_or_create_po_set(raw, cfg, create=False)
+        except PoLettersConflict:
+            open_ps = None  # reported by the normal path
+        if open_ps is not None:
+            ids.add(open_ps.id)
+        for ps_id in ids:
+            ps = s.get(POSet, ps_id)
+            if ps is not None and ps.locked_by_action is not None and is_locked(ps, cfg):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"PO Set #{ps.id} is busy ({ps.locked_by_action}); nothing was "
+                        "changed. Try again in a moment."
+                    ),
+                )
+
+
+def _open_set_or_409(raw: str, cfg, *, create: bool):
+    """`get_or_create_po_set`, with a letters clash reported as a 409 to the operator."""
+    from app.services.grouping import PoLettersConflict, get_or_create_po_set
+
+    try:
+        return get_or_create_po_set(raw, cfg, create=create)
+    except PoLettersConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/unclassified/{doc_id}/reclassify", response_class=HTMLResponse)
@@ -651,35 +1458,341 @@ def reclassify_document(
     cfg = load_config()
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
-    from app.services.grouping import get_or_create_po_set
+    from app.services import sync_lock
+
+    # Reclassifying writes a document's type/PO while the sync may be
+    # attaching the same row. Refuse rather than race the sweep.
+    if sync_lock._is_sync_running():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A sync is currently reading documents; wait for it to finish "
+                "before reclassifying a document."
+            ),
+        )
+
+    attached_ps_id: int | None = None
 
     try:
         new_doc_type = DocType(doc_type)
     except Exception as err:
         raise HTTPException(status_code=422, detail=f"Invalid doc_type: {doc_type}") from err
+    # Hand-assignable types, positively enumerated. This is an allowlist rather
+    # than a denylist so that no Layer-2 code has to name a type it must never
+    # produce: the multi-document packaging type is decided by the split in
+    # Layer 1 and has no single-document meaning for an operator to assert here.
+    # Rejecting anything outside the list keeps that rule true automatically as
+    # types are added, instead of relying on one explicit check to be maintained.
+    if new_doc_type not in _HAND_ASSIGNABLE_DOC_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"doc_type {new_doc_type.value} cannot be hand-tagged; "
+                "assign the type of an individual document instead"
+            ),
+        )
 
     with Session(eng) as s:
         doc = s.get(Document, doc_id)
         if doc is None:
             raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+        if doc.archived_at is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="This document belongs to an archived PO Set and is read-only.",
+            )
+        if doc.ingest_reject_reason:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "This file was rejected on arrival and cannot be placed in a PO Set: "
+                    f"{doc.ingest_reject_reason}. Replace it with a valid PDF."
+                ),
+            )
+        current_ps = s.get(POSet, doc.po_set_id) if doc.po_set_id else None
+        if current_ps is not None and current_ps.status == POSetStatus.merged:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This document belongs to a merged PO Set and is read-only. "
+                    "Use the customs append path for a post-delivery document."
+                ),
+            )
+        # Only a held document may be placed here. One already attached to a set
+        # (open, since merged and archived were refused above) would keep its old
+        # line items, leave that set's status stale and race a Force Merge on its
+        # lock. There is no UI path that moves it (see PRODUCT section 8).
+        held = _holding_area_query(s).filter(Document.id == doc.id).first() is not None
+        if not held and doc.po_set_id is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"This document is already placed in PO Set #{doc.po_set_id}. "
+                    "If it is in the wrong set: Re-Extract with AI sends it back to "
+                    "Unclassified only when no PO number is printed on it. Otherwise, "
+                    "if the set is quarantined, Delete (archive) the set and add the "
+                    "files again; if not, ask the administrator."
+                ),
+            )
+        # A split parent is the source of the child rows. Once its split
+        # COMPLETED it has no line items and its stored_path is the whole
+        # combined PDF, so attaching it would duplicate every child page in the
+        # delivered packet. The upload and re-extract paths already refuse it;
+        # this is the third entry point.
+        #
+        # A parent whose split FAILED never produced usable children. Refusing
+        # it forever left a readable packet in no set and on no page — the
+        # operator's only recovery is to reclassify it here, so that case is
+        # allowed (and the row stops pretending to be a parent).
+        if getattr(doc, "is_split_parent", False):
+            if getattr(doc, "split_completed_at", None) is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "This row is a split parent: its children are the documents "
+                        "to classify. Attaching the parent would duplicate the whole "
+                        "PDF in the packet."
+                    ),
+                )
+            children = s.query(Document).filter(Document.parent_document_id == doc.id).count()
+            if children:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "This document's split was interrupted after cutting "
+                        f"{children} child file(s). Re-run the split before "
+                        "reclassifying it, or the packet will contain the pages twice."
+                    ),
+                )
+            doc.is_split_parent = False
+            doc.split_completed_at = None
         doc.doc_type = new_doc_type
         if po_no and po_no.strip():
-            import re
+            from app.services.grouping import normalize_po_no
 
             raw = po_no.strip()
-            norm = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
+            norm = normalize_po_no(raw)
+            if not norm:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"PO number {raw!r} has no digits, so it cannot key a PO Set; "
+                        "enter the number printed on the document."
+                    ),
+                )
             doc.po_no_raw = raw
             doc.po_no_normalized = norm
-            ps = get_or_create_po_set(raw, cfg)
-            doc.po_set_id = ps.id
+            doc.po_no_source = "manual"
+            # A human naming the PO number resolves the ambiguity the VLM
+            # reported. Left set, the document would be refused by both
+            # attach sweeps if it were ever detached again, and it would keep
+            # showing in the holding area as unresolved.
+            doc.po_reference_ambiguous = False
+
+            # Refuse while the set this would join is being changed by someone else
+            # (Force Merge, Re-Extract, ...). Checked before any write: a document must
+            # never be attached to a set mid-merge and then silently left unreconciled.
+            # (Customs/shipping may join a delivered packet while it is busy: that is the
+            # recorded-pending append path below.)
+            if new_doc_type not in (DocType.CUSTOMS, DocType.SHIPPING):
+                _refuse_if_target_busy(s, raw, norm, cfg)
+
+            if new_doc_type in (DocType.CUSTOMS, DocType.SHIPPING):
+                # Customs/shipping documents may join a packet that has
+                # already been delivered; that is the append workflow. The
+                # generic lookup excludes merged sets, which would strand the
+                # document in a new empty set that can never merge.
+                from app.services.grouping import letters_compatible, po_letters
+
+                merged = [
+                    m
+                    for m in (
+                        s.query(POSet)
+                        .filter(
+                            POSet.po_no_normalized == norm,
+                            POSet.status == POSetStatus.merged,
+                            POSet.archived_at.is_(None),
+                        )
+                        .order_by(POSet.id.desc())
+                        .all()
+                    )
+                    if letters_compatible(m.po_no_letters, po_letters(raw))
+                ]
+                if len(merged) > 1:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"{len(merged)} merged packets exist for {norm}. "
+                            "Open the intended PO Set and attach the document "
+                            "there, so it is appended to the right packet."
+                        ),
+                    )
+                if merged:
+                    doc.po_set_id = merged[0].id
+                else:
+                    # No delivered packet yet: attach to an open set if one
+                    # exists, otherwise leave it waiting for a human.
+                    open_ps = _open_set_or_409(raw, cfg, create=False)
+                    if open_ps is not None:
+                        doc.po_set_id = open_ps.id
+            else:
+                # A human naming a PO is the explicit gate PRODUCT 8 describes:
+                # place the document, creating the set when no open one exists.
+                # Unlike the automatic sweeps, this is not a filename guess.
+                ps = _open_set_or_409(raw, cfg, create=True)
+                doc.po_set_id = ps.id
+
+        # Update customs_doc_count and status transition if attached to a PO Set
+        if doc.po_set_id is not None:
+            attached_ps_id = doc.po_set_id
+            ps_target = s.get(POSet, doc.po_set_id)
+            if ps_target is not None and ps_target.archived_at is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="The target PO Set is archived and read-only.",
+                )
+            if ps_target is not None:
+                docs = (
+                    s.query(Document)
+                    .filter_by(po_set_id=ps_target.id)
+                    .filter(Document.archived_at.is_(None))
+                    .all()
+                )
+                types_present = {
+                    d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type)
+                    for d in docs
+                }
+                cnt = (1 if DocType.CUSTOMS.value in types_present else 0) + (
+                    1 if DocType.SHIPPING.value in types_present else 0
+                )
+                ps_target.customs_doc_count = cnt
+                if (
+                    ps_target.has_customs_toggle
+                    and cnt == 2
+                    and ps_target.status == POSetStatus.blocked_customs
+                ):
+                    ps_target.status = POSetStatus.pending
+                # A customs document placed on a delivered packet is a debt the
+                # packet owes; record it with the attach so a busy lock cannot
+                # lose it. A successful append clears it.
+                if (
+                    ps_target.status == POSetStatus.merged
+                    and ps_target.has_customs_toggle
+                    and cnt == 2
+                ):
+                    ps_target.customs_append_pending = True
         s.commit()
 
-        if request.headers.get("HX-Request") == "true":
-            msg = f"Reclassified document #{doc_id} as {new_doc_type.value}"
-            html = (
-                f'<tr id="doc-row-{doc_id}">'
-                f'<td colspan="7" style="color: #166534; background: #dcfce7; padding: 8px;">'
-                f"{msg}</td></tr>"
+    # A document the operator has just placed must not wait for the next
+    # nightly scan to affect its set: attaching it is the trigger. This runs
+    # after the session closes — the reconcile opens its own, and SQLite
+    # writes cannot overlap two writer sessions on one file.
+    append_failed: str | None = None
+    if attached_ps_id is not None:
+        lock_ok = False
+        with Session(get_engine(cfg)) as s_lock:
+            ps_lock = s_lock.get(POSet, attached_ps_id)
+            if ps_lock is not None:
+                lock_ok = acquire_lock(ps_lock, "reclassify", s_lock, cfg)
+        if not lock_ok:
+            logger.info(
+                "Placed document %s but PO Set %s is busy; the next reconcile will evaluate it",
+                doc_id,
+                attached_ps_id,
             )
-            return HTMLResponse(content=html)
+            busy_msg = (
+                f"Document placed in PO Set #{attached_ps_id}, but the set became busy; "
+                "it will be evaluated on the next pass."
+            )
+            if request.headers.get("HX-Request") == "true":
+                return HTMLResponse(
+                    content=(
+                        f'<tr id="doc-row-{doc_id}"><td colspan="6" '
+                        'style="color:#92400e;background:#fffbeb;padding:8px;">'
+                        f"{escape(busy_msg)}</td></tr>"
+                    ),
+                )
+            return RedirectResponse(
+                url=f"/po_sets/{attached_ps_id}/view?notice=" + quote(busy_msg),
+                status_code=302,
+            )
+        try:
+            try:
+                from app.services.reconciliation import reconcile_po_set
+
+                reconcile_po_set(attached_ps_id, cfg)
+            except Exception:
+                logger.warning(
+                    "Placed document %s but could not reconcile PO Set %s",
+                    doc_id,
+                    attached_ps_id,
+                    exc_info=True,
+                )
+            # A customs/shipping document placed from the holding area on an
+            # already-merged set must reach the packet too, exactly as an upload
+            # does.
+            try:
+                from app.services.merge import append_customs_if_complete
+
+                append_customs_if_complete(attached_ps_id, cfg)
+            except Exception as e:
+                # append_customs_if_complete has already persisted the pending
+                # flag; the operator is told rather than left with a log line.
+                append_failed = _scrub_paths(str(e)) or type(e).__name__
+                logger.warning(
+                    "Placed document %s but could not rebuild the packet for PO Set %s",
+                    doc_id,
+                    attached_ps_id,
+                    exc_info=True,
+                )
+        finally:
+            with Session(get_engine(cfg)) as s_rel:
+                ps_rel = s_rel.get(POSet, attached_ps_id)
+                if ps_rel is not None:
+                    release_lock(ps_rel, s_rel, "reclassify")
+
+    if append_failed is not None:
+        notice = (
+            "Document placed, but the merged packet was NOT rebuilt with customs/shipping: "
+            f"{append_failed}. It will retry on the next sync."
+        )
+        if request.headers.get("HX-Request") == "true":
+            return HTMLResponse(
+                content=(
+                    f'<tr id="doc-row-{doc_id}"><td colspan="6" '
+                    'style="color:#92400e;background:#fffbeb;padding:8px;">'
+                    f"{escape(notice)}</td></tr>"
+                ),
+            )
+        return RedirectResponse(
+            url=f"/po_sets/{attached_ps_id}/view?notice=" + quote(notice),
+            status_code=302,
+        )
+
+    if attached_ps_id is None:
+        msg = (
+            f"Type set to {new_doc_type.value}, but no open PO Set exists for "
+            "this document; it remains in the holding area."
+        )
+        if request.headers.get("HX-Request") == "true":
+            # Reload the holding area so the row (with its new type) stays
+            # visible. Removing it made a failed placement look successful.
+            return HTMLResponse(
+                content=(
+                    f'<tr id="doc-row-{doc_id}"><td colspan="6" '
+                    'style="color:#92400e;background:#fffbeb;padding:8px;">'
+                    f"{msg}</td></tr>"
+                ),
+                headers={"HX-Refresh": "true"},
+            )
         return RedirectResponse(url="/unclassified", status_code=302)
+
+    if request.headers.get("HX-Request") == "true":
+        msg = f"Reclassified document #{doc_id} as {new_doc_type.value}"
+        html = (
+            f'<tr id="doc-row-{doc_id}">'
+            f'<td colspan="6" style="color: #166534; background: #dcfce7; padding: 8px;">'
+            f"{msg}</td></tr>"
+        )
+        return HTMLResponse(content=html)
+    return RedirectResponse(url="/unclassified", status_code=302)

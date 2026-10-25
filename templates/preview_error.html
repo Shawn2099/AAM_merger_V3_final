@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Preview unavailable — AAM Merger V3</title>
+  {# Standalone on purpose: this page is loaded inside the slide-over drawer's
+     iframe. Extending base.html would put the whole app shell (nav, toasts,
+     drawer) inside itself. #}
+  <link rel="stylesheet" href="/static/css/theme.css">
+</head>
+<body style="margin:0; background:var(--bg, #f1f5f9);">
+  <div style="display:flex; align-items:center; justify-content:center; min-height:100vh; padding:24px; box-sizing:border-box;">
+    <div class="card" style="max-width:520px; text-align:center;">
+      <div style="font-size:2rem; margin-bottom:8px;">📄</div>
+      <h2 class="card-title" style="justify-content:center; font-size:1.05rem;">
+        This file cannot be previewed
+      </h2>
+      <p class="muted" style="margin:10px 0 0; font-size:0.9rem;">
+        {{ message }}
+      </p>
+      <p class="muted" style="margin:14px 0 0; font-size:0.8rem;">
+        The rest of the PO Set is unaffected. Close this drawer to continue.
+      </p>
+    </div>
+  </div>
+</body>
+</html>

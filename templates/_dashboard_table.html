@@ -1,13 +1,18 @@
-<div id="po-table" hx-get="/dashboard/table{% if current_status %}?status={{ current_status }}{% endif %}" hx-trigger="every 2s" hx-swap="outerHTML">
+<div id="po-table" hx-get="/dashboard/table{% if current_status %}?status={{ current_status }}{% endif %}" hx-trigger="every 5s" hx-sync="this:replace" hx-swap="outerHTML">
 
   <table class="data-table">
+    <caption class="sr-only">
+      PO Sets with reconciliation status, the reason each one is in that state,
+      document count, age, and available actions.
+    </caption>
     <thead>
       <tr>
-        <th>PO Number</th>
-        <th>Reconciliation Status</th>
-        <th>Documents</th>
-        <th>Last Updated</th>
-        <th style="text-align:right;">Actions</th>
+        <th scope="col">PO Number</th>
+        <th scope="col">Reconciliation Status</th>
+        <th scope="col">Why</th>
+        <th scope="col">Documents</th>
+        <th scope="col">Age</th>
+        <th scope="col" style="text-align:right;">Actions</th>
       </tr>
     </thead>
     <tbody id="po-table-body">
@@ -15,6 +20,8 @@
       {% set status_str = ps.status.value if ps.status.value is defined else (ps.status|string) %}
       <tr 
         class="po-row" 
+        data-testid="po-row"
+        data-set-id="{{ ps.id }}"
         data-po="{{ ps.po_no_normalized }}" 
         data-status="{{ status_str }}"
       >
@@ -26,17 +33,44 @@
 
         <td>
           {% if status_str == 'merged' %}
-            <span class="badge badge-merged">✅ Merged &amp; Ready</span>
+            {% if not ps.has_merged_file %}
+              <span class="badge badge-quarantined" title="The database says merged, but the packet file is missing from the output folder.">Merged - packet missing</span>
+            {% elif (ps.description_match_count or 0) > 0 or ps.line_mapping_rule %}
+              <span class="badge badge-desc"
+                    title="The packet merged, but at least one vendor line was attached by DESCRIPTION or paired by a line-numbering rule rather than a printed line number. Check the item descriptions and the line mapping.">
+                Merged • review
+              </span>
+              {% if (ps.description_match_count or 0) > 0 %}
+              <span class="badge badge-desc" style="font-size:0.72rem; margin-left:4px;"
+                    title="Number of vendor lines linked by the description fallback.">
+                description match ×{{ ps.description_match_count }}
+              </span>
+              {% endif %}
+              {% if ps.line_mapping_rule %}<span class="badge badge-desc" style="font-size:0.72rem; margin-left:4px;" title="Line numbers were paired by a numbering rule, not as printed.">lines mapped ({{ ps.line_mapping_rule }})</span>{% endif %}
+            {% else %}
+              <span class="badge badge-merged">Merged &amp; Ready</span>
+            {% endif %}
+            {% if ps.reconcile_reason and ps.reconcile_reason.startswith('Force-merged') %}
+              <span class="badge badge-mismatched" style="font-size:0.72rem; margin-left:4px;"
+                    title="Reconciliation and customs gates were bypassed by an operator.">Force-merged</span>
+            {% endif %}
           {% elif status_str == 'mismatched' %}
-            <span class="badge badge-mismatched">⚠️ Needs Review</span>
+            <span class="badge badge-mismatched">Needs Review</span>
           {% elif status_str == 'blocked_customs' %}
             <span class="badge badge-blocked">🔒 Awaiting Customs</span>
           {% elif status_str == 'quarantined' %}
             <span class="badge badge-quarantined">🚨 Quarantined</span>
           {% elif status_str == 'pending' %}
-            <span class="badge badge-pending">⏳ Ingesting / Pending</span>
+            <span class="badge badge-pending">Pending / Waiting</span>
           {% else %}
             <span class="badge badge-gray">{{ status_str }}</span>
+          {% endif %}
+
+          {% if status_str == 'merged' and ps.has_customs_toggle and (ps.customs_doc_count < 2 or ps.customs_append_pending) %}
+            <span class="badge badge-blocked" style="font-size:0.72rem; margin-left:4px;"
+                  title="This set is delivered, but the customs requirement is on and the customs and shipping documents are not yet in the packet (a document is missing, or the rebuild failed and will retry on the next sync). Upload any missing document on the set page.">
+              🛃 Customs append pending
+            </span>
           {% endif %}
 
           {% if ps.is_locked %}
@@ -46,13 +80,34 @@
           {% endif %}
         </td>
 
+        <td class="reason-cell" data-testid="row-reason">
+          {% if ps.reconcile_reason %}
+            {{ ps.reconcile_reason }}
+          {% else %}
+            <span class="muted">Not evaluated yet</span>
+          {% endif %}
+        </td>
+
         <td>
-          <span style="font-weight:600; color:var(--text-main);">{{ ps.doc_count }}</span>
+          <span data-testid="row-doc-count" style="font-weight:600; color:var(--text-main);">{{ ps.doc_count }}</span>
           <span class="muted" style="font-size:0.82rem;">doc{{ 's' if ps.doc_count != 1 else '' }}</span>
         </td>
 
-        <td class="muted" style="font-size:0.85rem;">
-          {{ ps.updated_at.strftime('%b %d, %H:%M') if ps.updated_at else '—' }}
+        <td class="muted" style="font-size:0.85rem; white-space:nowrap;">
+          {% if ps.age_seconds is not none %}
+            {% set age = ps.age_seconds %}
+            {% if age < 90 %}
+              just now
+            {% elif age < 3600 %}
+              {{ (age / 60) | round | int }}m ago
+            {% elif age < 86400 %}
+              {{ (age / 3600) | round | int }}h ago
+            {% else %}
+              {{ (age / 86400) | round | int }}d ago
+            {% endif %}
+          {% else %}
+            —
+          {% endif %}
         </td>
 
         <td style="text-align:right;">
@@ -81,7 +136,7 @@
       </tr>
       {% else %}
       <tr>
-        <td colspan="5" style="text-align:center; padding:36px; color:var(--text-muted);">
+        <td colspan="6" style="text-align:center; padding:36px; color:var(--text-muted);">
           <div style="font-size:2rem; margin-bottom:8px;">📭</div>
           <div style="font-weight:600; font-size:1rem; color:var(--text-main);">No PO Sets found</div>
           <div style="font-size:0.85rem; margin-top:4px;">
@@ -97,3 +152,8 @@
     </tbody>
   </table>
 </div>
+{% if oob_stats and stats %}
+{% set oob = true %}
+{% include "_dashboard_kpi_grid.html" %}
+{% include "_dashboard_tabs.html" %}
+{% endif %}

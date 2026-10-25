@@ -9,20 +9,16 @@
         <span>🚨 Quarantine Review</span>
       </h2>
       <p class="card-subtitle">
-        PO Sets with non-positive quantities ($Q \le 0$), conflicting line descriptions, or reverse unmatched items are safely halted here for review.
+        PO Sets halted because a critical check failed: a zero or unreadable
+        quantity, a PO line with no line number, a vendor line that matches no
+        PO line, a PO reference mismatch, or a packet that cannot be named. The
+        exact reason is on each row.
       </p>
     </div>
   </div>
 
   <div class="table-container">
-    <div
-      id="quarantine-table"
-      hx-get="/quarantine/table"
-      hx-trigger="every 3s"
-      hx-swap="outerHTML"
-    >
-      {% include "_quarantine_table.html" %}
-    </div>
+    {% include "_quarantine_table.html" %}
   </div>
 </div>
 {% endblock %}

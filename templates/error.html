@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} — AAM Merger V3{% endblock %}
+
+{% block content %}
+{# A page route that cannot render its page still renders the app: the nav,
+   the theme and a way back. Raw `{"detail": ...}` belongs to API clients,
+   never to a browser navigation (F-04). #}
+<div class="card" style="max-width:640px; margin:48px auto; text-align:center;">
+  <div style="font-size:2.4rem; margin-bottom:8px;">
+    {% if code == 404 %}🔎{% else %}⚠️{% endif %}
+  </div>
+  <h2 class="card-title" style="justify-content:center;">
+    {{ heading }}
+  </h2>
+  <p class="card-subtitle" style="margin:8px 0 20px;">
+    {{ message }}
+  </p>
+  <a href="/dashboard" class="btn btn-primary">Back to dashboard</a>
+  <div class="muted" style="font-size:0.78rem; margin-top:18px;">
+    Error {{ code }}
+  </div>
+</div>
+{% endblock %}
