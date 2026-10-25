@@ -187,22 +187,22 @@ def test_ui_u_05_typing_a_po_number_previews_the_key_the_server_will_store(page:
 
 
 def test_ui_u_08_a_file_rejected_on_arrival_cannot_be_routed(page: Page, manifest, db):
-    """U-08: the refusal names the reason and the row stays where it is."""
+    """U-08: a rejected file offers no placement controls, only the reason and a move (I-40)."""
     held = manifest["held"]["rejected_on_arrival"]
     assert held["po_set_id"] is None
     page.goto("/unclassified")
     row = page.locator(f'[data-testid="unclassified-row"][data-doc-id="{held["id"]}"]')
-    row.get_by_test_id("select-doc-type").select_option("DN")
-    with page.expect_response(re.compile(rf"/unclassified/{held['id']}/reclassify")) as resp:
-        row.get_by_test_id("btn-route").click()
-    assert resp.value.status == 422, resp.value.text()
-    expect(page.locator(".toast-error")).to_contain_text("rejected on arrival", timeout=15000)
     expect(row).to_have_count(1)
+    expect(row.get_by_test_id("select-doc-type")).to_have_count(0)
+    expect(row.get_by_test_id("input-po-no")).to_have_count(0)
+    expect(row.get_by_test_id("btn-route")).to_be_hidden()
+    expect(row).to_contain_text("Cannot be placed: rejected on arrival")
+    expect(row.get_by_test_id("btn-set-aside")).to_be_visible()
     stored = db.execute(
         "select doc_type, po_set_id from documents where id=?", (held["id"],)
     ).fetchone()
     assert stored["po_set_id"] is None
-    assert stored["doc_type"] == "UNKNOWN", "a refused route must not re-type the document"
+    assert stored["doc_type"] == "UNKNOWN"
 
 
 def _awaiting_badge_count(page: Page) -> int:

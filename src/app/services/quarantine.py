@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -9,10 +10,19 @@ import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.core.database import get_engine
-from app.models import AuditAction, AuditLog, Document, LineItem, POSet, POSetStatus
+from app.models import (
+    AuditAction,
+    AuditLog,
+    Document,
+    ExtractionStatus,
+    LineItem,
+    POSet,
+    POSetStatus,
+)
 from app.models.base import Base
 from app.services.manual_merge import manual_merge  # noqa: F401  (re-export, FR-14.11)
 
@@ -203,7 +213,9 @@ def _copy_documents(folder: Path, docs) -> dict[int, str]:
     return names
 
 
-def _record_quarantine_audit(po_set_id: int | None, cfg, reason, text: str, **extra) -> None:
+def _record_quarantine_audit(
+    po_set_id: int | None, cfg, reason, text: str, *, source: str = "system", **extra
+) -> None:
     """Persist what the operator is told, so the audit trail survives the folder."""
     eng = get_engine(cfg)
     with Session(eng) as s:
@@ -212,7 +224,7 @@ def _record_quarantine_audit(po_set_id: int | None, cfg, reason, text: str, **ex
                 po_set_id=po_set_id,
                 action=AuditAction.quarantined,
                 detail=json.dumps({"reason": reason, "report": text, **extra}),
-                source="system",
+                source=source,
             )
         )
         s.commit()
@@ -419,7 +431,7 @@ def quarantine_copy(
     return folder
 
 
-def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
+def quarantine_document(doc_id: int, cfg, reason: str, *, source: str = "system") -> Path:
     """Quarantine a single document that could not be processed.
 
     A document whose extraction permanently failed is broken, and nothing about
@@ -525,6 +537,20 @@ def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
             "This file could not be read, so nothing about it could be verified.",
             "It has been removed from the input folder so it is not retried nightly.",
         )
+    if reason.startswith(SET_ASIDE_REASON_PREFIX):
+        what_happened = (
+            "An operator moved this file from the holding page.",
+            "It is no longer in the input folder, so the nightly scan will not read it.",
+        )
+        what_to_do = (
+            "Fix or split the file, then put it back in the input folder.",
+            "It is read again on the next scan.",
+        )
+    else:
+        what_to_do = (
+            "Enter its PO number on the Unclassified page to attach it to a PO Set,",
+            "then press Re-extract on that set. Or replace the file with a readable copy.",
+        )
     text = "\n".join(
         [
             "QUARANTINED DOCUMENT",
@@ -545,13 +571,118 @@ def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
             "",
             "What to do",
             "-" * 60,
-            "Enter its PO number on the Unclassified page to attach it to a PO Set,",
-            "then press Re-extract on that set. Or replace the file with a readable copy.",
+            *what_to_do,
             "",
         ]
     )
     (folder / "QUARANTINE.txt").write_text(text, encoding="utf-8")
-    _record_quarantine_audit(None, cfg, reason, text, document_id=doc_id_out, folder=str(folder))
+    _record_quarantine_audit(
+        None, cfg, reason, text, source=source, document_id=doc_id_out, folder=str(folder)
+    )
+    return folder
+
+
+#: Reason written when an operator moves a document from the holding page.
+SET_ASIDE_REASON_PREFIX = "operator_set_aside"
+SET_ASIDE_REASON = f"{SET_ASIDE_REASON_PREFIX}: moved from the holding page"
+
+
+class SetAsideRefused(Exception):
+    """An operator asked to move a document that has to stay where it is."""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+
+
+def _remove_input_duplicates(cfg, sha: str) -> None:
+    """Remove every input-folder file whose content matches `sha`.
+
+    The quarantine copy is the durable one, so an identical input copy is removed.
+    """
+    from app.services.ingestion import input_pdfs
+
+    for other in input_pdfs(cfg):
+        try:
+            if hashlib.sha256(other.read_bytes()).hexdigest() == sha:
+                other.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove duplicate input copy %s", other, exc_info=True)
+
+
+def set_aside_document(doc_id: int, cfg) -> Path | None:
+    """Move an unattached document off the holding list into the quarantine folder.
+
+    The stored copy and the quarantine copy are kept. If the document already has
+    a quarantine copy (a rejected file, or an earlier quarantine), its original
+    reason is kept and no second copy is made. Returns the quarantine folder, or
+    None when the document was already moved.
+    """
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        doc = s.get(Document, doc_id)
+        if doc is None:
+            raise SetAsideRefused(404, f"Document {doc_id} does not exist.")
+        if doc.archived_at is not None:
+            return None
+        if doc.po_set_id is not None:
+            raise SetAsideRefused(
+                409, "This document is attached to a PO Set and cannot be moved from here."
+            )
+        if doc.extraction_status == ExtractionStatus.processing:
+            raise SetAsideRefused(
+                409, "This document is being read right now; try again when it finishes."
+            )
+        stem = Path(doc.stored_path).name.replace(".pdf", "")
+        folder = Path(cfg.paths.quarantine_folder) / "_documents" / stem
+        sha = doc.sha256_hash
+        rejected = doc.ingest_reject_reason
+        in_quarantine_root = (
+            Path(doc.stored_path)
+            .resolve()
+            .is_relative_to(Path(cfg.paths.quarantine_folder).resolve())
+        )
+
+    report = folder / "QUARANTINE.txt"
+    has_copy = report.is_file() or (rejected is not None and in_quarantine_root)
+    if has_copy:
+        text = (
+            report.read_text(encoding="utf-8")
+            if report.is_file()
+            else f"Rejected on arrival: {rejected}"
+        )
+        _remove_input_duplicates(cfg, sha)
+        _record_quarantine_audit(
+            None,
+            cfg,
+            SET_ASIDE_REASON,
+            text,
+            source="operator",
+            document_id=doc_id,
+            folder=str(folder),
+            set_aside=True,
+        )
+    else:
+        folder = quarantine_document(doc_id, cfg, SET_ASIDE_REASON, source="operator")
+
+    with Session(eng) as s:
+        result = s.execute(
+            update(Document)
+            .where(
+                Document.id == doc_id,
+                Document.archived_at.is_(None),
+                Document.po_set_id.is_(None),
+                Document.extraction_status != ExtractionStatus.processing,
+            )
+            .values(archived_at=datetime.now(UTC))
+        )
+        s.commit()
+        if result.rowcount == 0:
+            raise SetAsideRefused(
+                409, "The document changed while it was being moved. Reload the page and try again."
+            )
     return folder
 
 

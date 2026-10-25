@@ -4,6 +4,7 @@ Cross-platform via pathlib. No hardcoded paths. Sync def handlers."""
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 from datetime import UTC, datetime
@@ -1497,9 +1498,58 @@ def unclassified_view(request: Request):
                 "ambiguous_count": ambiguous_count,
                 "unplaced_count": unplaced_count,
                 "hold_notes": hold_notes,
+                # Which rows already have a quarantine copy: the row text must not claim
+                # a copy that does not exist (I-52).
+                "in_quarantine_folder": {
+                    d.id: (
+                        Path(cfg.paths.quarantine_folder)
+                        / "_documents"
+                        / Path(d.stored_path).name.replace(".pdf", "")
+                        / "QUARANTINE.txt"
+                    ).is_file()
+                    for d in docs
+                },
                 "attempt_cap": int(getattr(cfg.extraction, "max_retries", 3) or 3),
             },
         )
+
+
+@router.post("/unclassified/{doc_id}/set_aside", response_class=HTMLResponse)
+def set_aside_route(doc_id: int, request: Request):
+    """Move one held document into the quarantine folder and off the holding list (D10).
+
+    The file is copied, not deleted: the operator splits or fixes it and puts it
+    back in the input folder. Refused while a sync is reading documents.
+    """
+    from app.services import sync_lock
+    from app.services.quarantine import SetAsideRefused, set_aside_document
+
+    cfg = load_config()
+    if sync_lock._is_sync_running():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A sync is currently reading documents; wait for it to finish "
+                "before moving a document."
+            ),
+        )
+    try:
+        folder = set_aside_document(doc_id, cfg)
+    except SetAsideRefused as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url="/unclassified", status_code=303)
+    where = html.escape(str(folder)) if folder is not None else "the quarantine folder"
+    return HTMLResponse(
+        content=(
+            f'<tr id="doc-row-{doc_id}" data-testid="set-aside-result">'
+            '<td colspan="6" style="padding:12px 14px; background:#f0fdf4;">'
+            f"Moved to the quarantine folder: <code>{where}</code>. "
+            "Fix or split it, then put it back in the input folder."
+            "</td></tr>"
+        )
+    )
 
 
 @router.get("/unclassified/normalize")

@@ -79,7 +79,7 @@
                 <span class="badge badge-failed" style="font-size:0.75rem;">Failed</span>
                 <div class="muted" style="font-size:0.7rem; margin-top:3px;">
                   {{ doc.extraction_attempt_count or 0 }}/{{ attempt_cap }} attempts.<br>
-                  Quarantined — file copied to the quarantine folder.
+                  {% if in_quarantine_folder.get(doc.id) %}Quarantined — file copied to the quarantine folder.{% endif %}
                   {% if doc.ingest_reject_reason %}<br><strong>Rejected on arrival:</strong> {{ doc.ingest_reject_reason }}{% endif %}
                 </div>
               {% elif es == 'valid' %}
@@ -92,6 +92,9 @@
             </td>
 
             <td>
+              {% if doc.ingest_reject_reason %}
+              <div class="muted" style="font-size:0.8rem;">Cannot be placed: rejected on arrival. Move it to the quarantine folder.</div>
+              {% else %}
               <select name="doc_type" data-testid="select-doc-type" required x-model="docType" aria-label="Document type for {{ doc.original_filename }}" style="padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); font-weight:600; background:#fff; width:100%; max-width:240px;">
                 <option value="">-- Select Type --</option>
                 <option value="PO">📄 Purchase Order (PO)</option>
@@ -106,9 +109,11 @@
               {% if stored_type != 'UNKNOWN' %}
               <div class="muted" style="font-size:0.72rem; margin-top:3px;">Stored type: {{ stored_type }}</div>
               {% endif %}
+              {% endif %}
             </td>
 
             <td>
+              {% if doc.ingest_reject_reason %}{% else %}
               <input 
                 type="text" 
                 name="po_no"
@@ -122,6 +127,7 @@
               <div data-testid="po-key-preview" x-show="norm.length > 0" class="muted" style="font-size:0.72rem; margin-top:2px;">
                 Server key: <strong x-text="norm" style="color:var(--primary);"></strong>
               </div>
+              {% endif %}
             </td>
 
             <td style="text-align:right;">
@@ -136,8 +142,20 @@
                 >
                   <span>👁️ Preview</span>
                 </button>
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm"
+                  data-testid="btn-set-aside"
+                  hx-post="/unclassified/{{ doc.id }}/set_aside"
+                  hx-target="#doc-row-{{ doc.id }}"
+                  hx-swap="outerHTML"
+                  hx-confirm="Move this file to the quarantine folder? It leaves this list. The original is kept there, and you can put a fixed copy back in the input folder."
+                  title="Copy this file to the quarantine folder and remove it from this list"
+                >
+                  <span>Move to quarantine</span>
+                </button>
 
-                <button 
+                {% if not doc.ingest_reject_reason %}<button 
                   type="button"
                   class="btn btn-primary btn-sm"
                   data-testid="btn-route"
@@ -150,7 +168,7 @@
                   title="Assign type and route document"
                 >
                   <span>Save &amp; Route</span>
-                </button>
+                </button>{% endif %}
               </div>
             </td>
         </tr>
