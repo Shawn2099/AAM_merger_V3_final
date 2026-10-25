@@ -1,0 +1,150 @@
+# UI/UX CA Transformation Blueprint & Session Context Plan
+**Repository:** `Shawn2099/AAM_merger_V3_final`  
+**Active Development Branch:** `fix/mvp-high-priority`  
+**Production Head:** `main` (commit `bd33eb2`, PR #5 merged)  
+**Target User Persona:** Chartered Accountants (CAs), Commercial Finance Controllers, Tax & Statutory Auditors, Accounts Operations  
+**Last Updated:** 2026-10-26 (IST)
+
+---
+
+## 1. Project Background & System Context (For Future Sessions)
+
+### Architectural Truths & Non-Negotiable Engine Invariants
+* **The Core Formula:** Quantities are the **sole signal** for matching and reconciliation.
+  * Every quantity in SQLite is stored as an integer scaled $\times 1000$ (e.g., $10.5 \to 10500$). Comparisons are strictly integer math; no floats.
+  * Part numbers, line types, SKUs, and UOM were **retired on 2026-09-29** (migration `c1a2b3d4e5f6`) because vendor formatting variations caused high false-quarantine rates.
+  * Unit prices were removed from VLM schemas and database storage in migration `d5e6f7a8b9c0` (R-02).
+* **Database & Concurrency:**
+  * Synchronous SQLAlchemy 2.x with SQLite WAL mode. Single-writer, multi-reader.
+  * Optimistic locking protocol: Concurrent updates/merges to the same PO Set raise HTTP 409 Conflict via `po_sets.locked_by_action` and `locked_at`.
+* **Branch Strategy:**
+  * `main`: Protected deployment-only tree. Contains only production runtime, migrations, static assets, templates, and operator documentation.
+  * `fix/mvp-high-priority`: Comprehensive development branch carrying all test suites, evaluation scripts, benchmarks, and architectural plans.
+
+### Documented Limitations to Respect (Product Doc §8)
+* **Limitation N:** "Move to quarantine and remove set" deletes database rows (atomic single-transaction delete) while archiving source PDFs, input copies, and JSON manifest exports to `quarantine/_removed_sets/<PO>_<stamp>_<id>/`.
+* **Limitation O:** SQLite `po_sets.id` does not use `AUTOINCREMENT`. If the latest set is deleted, the next created set may reuse its primary key. Mitigated by stamping quarantine folders with `removed:<id>:<stamp>`.
+* **Limitation L:** A PO document cannot be removed individually from a set via the UI. If a set contains conflicting PO files, operators must either Force Merge (if both apply) or remove the set.
+
+---
+
+## 2. The CA Persona: Friction Points & Mental Model
+
+Chartered Accountants and commercial audit managers evaluate the software against **statutory audit standards**:
+1. **Mathematical Proof & Deltas:** A CA requires explicit variance calculations ($PO - DN$ and $DN - SI$). Mental subtraction on raw quantities is unacceptable in high-volume reconciliation.
+2. **Substance vs Form (Fidelity):** CAs fear vendor material substitution (e.g. delivering Grade B goods with the same quantity as Grade A). The UI must show both the PO description and the vendor’s printed description side-by-side.
+3. **Statutory Gating:** Customs Bill of Entry and Transshipment Air Waybills (AWB) are legal prerequisites for payment release. They must be presented as a clear compliance checklist.
+4. **Defensible Accountability:** Management overrides ("Force Merge") must not look like reckless developer bypasses; they must serve as **Authorized Exception Certificates** complete with variance logs, business justification, and authorizer attribution.
+
+---
+
+## 3. Screen-by-Screen Audit & Redesign Blueprint
+
+### Screen 1: Global Shell & Header (`templates/base.html`)
+* **Eliminate:**
+  * Separate "🚨 Quarantine" link in top navbar (fold into the Dashboard's "Exceptions" view).
+  * Duplicate "Merge PDFs" button from dashboard header.
+* **Add:**
+  * Live **Sync State Pill** in header: `🟢 Ready (Last scan: 12m ago)` or `🔄 Scanning input (Doc 2 of 5)...`.
+  * Contextual metadata and zoom/rotate controls inside the slide-over PDF drawer header.
+* **Relocate:**
+  * Group navbar into: **Worklists (Dashboard)** | **Unclassified Ingest (Badge)** | **Audit Trail** | **Tools ▾ (Manual Merger, Settings)**.
+
+---
+
+### Screen 2: Main Dashboard (`templates/dashboard.html`, `_dashboard_table.html`, `_dashboard_kpi_grid.html`)
+* **Eliminate:**
+  * Redundant `<select id="status-filter">` dropdown (keep clean horizontal tab pills).
+  * Long wrapped sentences in the "Why" column.
+* **Add:**
+  * Multi-select row checkboxes + Batch Action Bar: `[📥 Download Selected Packets (ZIP)]` and `[🖨️ Print Reconciliation Summaries]`.
+  * Commercial context in KPI cards:
+    * `24 Sets Ready to Authorize (100% Match)`
+    * `12 Sets Short Deliveries (Awaiting Supplier Balance)`
+    * `5 Sets Audit Exceptions (Discrepancies / Action Needed)`
+    * `8 Sets Customs Hold (Missing AWB / Bill of Entry)`
+* **Relocate:**
+  * Replace the raw "Why" column with structured, high-contrast status tags:
+    * `🟡 -20 Qty (Line 1)` (Short delivery)
+    * `🔴 Overbilled +10 (Line 4)` (Invoice exceeds GRN)
+    * `🛃 Missing Bill of Entry` (Customs required)
+    * `⚠️ Multiple POs Attached` (Contractual conflict)
+
+---
+
+### Screen 3: PO Set Detail & 3-Way Reconciliation (`templates/po_set_detail.html`)
+* **Eliminate:**
+  * Vertical clutter: Remove separate bottom cards for "Archive Quarantined PO Set" and "Move to quarantine and remove set".
+  * Developer-centric justification note: *"The matrix below compares line quantities only... check above stopped it first."*
+* **Add (The 3-Way Reconciliation Schedule):**
+  * **Delivery Variance Column:** $DN - PO$ (Highlight negative in Amber: *Short Delivery*).
+  * **Invoicing Variance Column:** $SI - DN$ (Highlight positive in Red: *Overbilled / Credit Note Required*).
+  * **Vendor Item Description Column:** Displays what was actually printed on the vendor's delivery note alongside the PO baseline description.
+  * **Formal Totals Row:** Sum of PO Qty, Sum of DN Qty, Sum of SI Qty, Net Variance.
+  * **Statutory Compliance Checklist:** Clean side-by-side card showing:
+    * `[☑] Purchase Order (Verified)`
+    * `[☑] Delivery Challan / GRN (Verified)`
+    * `[☑] Tax Invoice (Verified)`
+    * `[☒] Bill of Entry (Customs) ── [📎 Attach PDF]`
+    * `[☒] Air Waybill (Shipping) ── [📎 Attach PDF]`
+  * **Export Workpaper Button:** `[🖨️ Export 3-Way Reconciliation Certificate (PDF / CSV)]`.
+* **Relocate:**
+  * Danger actions: Consolidate "Force Merge" and "Remove Set" under a collapsed **Supervisor Controls / Management Exceptions** section.
+
+---
+
+### Screen 4: Unclassified Ingest Area (`templates/unclassified.html`)
+* **Eliminate:**
+  * Technical SHA-256 strings in table rows (`SHA: e7f8a9b0c1...`).
+  * Repetitive text: *"Server key: 210851"*.
+* **Add:**
+  * Accordion categorization by problem type:
+    1. 📂 **Missing PO Number** (Clean files needing order assignment)
+    2. 🔀 **Conflicting References** (Files with multiple PO references)
+    3. ⚠️ **Corrupt / Unreadable Files** (Password-protected, damaged)
+  * **Batch Assign Bar:** Select 5 files → `[ Assign Type: DN ▾ ]` `[ PO #: 210851 ]` `[ 🚀 Route All ]`.
+  * **Vendor Rejection Helper:** 1-click button to copy email notice explaining why an invoice was rejected.
+
+---
+
+### Screen 5: System Audit Log (`templates/audit.html`)
+* **Eliminate:**
+  * Raw JSON disclosure blocks (`<details><summary>Raw JSON</summary><pre>...</pre></details>`).
+* **Add:**
+  * Clean, formatted **Audit Attribute Grid** showing authorizer, reason, affected documents, and waived line items.
+  * Filter pills: `[ All Events ]` `[ ⚡ Management Overrides ]` `[ 🚨 Set Removals ]` `[ ⚙️ Settings Changes ]`.
+  * Export options: `[ 📊 Export to Excel (.xlsx) ]` and `[ 📄 Export Statutory Audit Report (.PDF) ]`.
+
+---
+
+## 4. Implementation Phasing & Next Steps
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 1: Jargon Removal & Visual Polish (Zero DB / Backend Changes)         │
+│ • Update terminology: "Quarantine" -> "Audit Exception",                    │
+│   "Force Merge" -> "Management Override", "Re-Extract with AI" -> "Re-Parse"│
+│ • Add Variance columns (Delivery Δ and Invoicing Δ) to the matrix           │
+│ • Add formal Totals Row to the reconciliation table                         │
+│ • Add Print Stylesheet (@media print) for physical 3-Way Match Certificates │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ PHASE 2: Layout & Workflow Restructuring                                    │
+│ • Consolidate red buttons on PO Set Detail under "Supervisor Controls"      │
+│ • Refactor Dashboard tabs into commercial worklists                         │
+│ • Implement batch routing in Unclassified holding area                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ PHASE 3: Audit & Reporting Exports                                          │
+│ • Add Excel/CSV export for Reconciliation Statements & System Audit Log     │
+│ • Deep-link line item clicks directly to target page in the PDF drawer      │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 5. Ongoing Session Log & Insights Tracker
+
+| Date | Author / Agent | Milestone / Insight Recorded | Status |
+| :--- | :--- | :--- | :--- |
+| **2026-10-25** | Claude & Shawn | Completed Batch 1 features (safe set removal, customs toggle refusal, holding set-aside, IST timestamps, responsive styling). Created PR #5. | Merged to `main` (`bd33eb2`) |
+| **2026-10-26** | Antigravity | Full code audit of PR #5 (27 files, 134 tests verified green). Boot clean-room verified. | Production Ready |
+| **2026-10-26** | Antigravity | Conducted Senior UI/UX Audit for CA clients; created comprehensive screen-by-screen blueprint (`docs/UI_UX_CA_TRANSFORMATION_PLAN.md`). | Blueprint Established |
