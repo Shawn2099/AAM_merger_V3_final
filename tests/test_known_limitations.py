@@ -157,3 +157,32 @@ def test_known_limitation_sanitizer_accepts_exponent_and_underscore_forms():
     # (1e2 -> 100, 1_000 -> 1000), scaled x1000 as usual.
     assert parse_quantity_scaled("1e2") == 100 * 1000
     assert parse_quantity_scaled("1_000") == 1000 * 1000
+
+
+def test_known_limitation_a_po_document_cannot_be_removed_from_a_set(cfg, client):
+    """PRODUCT section 8 L (D11, Q2): a PO file is never removed from a set here.
+
+    The way out is Force Merge (both files are needed) or, once it exists, moving
+    the set to quarantine and putting the right PO back in the input folder.
+    """
+    from app.models import POSet
+
+    pid = _set(cfg, "PO-LIM")
+    po_a = _doc(cfg, pid, DocType.PO, "lim-po-a.pdf", LINE, po_no="PO-LIM")
+    _doc(cfg, pid, DocType.PO, "lim-po-b.pdf", LINE, po_no="PO-LIM")
+    _doc(cfg, pid, DocType.DN, "lim-dn.pdf", LINE, po_no="PO-LIM")
+    _doc(cfg, pid, DocType.SI, "lim-si.pdf", LINE, po_no="PO-LIM", si_no="INV-LIM")
+
+    resp = client.post(f"/po_sets/{pid}/documents/{po_a}/remove_supporting")
+    assert resp.status_code == 422
+    assert "Only a CUSTOMS or SHIPPING document can be removed here" in resp.text
+
+    with Session(get_engine(cfg)) as s:
+        doc = s.get(Document, po_a)
+        assert doc.po_set_id == pid and doc.archived_at is None
+    assert reconcile_po_set(pid, cfg)["status"] == "pending"
+    with Session(get_engine(cfg)) as s:
+        assert "2 PO documents" in s.get(POSet, pid).reconcile_reason
+
+    page = client.get(f"/po_sets/{pid}/view").text
+    assert f"btn-remove-supporting-{po_a}" not in page

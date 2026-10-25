@@ -203,8 +203,9 @@ A PO Set is expected to hold one PO **document**. With
 set carrying more than one PO document is held **pending** with
 `multiple_po_documents`; it is not summed and it does not auto-merge. The
 documents may be page fragments or a re-issue, and the engine must not guess.
-The detail names the files. The operator resolves the set using the existing
-document tools; this release adds no PO-selection UI.
+The detail names the files. A PO document cannot be removed from a set in this
+release (section 8, L). The operator resolves the set with Force Merge when both
+files are needed; this release adds no PO-selection UI.
 
 Without the gate, two POs in one set are summed into the baseline, which
 silently doubles every quantity the DN and SI are then compared against — the
@@ -498,6 +499,18 @@ and 4 test files deleted.
 
 These are real. They are the price of §7, stated plainly so nobody discovers
 them on a live document.
+
+### L — a PO document cannot be removed from a set
+
+When a PO Set holds several PO documents (D11, Q2), the set page offers no remove
+action for a PO, DN or SI document. Only CUSTOMS and SHIPPING documents can be
+removed (`remove_supporting` refuses the others with 422). A PO that arrived as
+several files therefore stays `multiple_po_documents` until the operator uses
+Force Merge (both files are needed) or the set is handled outside the app.
+
+> Pinned by `test_known_limitation_a_po_document_cannot_be_removed_from_a_set`
+> in `tests/test_known_limitations.py`. When a removal action is added, flip
+> that test and drop the prefix.
 
 ### H — a wrong item can merge (highest consequence)
 

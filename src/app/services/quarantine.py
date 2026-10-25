@@ -96,7 +96,10 @@ def _format_qty(value) -> str:
 WHAT_TO_DO: dict[str, str] = {
     "document_extraction_failed": "Open the named file; Re-Extract the set or replace the file.",
     "unclassified_document_in_set": "Reclassify the unclassified document, or remove it.",
-    "multiple_po_documents": "Decide which PO document is correct; remove the other one.",
+    "multiple_po_documents": (
+        "Decide which PO document is correct. A PO file cannot be removed from the set; "
+        "use Force Merge if both are needed."
+    ),
     "po_reference_mismatch": "Check the PO number printed on each document; fix the odd one out.",
     "duplicate_document_number": "Check if the same DN/SI was scanned twice; remove the duplicate.",
     "po_document_has_no_line_items": "Check the PO has every page; add missing ones, re-extract.",
