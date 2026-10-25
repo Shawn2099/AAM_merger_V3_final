@@ -18,7 +18,7 @@
     <table class="data-table">
       <thead>
         <tr>
-          <th>Timestamp (UTC)</th>
+          <th>Time (IST)</th>
           <th>Administrative Action</th>
           <th>PO Set ID</th>
           <th>Event Detail</th>
@@ -31,7 +31,7 @@
         {% set act = e.action %}
         <tr data-testid="audit-row">
           <td class="muted" style="font-family:ui-monospace, monospace; font-size:0.85rem;">
-            {{ e.timestamp.strftime('%Y-%m-%d %H:%M:%S') if e.timestamp else '—' }}
+            {{ e.timestamp | ist('%Y-%m-%d %H:%M:%S') }}
           </td>
           <td>
             {% if act == 'force_merge' %}

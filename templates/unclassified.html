@@ -66,7 +66,7 @@
             </td>
 
             <td class="muted" style="font-size:0.85rem;">
-              {{ doc.created_at.strftime('%b %d, %H:%M') if doc.created_at else '—' }}
+              {{ doc.created_at | ist('%d %b %Y, %H:%M') }}
             </td>
 
             {# Extraction outcome. A document that is `failed` has exhausted

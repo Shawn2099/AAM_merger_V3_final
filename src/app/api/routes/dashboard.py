@@ -13,11 +13,11 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.routes.po_sets import _scrub_paths
+from app.api.templating import templates
 from app.core.config import load_config
 from app.core.database import get_engine
 from app.models import (
@@ -50,8 +50,8 @@ _HAND_ASSIGNABLE_DOC_TYPES = frozenset(
     }
 )
 
-# Jinja templates — directory = "templates" (cross-platform, not hardcoded absolute)
-_templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[4] / "templates"))
+# Shared Jinja templates (with the `ist` display filter), see api/templating.py
+_templates = templates
 
 # 5 statuses as defined in SPEC §6.3 — enum values are the source of truth
 _ALLOWED_STATUSES = {s.value for s in POSetStatus}

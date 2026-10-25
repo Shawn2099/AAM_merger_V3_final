@@ -11,20 +11,17 @@ hosts apply, and every save is written to the audit log.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 
+from app.api.templating import templates as _templates
 from app.core import config as config_module
 from app.services import settings_admin as svc
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
-
-_templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[4] / "templates"))
 
 #: A form carries one field per setting plus the file version; anything bigger is not ours.
 _MAX_FORM_FIELDS = 200

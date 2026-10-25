@@ -16,7 +16,7 @@
 <div class="card" style="border-left:4px solid #6b7280; margin-bottom:16px; background:#f9fafb;">
   <div data-testid="archived-banner" style="font-weight:700; color:#374151; margin-bottom:4px;">📦 Archived PO Set — read-only</div>
   <div class="muted" style="font-size:0.9rem;">
-    Archived {{ po_set.archived_at.strftime('%Y-%m-%d %H:%M:%S UTC') if po_set.archived_at else '—' }}
+    Archived {{ po_set.archived_at | ist('%Y-%m-%d %H:%M:%S') }}
     by {{ po_set.archived_by or 'unknown' }}. The records and files are kept for audit and analysis.
     Export: <code>{{ po_set.archive_path or '—' }}</code>
   </div>
@@ -100,8 +100,8 @@
   </div>
 
   <div style="display:flex; gap:20px; flex-wrap:wrap; font-size:0.85rem; color:var(--text-muted); border-top:1px solid var(--border); padding-top:12px; align-items:center;">
-    <div><strong>Created:</strong> {{ po_set.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') if po_set.created_at else '—' }}</div>
-    <div title="The system touches a set on every check, so this is not when the documents changed."><strong>Last checked:</strong> {{ po_set.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC') if po_set.updated_at else '—' }}</div>
+    <div><strong>Created:</strong> {{ po_set.created_at | ist('%Y-%m-%d %H:%M:%S') }}</div>
+    <div title="The system touches a set on every check, so this is not when the documents changed."><strong>Last checked:</strong> {{ po_set.updated_at | ist('%Y-%m-%d %H:%M:%S') }}</div>
     <div><strong>Customs Requirement:</strong> <span style="font-weight:600; color:{{ 'var(--primary)' if po_set.has_customs_toggle else 'var(--text-muted)' }};">{{ 'ENABLED (CUSTOMS + SHIPPING Required)' if po_set.has_customs_toggle else 'DISABLED' }}</span></div>
     {% if po_set.has_customs_toggle %}
       <div><strong>Customs Clearance:</strong> <span style="font-weight:600;">{% if 'CUSTOMS' in documents|map(attribute='doc_type')|map(attribute='value')|list %}✅ Attached{% else %}❌ Missing{% endif %}</span></div>
