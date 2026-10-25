@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -243,3 +244,18 @@ def test_reclassifying_a_moved_document_says_it_was_moved_not_archived(cfg, clie
     assert resp.status_code == 409
     assert "moved to the quarantine folder" in resp.text
     assert "archived" not in resp.text
+
+
+def test_a_removed_customs_file_keeps_the_archived_message_not_the_quarantine_one(cfg, client):
+    """Review M1: a CUSTOMS file deleted from a set has no quarantine report, so it keeps the
+    archived-set message. The quarantine message is for documents moved from the holding page."""
+    doc_id, _sha, _input = _held_valid_si(cfg, name="SIV-CUSTOMS-GONE.pdf")
+    with Session(get_engine(cfg)) as s:
+        doc = s.get(Document, doc_id)
+        doc.doc_type = DocType.CUSTOMS
+        doc.archived_at = datetime.now(UTC)
+        s.commit()
+    resp = client.post(f"/unclassified/{doc_id}/reclassify", data={"doc_type": "DN"})
+    assert resp.status_code == 409
+    assert "archived PO Set" in resp.text
+    assert "quarantine folder" not in resp.text

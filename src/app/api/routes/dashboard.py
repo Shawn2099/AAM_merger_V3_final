@@ -1728,8 +1728,16 @@ def reclassify_document(
         if doc is None:
             raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
         if doc.archived_at is not None:
-            # A document moved from the holding page is not in any set (review L5).
-            if doc.po_set_id is None:
+            # Only a document actually moved from the holding page gets the quarantine
+            # message: it has a quarantine report. A removed CUSTOMS/SHIPPING file has
+            # none, and keeps the archived-set message (review M1).
+            report = (
+                Path(cfg.paths.quarantine_folder)
+                / "_documents"
+                / Path(doc.stored_path).name.replace(".pdf", "")
+                / "QUARANTINE.txt"
+            )
+            if doc.po_set_id is None and report.is_file():
                 raise HTTPException(
                     status_code=409,
                     detail=(
