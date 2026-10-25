@@ -92,7 +92,7 @@
             </td>
 
             <td>
-              <select name="doc_type" data-testid="select-doc-type" required x-model="docType" style="padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); font-weight:600; background:#fff; width:100%; max-width:240px;">
+              <select name="doc_type" data-testid="select-doc-type" required x-model="docType" aria-label="Document type for {{ doc.original_filename }}" style="padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); font-weight:600; background:#fff; width:100%; max-width:240px;">
                 <option value="">-- Select Type --</option>
                 <option value="PO">📄 Purchase Order (PO)</option>
                 <option value="DN">📦 Delivery Note (DN)</option>
@@ -111,7 +111,8 @@
             <td>
               <input 
                 type="text" 
-                name="po_no" 
+                name="po_no"
+                aria-label="PO number for {{ doc.original_filename }}"
                 data-testid="input-po-no"
                 placeholder="e.g. PO-210851" 
                 x-model="poInput"

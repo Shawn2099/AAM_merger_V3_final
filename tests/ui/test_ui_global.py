@@ -143,32 +143,13 @@ def test_ui_g_02_no_request_leaves_the_app_host(page: Page, base_url, manifest):
 
 G03_VIEWPORTS = ((1024, 768), (1366, 768), (768, 1024))
 
-#: The 768px-wide viewport overflows on both pages: `.nav-right` ends at x=830
-#: in a 768px client area, so `document.documentElement.scrollWidth` is 830.
-G03_OVERFLOW_768 = (830, 768)
 
-
+#: At 768px the nav used to overflow (`.nav-right` ended at x=830). The narrow-window
+#: rules in theme.css (Batch 1 step 5, I-50) fixed it, so this is now a guard.
 @pytest.mark.parametrize(
     "width,height,kind",
     [
-        pytest.param(
-            width,
-            height,
-            kind,
-            id=f"{width}-{kind}",
-            marks=(
-                pytest.mark.xfail(
-                    strict=True,
-                    reason=(
-                        f"SUSPECTED PRODUCT BUG UI-G03-{width}-{kind}: "
-                        f"scrollWidth {G03_OVERFLOW_768[0]} > "
-                        f"clientWidth {G03_OVERFLOW_768[1]}"
-                    ),
-                )
-                if width == 768
-                else ()
-            ),
-        )
+        pytest.param(width, height, kind, id=f"{width}-{kind}")
         for width, height in G03_VIEWPORTS
         for kind in ("dashboard", "set")
     ],
