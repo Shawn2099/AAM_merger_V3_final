@@ -1343,7 +1343,7 @@ def test_packet_name_collision_quarantines_the_second_set(cfg, client):
     assert "already exists" in (client.get("/quarantine").text).lower()
 
 
-def test_failed_document_is_in_the_holding_area_not_the_quarantine_page(cfg, client):
+def test_failed_document_is_on_the_holding_area_and_in_files_set_aside(cfg, client):
     eng = get_engine(cfg)
     with Session(eng) as s:
         s.add(
@@ -1362,7 +1362,10 @@ def test_failed_document_is_in_the_holding_area_not_the_quarantine_page(cfg, cli
     holding = client.get("/unclassified").text
     assert "broken-scan.pdf" in holding
     assert "failed" in holding.lower()
-    assert "broken-scan.pdf" not in client.get("/quarantine").text
+    # Step 11: a failed read stays on the holding list and is also listed as "Files set aside".
+    quarantine = client.get("/quarantine").text
+    assert "broken-scan.pdf" in quarantine
+    assert "files-set-aside" in quarantine
 
 
 def test_needs_review_detail_page_shows_the_numbers(cfg, client):

@@ -1327,6 +1327,25 @@ def audit_log(request: Request):
 # ---------------------------------------------------------------------------
 
 
+def _set_aside_query(session: Session):
+    """Unattached documents the system could not process: failed reads and combined bundles.
+
+    They stay on the holding list until moved (D9). The Quarantine page lists them as
+    "Files set aside" so every file the system could not process is in one place.
+    """
+    return session.query(Document).filter(
+        Document.archived_at.is_(None),
+        Document.po_set_id.is_(None),
+        or_(
+            Document.extraction_status == ExtractionStatus.failed,
+            and_(
+                Document.doc_type == DocType.COMBINED,
+                Document.is_split_parent.is_(False),
+            ),
+        ),
+    )
+
+
 @router.get("/quarantine", response_class=HTMLResponse)
 def quarantine_view(request: Request):
     cfg = load_config()
@@ -1370,12 +1389,21 @@ def quarantine_view(request: Request):
             for ps in qs
         ]
         unclassified_count = _holding_area_query(s).count()
+        set_aside_docs = _set_aside_query(s).order_by(Document.created_at.desc()).all()
+        quarantine_root = Path(cfg.paths.quarantine_folder)
+        set_aside_in_folder: dict[int, str | None] = {}
+        for d in set_aside_docs:
+            folder_name = Path(d.stored_path).name.replace(".pdf", "")
+            has_copy = (quarantine_root / "_documents" / folder_name / "QUARANTINE.txt").is_file()
+            set_aside_in_folder[d.id] = f"_documents/{folder_name}" if has_copy else None
         return _templates.TemplateResponse(
             request,
             "quarantine.html",
             {
                 "request": request,
                 "po_sets": enriched,
+                "set_aside_docs": set_aside_docs,
+                "set_aside_in_folder": set_aside_in_folder,
                 "unclassified_count": unclassified_count,
                 "now_ts": _now_ts(),
                 "archive_folder": str(cfg.paths.archive_folder),

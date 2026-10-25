@@ -1,0 +1,58 @@
+{# Files set aside: unattached documents the system could not process (D9).
+   Static on page load; a move from the holding page refreshes the whole page. #}
+<div class="card" style="margin-top:20px;" data-testid="files-set-aside">
+  <div class="card-header">
+    <div>
+      <h3 class="card-title" style="font-size:1.05rem;">📥 Files set aside</h3>
+      <p class="card-subtitle">
+        Files that could not be read, or that hold several documents in one PDF.
+        They are not in any PO Set. Split or fix them outside the app and put the
+        copy back in the input folder. Move them from the Unclassified page.
+      </p>
+    </div>
+  </div>
+  {% if set_aside_docs %}
+  <div class="table-container">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Why it was set aside</th>
+          <th>Received</th>
+          <th>Quarantine copy</th>
+          <th style="text-align:right;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for doc in set_aside_docs %}
+        <tr data-testid="set-aside-row" data-doc-id="{{ doc.id }}">
+          <td>
+            <a href="/unclassified" title="Open the Unclassified page">{{ doc.original_filename }}</a>
+          </td>
+          <td>
+            {% if doc.ingest_reject_reason %}
+              Rejected on arrival: {{ doc.ingest_reject_reason }}
+            {% elif doc.extraction_status and doc.extraction_status.value == 'failed' %}
+              Could not be read after {{ doc.extraction_attempt_count or 0 }} attempts
+            {% else %}
+              Several documents in one PDF; not split
+            {% endif %}
+          </td>
+          <td class="muted" style="font-size:0.85rem;">{{ doc.created_at | ist('%d %b %Y, %H:%M') }}</td>
+          <td class="muted" style="font-size:0.85rem;">
+            {% if set_aside_in_folder.get(doc.id) %}yes ({{ set_aside_in_folder[doc.id] }}){% else %}no{% endif %}
+          </td>
+          <td style="text-align:right;">
+            <form method="post" action="/unclassified/{{ doc.id }}/set_aside" style="display:inline;">
+              <button type="submit" class="btn btn-secondary btn-sm" data-testid="btn-set-aside-quarantine">Move to quarantine</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="margin:12px 0 0;">No files are set aside.</p>
+  {% endif %}
+</div>

@@ -759,6 +759,9 @@ A file ingest refuses for good (not a PDF, truncated and older than five
 minutes, password-protected, over the size cap) is moved to
 `quarantine/_documents/` and now also gets a `failed`, unattached Document row,
 so it appears on the Unclassified page with the reason ("Rejected on arrival").
+It is also listed under Files set aside on the Quarantine page, and it stays on
+the Unclassified page until an operator moves it ("Move to quarantine"). Failed
+reads and combined bundles are listed on both pages until moved (Batch 1, D9).
 A byte-identical file re-sent after its set merged resolves to the existing
 document, no longer mints an empty set, and is removed from input once the set
 is merged, the stored copy exists and the bytes still hash to the stored SHA.
