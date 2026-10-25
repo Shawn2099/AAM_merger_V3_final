@@ -2,17 +2,28 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
 import shutil
-from datetime import UTC, datetime
+import uuid
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
+from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
 
 from app.core.database import get_engine
-from app.models import AuditAction, AuditLog, Document, LineItem, POSet, POSetStatus
+from app.models import (
+    AuditAction,
+    AuditLog,
+    Document,
+    ExtractionStatus,
+    LineItem,
+    POSet,
+    POSetStatus,
+)
 from app.models.base import Base
 from app.services.manual_merge import manual_merge  # noqa: F401  (re-export, FR-14.11)
 
@@ -96,7 +107,10 @@ def _format_qty(value) -> str:
 WHAT_TO_DO: dict[str, str] = {
     "document_extraction_failed": "Open the named file; Re-Extract the set or replace the file.",
     "unclassified_document_in_set": "Reclassify the unclassified document, or remove it.",
-    "multiple_po_documents": "Decide which PO document is correct; remove the other one.",
+    "multiple_po_documents": (
+        "Decide which PO document is correct. A PO file cannot be removed from the set; "
+        "use Force Merge if both are needed."
+    ),
     "po_reference_mismatch": "Check the PO number printed on each document; fix the odd one out.",
     "duplicate_document_number": "Check if the same DN/SI was scanned twice; remove the duplicate.",
     "po_document_has_no_line_items": "Check the PO has every page; add missing ones, re-extract.",
@@ -200,7 +214,9 @@ def _copy_documents(folder: Path, docs) -> dict[int, str]:
     return names
 
 
-def _record_quarantine_audit(po_set_id: int | None, cfg, reason, text: str, **extra) -> None:
+def _record_quarantine_audit(
+    po_set_id: int | None, cfg, reason, text: str, *, source: str = "system", **extra
+) -> None:
     """Persist what the operator is told, so the audit trail survives the folder."""
     eng = get_engine(cfg)
     with Session(eng) as s:
@@ -209,7 +225,7 @@ def _record_quarantine_audit(po_set_id: int | None, cfg, reason, text: str, **ex
                 po_set_id=po_set_id,
                 action=AuditAction.quarantined,
                 detail=json.dumps({"reason": reason, "report": text, **extra}),
-                source="system",
+                source=source,
             )
         )
         s.commit()
@@ -238,7 +254,7 @@ def _write_quarantine_report(
         f"PO number   : {po_no or '(none)'}",
         f"Status      : {status}",
         f"Reason      : {reason or '(none recorded)'}",
-        f"Detected    : {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        f"Detected    : {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')} ({_ist_stamp()} IST)",
         "",
         "What happened",
         "-" * 60,
@@ -364,6 +380,8 @@ def _quarantine_set_folder(ps, cfg) -> Path:
                     folder = candidate
                     break
                 counter += 1
+    # The marker belongs to the folder actually chosen, which may be a candidate.
+    marker = folder / ".po_set_id"
     folder.mkdir(parents=True, exist_ok=True)
     try:
         marker.write_text(str(ps.id), encoding="utf-8")
@@ -416,7 +434,7 @@ def quarantine_copy(
     return folder
 
 
-def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
+def quarantine_document(doc_id: int, cfg, reason: str, *, source: str = "system") -> Path:
     """Quarantine a single document that could not be processed.
 
     A document whose extraction permanently failed is broken, and nothing about
@@ -522,6 +540,25 @@ def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
             "This file could not be read, so nothing about it could be verified.",
             "It has been removed from the input folder so it is not retried nightly.",
         )
+    if reason.startswith(SET_ASIDE_REASON_PREFIX):
+        what_happened = (
+            "An operator moved this file from the holding page.",
+            "It is no longer in the input folder, so the nightly scan will not read it.",
+        )
+        what_to_do = (
+            "Fix or split the file, then put it back in the input folder.",
+            "It is read again on the next scan.",
+        )
+    elif reason.startswith(("combined_document", "child_recombined", "split_failed")):
+        what_to_do = (
+            "Split this file into single documents (one PO, one DN or one SI each),",
+            "then put the parts in the input folder. They are read on the next scan.",
+        )
+    else:
+        what_to_do = (
+            "Enter its PO number on the Unclassified page to attach it to a PO Set,",
+            "then press Re-extract on that set. Or replace the file with a readable copy.",
+        )
     text = "\n".join(
         [
             "QUARANTINED DOCUMENT",
@@ -530,7 +567,7 @@ def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
             f"Document id : {doc_id_out}",
             *attempts_line,
             f"Reason      : {reason}",
-            f"Detected    : {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+            f"Detected    : {_utc_and_ist()}",
             "",
             "What happened",
             "-" * 60,
@@ -542,13 +579,151 @@ def quarantine_document(doc_id: int, cfg, reason: str) -> Path:
             "",
             "What to do",
             "-" * 60,
-            "Enter its PO number on the Unclassified page to attach it to a PO Set,",
-            "then press Re-extract on that set. Or replace the file with a readable copy.",
+            *what_to_do,
             "",
         ]
     )
     (folder / "QUARANTINE.txt").write_text(text, encoding="utf-8")
-    _record_quarantine_audit(None, cfg, reason, text, document_id=doc_id_out, folder=str(folder))
+    _record_quarantine_audit(
+        None, cfg, reason, text, source=source, document_id=doc_id_out, folder=str(folder)
+    )
+    return folder
+
+
+#: Reason written when an operator moves a document from the holding page.
+SET_ASIDE_REASON_PREFIX = "operator_set_aside"
+SET_ASIDE_REASON = f"{SET_ASIDE_REASON_PREFIX}: moved from the holding page"
+
+
+class SetAsideRefused(Exception):
+    """An operator asked to move a document that has to stay where it is."""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+
+
+def _remove_input_duplicates(cfg, sha: str) -> None:
+    """Remove every input-folder file whose content matches `sha`.
+
+    The quarantine copy is the durable one, so an identical input copy is removed.
+    """
+    from app.services.ingestion import input_pdfs
+
+    for other in input_pdfs(cfg):
+        try:
+            if hashlib.sha256(other.read_bytes()).hexdigest() == sha:
+                other.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove duplicate input copy %s", other, exc_info=True)
+
+
+def set_aside_document(doc_id: int, cfg) -> Path | None:
+    """Move an unattached document off the holding list into the quarantine folder.
+
+    The whole move runs under the sync lock, so a sync cannot attach or read the
+    document in the middle of it. Returns the quarantine folder, or None when the
+    document was already moved.
+    """
+    from app.services import sync_lock
+
+    lock = sync_lock.acquire_sync_lock()
+    if lock is None:
+        raise SetAsideRefused(
+            409,
+            "Moves and removals are paused while a sync reads documents. "
+            "They resume when the sync finishes; a large batch can take an hour or more.",
+        )
+    try:
+        return _set_aside_locked(doc_id, cfg)
+    finally:
+        sync_lock.release_sync_lock(lock)
+
+
+def _set_aside_locked(doc_id: int, cfg) -> Path | None:
+    """The set-aside steps. The caller holds the sync lock.
+
+    The stored copy and the quarantine copy are kept. If the document already has
+    a quarantine copy (a rejected file, or an earlier quarantine), its original
+    reason is kept and no second copy is made.
+    """
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        doc = s.get(Document, doc_id)
+        if doc is None:
+            raise SetAsideRefused(404, f"Document {doc_id} does not exist.")
+        if doc.archived_at is not None:
+            return None
+        if doc.po_set_id is not None:
+            raise SetAsideRefused(
+                409, "This document is attached to a PO Set and cannot be moved from here."
+            )
+        if doc.extraction_status == ExtractionStatus.processing:
+            raise SetAsideRefused(
+                409, "This document is being read right now; try again when it finishes."
+            )
+        stem = Path(doc.stored_path).name.replace(".pdf", "")
+        folder = Path(cfg.paths.quarantine_folder) / "_documents" / stem
+        sha = doc.sha256_hash
+        rejected = doc.ingest_reject_reason
+        stored = Path(doc.stored_path)
+        stored_exists = stored.is_file()
+        in_quarantine_root = stored.resolve().is_relative_to(
+            Path(cfg.paths.quarantine_folder).resolve()
+        )
+
+    report = folder / "QUARANTINE.txt"
+    has_copy = report.is_file() or (rejected is not None and in_quarantine_root)
+    if has_copy:
+        # Never remove an input copy unless a quarantine PDF really exists (review L3).
+        pdf_present = (folder.is_dir() and any(folder.glob("*.pdf"))) or (
+            rejected is not None and in_quarantine_root and stored_exists
+        )
+        if not pdf_present:
+            if not stored_exists:
+                raise SetAsideRefused(
+                    409,
+                    "The quarantine copy and the stored file are both missing; nothing was moved.",
+                )
+            folder.mkdir(parents=True, exist_ok=True)
+            shutil.copy(str(stored), str(folder / stored.name))
+        text = (
+            report.read_text(encoding="utf-8")
+            if report.is_file()
+            else f"Rejected on arrival: {rejected}"
+        )
+        _remove_input_duplicates(cfg, sha)
+        _record_quarantine_audit(
+            None,
+            cfg,
+            SET_ASIDE_REASON,
+            text,
+            source="operator",
+            document_id=doc_id,
+            folder=str(folder),
+            set_aside=True,
+        )
+    else:
+        folder = quarantine_document(doc_id, cfg, SET_ASIDE_REASON, source="operator")
+
+    with Session(eng) as s:
+        result = s.execute(
+            update(Document)
+            .where(
+                Document.id == doc_id,
+                Document.archived_at.is_(None),
+                Document.po_set_id.is_(None),
+                Document.extraction_status != ExtractionStatus.processing,
+            )
+            .values(archived_at=datetime.now(UTC))
+        )
+        s.commit()
+        if (getattr(result, "rowcount", 0) or 0) == 0:
+            raise SetAsideRefused(
+                409, "The document changed while it was being moved. Reload the page and try again."
+            )
     return folder
 
 
@@ -786,7 +961,7 @@ def _write_archive_manifest(
         f"PO Set id      : {ps.id}",
         f"Status         : {status}",
         f"Reason         : {reason}",
-        f"Archived at    : {archived_at.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        f"Archived at    : {_utc_and_ist(archived_at)}",
         f"Archived by    : {source}",
         f"Justification  : {note or '(none)'}",
         f"Documents      : {len(docs)}",
@@ -1070,3 +1245,404 @@ def delete_quarantined(
 ) -> AuditLog:
     """Backward-compatible name for the Delete route: archive, never delete."""
     return archive_quarantined(po_set_id, cfg, justification=justification, source=source)
+
+
+class SetRemovalRefused(Exception):
+    """An operator asked to remove a PO Set that must stay as it is."""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+
+
+#: The folder that keeps every removed set: copies, a JSON export and REMOVED.txt.
+REMOVED_SETS_FOLDER = "_removed_sets"
+
+
+def _safe_po_name(po_no: str | None) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "_", po_no or "NO_PO")[:60] or "NO_PO"
+
+
+def _unique_name(folder: Path, name: str) -> str:
+    """A file name not yet used in `folder`: `a.pdf`, then `a (2).pdf`, and so on."""
+    candidate, stem, suffix, n = name, Path(name).stem, Path(name).suffix, 2
+    while (folder / candidate).exists():
+        candidate = f"{stem} ({n}){suffix}"
+        n += 1
+    return candidate
+
+
+def _same_bytes(path: Path, data: bytes) -> bool:
+    return hashlib.sha256(path.read_bytes()).digest() == hashlib.sha256(data).digest()
+
+
+def _restore_input_copies(moved: list[tuple[Path, Path]]) -> list[str]:
+    """Put back input-folder files that were moved out by a removal that did not finish.
+
+    Returns the names that could not be put back. The caller must keep the copies on
+    disk when any name is returned (review M2).
+    """
+    failed: list[str] = []
+    for copy, original in moved:
+        partial = original.with_name(original.name + ".restoring")
+        try:
+            # Never overwrite a file the operator put there meanwhile: restore under a
+            # free name instead. Write beside the target and rename, so a crash cannot
+            # leave a truncated PDF (review L3, review 7).
+            target = original
+            if target.exists():
+                target = original.with_name(_unique_name(original.parent, original.name))
+            partial = target.with_name(target.name + ".restoring")
+            partial.write_bytes(copy.read_bytes())
+            partial.replace(target)
+            copy.unlink(missing_ok=True)
+        except OSError:
+            partial.unlink(missing_ok=True)
+            failed.append(original.name)
+            logger.warning("Could not restore input copy %s", original, exc_info=True)
+    return failed
+
+
+def _utc_and_ist(moment: datetime | None = None) -> str:
+    """A time shown as UTC and as IST, for the operator-facing text reports (decision 12)."""
+    moment = moment or datetime.now(UTC)
+    aware = moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment
+    ist = aware.astimezone(timezone(timedelta(hours=5, minutes=30)))
+    return f"{aware.strftime('%Y-%m-%d %H:%M:%S')} UTC ({ist.strftime('%Y-%m-%d %H:%M:%S')} IST)"
+
+
+def _ist_stamp() -> str:
+    """The current time in IST, for operator-facing text (decision 12)."""
+    return datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _mark_removal_failed(folder: Path, reason: str) -> None:
+    """A removal that did not finish keeps its folder, and the folder says so (review L1).
+
+    The report that says the set was removed is replaced, because the set still exists.
+    """
+    lines = [
+        "THE REMOVAL DID NOT FINISH",
+        "=" * 60,
+        reason,
+        "",
+        "The PO Set is still in the database and nothing was deleted.",
+        "Check the files in this folder before trying again.",
+        "",
+    ]
+    try:
+        (folder / "REMOVED.txt").unlink(missing_ok=True)
+        (folder / "REMOVAL_IN_PROGRESS.txt").unlink(missing_ok=True)
+        (folder / "REMOVAL_FAILED.txt").write_text(chr(10).join(lines), encoding="utf-8")
+    except OSError:
+        logger.warning("Could not write the removal failure report in %s", folder, exc_info=True)
+
+
+def _set_row_export(ps: POSet) -> dict:
+    out: dict = {}
+    for column in POSet.__table__.columns:
+        value = getattr(ps, column.name)
+        out[column.name] = value.isoformat() if hasattr(value, "isoformat") else value
+    return out
+
+
+def remove_set_to_quarantine(
+    po_set_id: int, cfg, *, source: str = "operator", note: str = ""
+) -> dict:
+    """Copy a PO Set's files to the quarantine folder, then delete its rows (step 13).
+
+    Order: copy and verify every stored PDF, and write a JSON export and REMOVED.txt,
+    into a staging folder; rename it into place; move the input-folder copies in;
+    only then, in one transaction, write the audit row and delete the set's rows.
+    Stored copies in `data/stored` are never deleted. A missing stored PDF does not
+    stop the removal: it is listed in REMOVED.txt, the audit row and the result.
+    """
+    from app.services import sync_lock
+    from app.services.ingestion import input_pdfs
+
+    lock = sync_lock.acquire_sync_lock()
+    if lock is None:
+        raise SetRemovalRefused(
+            409,
+            "Moves and removals are paused while a sync reads documents. "
+            "They resume when the sync finishes; a large batch can take an hour or more.",
+        )
+    try:
+        eng = get_engine(cfg)
+        Base.metadata.create_all(eng)
+        with Session(eng) as s:
+            ps = s.get(POSet, po_set_id)
+            if ps is None:
+                raise SetRemovalRefused(404, f"PO Set {po_set_id} does not exist.")
+            if ps.archived_at is not None:
+                raise SetRemovalRefused(409, "This PO Set is archived and read-only.")
+            if ps.status == POSetStatus.merged:
+                raise SetRemovalRefused(
+                    409, "A merged PO Set cannot be removed: its packet has been delivered."
+                )
+            po_no = ps.po_no_normalized
+            status_before = ps.status.value
+            set_row = _set_row_export(ps)
+            docs = s.query(Document).filter(Document.po_set_id == po_set_id).all()
+            doc_ids = sorted(d.id for d in docs)
+            doc_rows = [
+                {
+                    "id": d.id,
+                    "filename": d.original_filename,
+                    "doc_type": d.doc_type.value
+                    if hasattr(d.doc_type, "value")
+                    else str(d.doc_type),
+                    "sha256": d.sha256_hash,
+                    "stored_path": d.stored_path,
+                    "archived_at": d.archived_at.isoformat() if d.archived_at else None,
+                }
+                for d in docs
+            ]
+            item_rows = (
+                [
+                    {
+                        "document_id": li.document_id,
+                        "line_item_no": li.line_item_no,
+                        "description": li.description,
+                        "quantity": li.quantity,
+                    }
+                    for li in s.query(LineItem).filter(LineItem.document_id.in_(doc_ids)).all()
+                ]
+                if doc_ids
+                else []
+            )
+            audit_rows = [
+                {
+                    "id": a.id,
+                    "action": a.action.value if hasattr(a.action, "value") else str(a.action),
+                    "detail": a.detail,
+                    "timestamp": a.timestamp.isoformat() if a.timestamp else None,
+                    "source": a.source,
+                }
+                for a in s.query(AuditLog).filter(AuditLog.po_set_id == po_set_id).all()
+            ]
+            shas = {d["sha256"] for d in doc_rows}
+            # Plan rule: an input copy is moved only when no other ACTIVE document holds its bytes.
+            other_active = {
+                row[0]
+                for row in s.query(Document.sha256_hash)
+                .filter(Document.archived_at.is_(None), ~Document.id.in_(doc_ids or [-1]))
+                .all()
+            }
+            shas -= other_active
+
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        base = Path(cfg.paths.quarantine_folder) / REMOVED_SETS_FOLDER
+        base.mkdir(parents=True, exist_ok=True)
+        stage = base / f".tmp-{uuid.uuid4().hex}"
+        final = base / f"{_safe_po_name(po_no)}_{stamp}_{po_set_id}"
+        files_dir = stage / "files"
+        files_dir.mkdir(parents=True)
+        moved: list[tuple[Path, Path]] = []
+        missing: list[str] = []
+        try:
+            for d in doc_rows:
+                src = Path(str(d["stored_path"]))
+                if not src.is_file():
+                    missing.append(str(d["filename"]))
+                    continue
+                data = src.read_bytes()
+                name = _unique_name(files_dir, str(d["filename"] or src.name))
+                (files_dir / name).write_bytes(data)
+                if not _same_bytes(files_dir / name, data):
+                    raise OSError(f"copy verification failed for {d['filename']}")
+                d["quarantine_name"] = name
+
+            exports = {
+                "po_set.json": set_row,
+                "documents.json": doc_rows,
+                "line_items.json": item_rows,
+                "audit_log.json": audit_rows,
+            }
+            for file_name, payload in exports.items():
+                (stage / file_name).write_text(
+                    json.dumps(payload, indent=2, default=str), encoding="utf-8"
+                )
+            manifest = {
+                "po_set_id": po_set_id,
+                "po_no_normalized": po_no,
+                "status_before": status_before,
+                "removed_at_utc": stamp,
+                "document_count": len(doc_rows),
+                "line_item_count": len(item_rows),
+                "missing_files": missing,
+                "note": note,
+                "folder": f"{REMOVED_SETS_FOLDER}/{final.name}",
+            }
+            (stage / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            file_lines = [
+                f"  {d.get('quarantine_name', '(missing)')}  <-  {d['filename']}" for d in doc_rows
+            ]
+            text = "\n".join(
+                [
+                    "PO SET REMOVED FROM THE PIPELINE",
+                    "=" * 60,
+                    f"PO number   : {po_no}",
+                    f"PO Set id   : {po_set_id}",
+                    f"Status was  : {status_before}",
+                    f"Removed at  : {stamp} (UTC) / {_ist_stamp()} (IST)",
+                    f"Note        : {note or '-'}",
+                    "",
+                    "Files (copied from data/stored)",
+                    "-" * 60,
+                    *(file_lines or ["  (none)"]),
+                    "",
+                    "Missing stored files" if missing else "Missing stored files: none",
+                    *(f"  {name}" for name in missing),
+                    "",
+                    "How to restore",
+                    "-" * 60,
+                    "Put the files from files/ and input/ back in the input folder, then scan.",
+                    "The documents are read again. CUSTOMS and SHIPPING files are re-uploaded",
+                    "on the new set's page, not put in the input folder.",
+                    "",
+                ]
+            )
+            # A crash before the commit leaves this note, not a false "removed" report (review 5).
+            (stage / "REMOVAL_IN_PROGRESS.txt").write_text(
+                "THE REMOVAL IS IN PROGRESS OR DID NOT FINISH"
+                + chr(10)
+                + f"Started {stamp} (UTC). The set is removed only when REMOVED.txt appears."
+                + chr(10),
+                encoding="utf-8",
+            )
+            report_text = text
+            stage.rename(final)
+
+            input_dir = final / "input"
+            unreadable: list[str] = []
+            for pdf in input_pdfs(cfg):
+                try:
+                    data = pdf.read_bytes()
+                except OSError:
+                    # An unreadable input file might hold these bytes. Skipping it would let
+                    # the rows go and the file re-form a set on the next sync (review 1).
+                    unreadable.append(pdf.name)
+                    continue
+                if hashlib.sha256(data).hexdigest() not in shas:
+                    continue
+                input_dir.mkdir(exist_ok=True)
+                copy = input_dir / _unique_name(input_dir, pdf.name)
+                copy.write_bytes(data)
+                if not _same_bytes(copy, data):
+                    copy.unlink(missing_ok=True)
+                    raise OSError(f"copy verification failed for input file {pdf.name}")
+                pdf.unlink(missing_ok=True)
+                moved.append((copy, pdf))
+            if unreadable:
+                raise OSError(f"input files could not be read: {', '.join(unreadable)}")
+        except Exception as exc:
+            # Any failure in step 1: put the moved inputs back, keep the folder and say
+            # why (review 2). Nothing has been deleted from the database yet.
+            failed = _restore_input_copies(moved)
+            shutil.rmtree(stage, ignore_errors=True)
+            reasons = ["The removal failed and nothing was deleted."]
+            if failed:
+                reasons.append(f"Input files not put back: {', '.join(failed)}.")
+            if final.is_dir():
+                reasons.append(f"The copies are in {REMOVED_SETS_FOLDER}/{final.name}.")
+            message = " ".join(reasons)
+            if final.is_dir():
+                _mark_removal_failed(final, message)
+            raise SetRemovalRefused(500, message) from exc
+
+        try:
+            with Session(eng) as s:
+                current = sorted(
+                    d.id for d in s.query(Document).filter(Document.po_set_id == po_set_id).all()
+                )
+                if current != doc_ids:
+                    raise SetRemovalRefused(
+                        409,
+                        "A document arrived or changed while the set was being removed. "
+                        f"Nothing was deleted. The copies are in {REMOVED_SETS_FOLDER}/"
+                        f"{final.name}.",
+                    )
+                detail = {
+                    "deleted": True,
+                    "archived": False,
+                    "removed_po_set_id": po_set_id,
+                    "po_no_normalized": po_no,
+                    "status_before": status_before,
+                    "folder": f"{REMOVED_SETS_FOLDER}/{final.name}",
+                    "document_count": len(doc_ids),
+                    "line_item_count": len(item_rows),
+                    "documents": [
+                        {
+                            "id": d["id"],
+                            "filename": d["filename"],
+                            "doc_type": d["doc_type"],
+                            "sha256": d["sha256"],
+                        }
+                        for d in doc_rows
+                    ],
+                    "moved_input_count": len(moved),
+                    "missing_files": missing,
+                    "note": note,
+                }
+                s.add(
+                    AuditLog(
+                        po_set_id=None,
+                        action=AuditAction.quarantine_delete,
+                        source=source,
+                        detail=json.dumps(detail),
+                    )
+                )
+                if doc_ids:
+                    s.execute(
+                        update(Document)
+                        .where(Document.parent_document_id.in_(doc_ids))
+                        .values(parent_document_id=None)
+                    )
+                    s.execute(delete(LineItem).where(LineItem.document_id.in_(doc_ids)))
+                    s.execute(delete(Document).where(Document.id.in_(doc_ids)))
+                s.execute(delete(POSet).where(POSet.id == po_set_id))
+                s.commit()
+        except SetRemovalRefused as exc:
+            failed = _restore_input_copies(moved)
+            message = exc.message
+            if failed:
+                message += f" Input files not put back: {', '.join(failed)}."
+            _mark_removal_failed(final, message)
+            raise SetRemovalRefused(exc.status_code, message) from None
+        except Exception as exc:
+            # The transaction rolled back, so no row changed. Put the input files back
+            # and keep the folder, so the operator can see where the copies are (A2).
+            failed = _restore_input_copies(moved)
+            detail = (
+                "The removal failed and nothing was deleted. "
+                f"The copies are in {REMOVED_SETS_FOLDER}/{final.name}."
+            )
+            if failed:
+                detail += f" These input files could not be put back: {', '.join(failed)}."
+            _mark_removal_failed(final, detail)
+            raise SetRemovalRefused(500, detail) from exc
+
+        # The commit is done: the completion report replaces the in-progress note.
+        (final / "REMOVED.txt").write_text(report_text, encoding="utf-8")
+        (final / "REMOVAL_IN_PROGRESS.txt").unlink(missing_ok=True)
+
+        # A future set with this id must not adopt the old quarantine folder (id reuse).
+        for marker in Path(cfg.paths.quarantine_folder).glob("*/.po_set_id"):
+            try:
+                if marker.read_text(encoding="utf-8").strip() == str(po_set_id):
+                    marker.write_text(f"removed:{po_set_id}:{stamp}", encoding="utf-8")
+            except OSError:
+                logger.warning("Could not update quarantine marker %s", marker, exc_info=True)
+
+        return {
+            "folder": str(final),
+            "folder_name": f"{REMOVED_SETS_FOLDER}/{final.name}",
+            "document_count": len(doc_ids),
+            "line_item_count": len(item_rows),
+            "moved_input_count": len(moved),
+            "missing_files": missing,
+        }
+    finally:
+        sync_lock.release_sync_lock(lock)

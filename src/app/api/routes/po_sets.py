@@ -19,7 +19,7 @@ import logging
 import re
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Form, HTTPException, Response
+from fastapi import APIRouter, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
@@ -74,8 +74,10 @@ def _acquire_lock(po_set_id: int, action: str, cfg) -> POSet:
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    "A sync is currently running; wait for it to finish before "
-                    "changing this PO Set."
+                    "A sync is currently running (a scan of the input folder). Actions "
+                    "on PO Sets are paused while it runs and resume when it finishes; "
+                    "a large batch can take an hour or more. Reload this page after "
+                    "the scan ends."
                 ),
             )
         # Archived sets are read-only. The archive action is the one exception:
@@ -365,9 +367,13 @@ def toggle_customs(po_set_id: int):
     cfg = load_config()
     _acquire_lock(po_set_id, "toggle_customs", cfg)
     try:
+        from app.services.customs import CustomsToggleRefused
         from app.services.customs import toggle_customs as svc_toggle
 
-        updated = svc_toggle(po_set_id, cfg)
+        try:
+            updated = svc_toggle(po_set_id, cfg)
+        except CustomsToggleRefused as exc:
+            raise HTTPException(status_code=409, detail=exc.message) from exc
         rebuilt = None
         append_error: str | None = None
         # A merged set whose customs requirement has just been switched on,
@@ -607,6 +613,75 @@ def confirm_placement(po_set_id: int, doc_id: int):
         raise _merge_failure(e, "Confirm placement", po_set_id) from e
     finally:
         _release_lock(po_set_id, cfg, "confirm_placement")
+
+
+@router.post("/{po_set_id}/remove_to_quarantine", response_class=HTMLResponse)
+def remove_to_quarantine(po_set_id: int, request: Request, note: str = Form("")):
+    """Copy the set's files to the quarantine folder, then delete its rows (step 13).
+
+    Refused while a sync reads documents, and for merged or archived sets. The
+    set's own lock is held for the whole removal. A browser form gets a page for
+    both the result and a refusal; API clients get the JSON detail.
+    """
+    from app.api.templating import templates
+    from app.core.http_errors import wants_html
+    from app.services import sync_lock
+    from app.services.quarantine import SetRemovalRefused, remove_set_to_quarantine
+
+    cfg = load_config()
+    browser = wants_html(request) and "HX-Request" not in request.headers
+
+    def refuse(status: int, message: str):
+        if browser:
+            return templates.TemplateResponse(
+                request,
+                "error.html",
+                {"code": status, "heading": "The PO Set was not removed", "message": message},
+                status_code=status,
+            )
+        raise HTTPException(status_code=status, detail=message)
+
+    if sync_lock._is_sync_running():
+        return refuse(
+            409,
+            "Moves and removals are paused while a sync reads documents. "
+            "They resume when the sync finishes; a large batch can take an hour or more.",
+        )
+    try:
+        _acquire_lock(po_set_id, "remove_set", cfg)
+    except HTTPException as exc:
+        return refuse(exc.status_code, str(exc.detail))
+    try:
+        result = remove_set_to_quarantine(po_set_id, cfg, note=note.strip()[:200])
+    except SetRemovalRefused as exc:
+        return refuse(exc.status_code, exc.message)
+    finally:
+        _release_lock(po_set_id, cfg, "remove_set")
+
+    if browser:
+        return templates.TemplateResponse(
+            request,
+            "remove_set_result.html",
+            {
+                "set_id": po_set_id,
+                "document_count": result["document_count"],
+                "folder": result["folder"],
+                "missing_count": len(result["missing_files"]),
+            },
+        )
+    return HTMLResponse(
+        content=(
+            '<div class="card" data-testid="remove-set-result">'
+            f"<p>Removed PO Set #{po_set_id}. {result['document_count']} document(s) were copied to "
+            f"<code>{_html.escape(result['folder'])}</code>."
+            + (
+                f" {len(result['missing_files'])} stored file(s) were missing (see REMOVED.txt)."
+                if result["missing_files"]
+                else ""
+            )
+            + "</p></div>"
+        )
+    )
 
 
 @router.post("/{po_set_id}/documents/{doc_id}/remove_supporting")

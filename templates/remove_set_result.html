@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Set removed — AAM Merger V3{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width:720px; margin:48px auto;" data-testid="remove-set-result">
+  <h2 class="card-title">Removed PO Set #{{ set_id }}</h2>
+  <p class="card-subtitle" style="margin:8px 0 16px;">
+    {{ document_count }} document(s) were copied to <code>{{ folder }}</code>.
+  </p>
+  {% if missing_count %}
+  <p style="margin-bottom:12px;">{{ missing_count }} stored file(s) were missing. They are listed in REMOVED.txt in that folder.</p>
+  {% endif %}
+  <p class="muted" style="margin-bottom:20px;">
+    The folder holds the files, a JSON export and REMOVED.txt, which explains how to restore the set.
+  </p>
+  <a href="/dashboard" class="btn btn-primary">Back to dashboard</a>
+</div>
+{% endblock %}

@@ -138,7 +138,7 @@
 
     <div style="display:flex; gap:10px; align-items:center; position:sticky; bottom:0; padding:10px 0; background:var(--bg);">
       <button type="submit" class="btn btn-primary" data-testid="settings-save" :disabled="!dirty">Save changes</button>
-      <a href="/settings" class="btn btn-secondary" data-testid="settings-reset">Discard changes</a>
+      <a href="/settings" class="btn btn-secondary" data-testid="settings-reset" @click="if (dirty && !confirm('Discard your unsaved changes?')) $event.preventDefault()">Discard changes</a>
       <span class="muted" style="font-size:0.85rem;" x-show="dirty" x-cloak>You have unsaved changes.</span>
     </div>
   </form>

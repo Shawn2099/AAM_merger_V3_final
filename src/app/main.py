@@ -29,6 +29,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import URL, Headers
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -38,8 +39,9 @@ from app.api.routes.manual_merger import router as manual_router
 from app.api.routes.po_sets import router as po_sets_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.sync import router as sync_router
+from app.api.templating import templates
 from app.core.config import load_config
-from app.core.http_errors import BodyTooLarge, error_response
+from app.core.http_errors import BodyTooLarge, error_response, wants_html
 from app.core.limits import MAX_MANUAL_MERGE_REQUEST_BYTES, MAX_UPLOAD_BYTES
 
 logger = logging.getLogger(__name__)
@@ -351,6 +353,33 @@ def _configured_allowed_hosts() -> list[str]:
     return hosts or ["*"]
 
 
+def _styled_http_error(request: Request, exc: Exception):
+    """A browser navigation to an unknown page gets the themed error page.
+
+    API clients, HTMX requests and any non-404 status keep the JSON body that
+    FastAPI returns by default. Synchronous on purpose: it does no I/O.
+    """
+    if not isinstance(exc, StarletteHTTPException):
+        raise exc
+    if exc.status_code == 404 and wants_html(request) and "HX-Request" not in request.headers:
+        message = (
+            "There is no page at this address. Check the link, or go back to the dashboard."
+            if exc.detail in (None, "Not Found")
+            else str(exc.detail)
+        )
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            {"code": 404, "heading": "Page not found", "message": message},
+            status_code=404,
+        )
+    return JSONResponse(
+        {"detail": exc.detail},
+        status_code=exc.status_code,
+        headers=getattr(exc, "headers", None),
+    )
+
+
 def create_app(allowed_hosts: list[str] | None = None) -> FastAPI:
     """Build the application.
 
@@ -360,6 +389,7 @@ def create_app(allowed_hosts: list[str] | None = None) -> FastAPI:
     hosts = _configured_allowed_hosts() if allowed_hosts is None else list(allowed_hosts)
 
     app = FastAPI(title="AAM Merger V3", version="0.1.0", lifespan=lifespan)
+    app.add_exception_handler(StarletteHTTPException, _styled_http_error)
 
     # Middleware order: the last added is the outermost. TrustedHost runs
     # before the body guard, which runs before the origin check.

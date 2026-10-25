@@ -203,8 +203,9 @@ A PO Set is expected to hold one PO **document**. With
 set carrying more than one PO document is held **pending** with
 `multiple_po_documents`; it is not summed and it does not auto-merge. The
 documents may be page fragments or a re-issue, and the engine must not guess.
-The detail names the files. The operator resolves the set using the existing
-document tools; this release adds no PO-selection UI.
+The detail names the files. A PO document cannot be removed from a set in this
+release (section 8, L). The operator resolves the set with Force Merge when both
+files are needed; this release adds no PO-selection UI.
 
 Without the gate, two POs in one set are summed into the baseline, which
 silently doubles every quantity the DN and SI are then compared against — the
@@ -494,10 +495,85 @@ and 4 test files deleted.
 
 ---
 
+## 7b. Operator rules added on 2026-10-25
+
+Full list with commits: `docs/BATCH1_CHANGES_2026-10-25.md`.
+
+- **Times** are shown in IST with the zone. The database and JSON APIs stay UTC.
+- **Worklists** name what is needed: "Needs a decision" (several PO files, or a document
+  placed by its DN number only), "Waiting (part delivered)" (every disagreeing quantity is
+  below the PO), "Matched by description - needs a second check", and "Force-merged - needs a
+  second check". Status and the engine verdict do not change.
+- **Holding list:** "Move to quarantine" copies a document to the quarantine folder and takes
+  it off the list. Unsplit multi-document PDFs are set aside automatically and are listed under
+  "Files set aside" on the Quarantine page; they cannot be reclassified (D17).
+- **Customs:** the requirement can be turned on at any time. Turning it off on an unmerged
+  set is refused while a CUSTOMS or SHIPPING file is attached; delete the file first. Merged
+  sets keep the switch rule (D5, D18). Per-file Delete is offered before merge only (D1).
+- **Merging:** press Merge Now. Force Merge merges without the checks and needs a reason.
+- **Removing a set:** "Move to quarantine and remove set" at the bottom of an open set (see
+  section 8, N). Archive is the softer action for quarantined sets; it keeps every row.
+
 ## 8. Accepted limitations
 
 These are real. They are the price of §7, stated plainly so nobody discovers
 them on a live document.
+
+### N — removing a set deletes its rows; the files and audit trail are kept (2026-10-25)
+
+"Move to quarantine and remove set" (decision 2026-10-25) is the one operator action
+that deletes rows. It applies to pending, mismatched, quarantined and blocked-customs
+sets, never to merged or archived ones. It copies and verifies every stored PDF into
+`quarantine/_removed_sets/<PO>_<UTC stamp>_<id>/`, moves the input-folder copies there,
+writes a JSON export and REMOVED.txt, and only then deletes the set's rows in one
+transaction. The audit row keeps the old set id and PO number. A missing stored PDF
+is recorded and does not stop the removal. Restore: put the files from `files/` and
+`input/` back in the input folder and scan; CUSTOMS and SHIPPING files are re-uploaded
+on the new set's page.
+
+A future set that reuses the old id does not adopt the old folder: the marker is
+rewritten to `removed:<id>:<stamp>`.
+
+Audit detail: the old audit rows keep their history, but their `po_set_id` link is
+cleared (ON DELETE SET NULL); that link survives only in `audit_log.json` in the
+removal folder and in the new audit row's detail.
+
+Crash behaviour: a removal writes REMOVAL_IN_PROGRESS.txt first and REMOVED.txt only after the commit. A folder that still has the in-progress note was interrupted; check the set before retrying.
+
+Failure behaviour: if any step fails, nothing is deleted. Input files moved out are
+put back, and the folder is kept with REMOVAL_FAILED.txt and a 500 that names it.
+An unreadable input-folder file stops the removal, because it might hold the set's
+bytes. The shared-hash rule: an input copy is left in place when another active
+document holds the same bytes.
+
+> The same bytes can be added again after a removal: the removed rows are gone, so the
+> hash is free (test_the_same_bytes_can_be_added_again_after_removal).
+
+### O — a removed set's id can be reused (review L1, 2026-10-25)
+
+The `po_sets` id has no AUTOINCREMENT, so after the newest set is removed, the next
+set can take its id. A browser tab still open on the old `/po_sets/<id>` then shows
+the new set, and document ids in old audit JSON can point at new rows. The removal
+keeps the audit row and the export, and the marker in the old quarantine folder is
+rewritten (`removed:<id>:<stamp>`) so the new set does not adopt that folder. A
+migration to AUTOINCREMENT is not made in this batch.
+
+### Known exceptions recorded in review (2026-10-25)
+- The label "Waiting (part delivered)" reads quantity flags only. A future non-quantity mismatch reason must be checked in `_shortfall_shapes`.
+- The COMBINED type is named only in models.py and extraction.py. The holding and quarantine lists use the helper `unsplit_bundle_clause()` in extraction.py, so Layer 2 never names the type.
+- A removal or a move from the holding page holds the sync sidecar for a few seconds; a scheduled sync that starts then is skipped until the next run.
+
+### L — a PO document cannot be removed from a set
+
+When a PO Set holds several PO documents (D11, Q2), the set page offers no remove
+action for a PO, DN or SI document. Only CUSTOMS and SHIPPING documents can be
+removed (`remove_supporting` refuses the others with 422). A PO that arrived as
+several files therefore stays `multiple_po_documents` until the operator uses
+Force Merge (both files are needed) or the set is handled outside the app.
+
+> Pinned by `test_known_limitation_a_po_document_cannot_be_removed_from_a_set`
+> in `tests/test_known_limitations.py`. When a removal action is added, flip
+> that test and drop the prefix.
 
 ### H — a wrong item can merge (highest consequence)
 
@@ -746,6 +822,9 @@ A file ingest refuses for good (not a PDF, truncated and older than five
 minutes, password-protected, over the size cap) is moved to
 `quarantine/_documents/` and now also gets a `failed`, unattached Document row,
 so it appears on the Unclassified page with the reason ("Rejected on arrival").
+It is also listed under Files set aside on the Quarantine page, and it stays on
+the Unclassified page until an operator moves it ("Move to quarantine"). Failed
+reads and combined bundles are listed on both pages until moved (Batch 1, D9).
 A byte-identical file re-sent after its set merged resolves to the existing
 document, no longer mints an empty set, and is removed from input once the set
 is merged, the stored copy exists and the bytes still hash to the stored SHA.
@@ -778,8 +857,10 @@ is no longer held, and moving it would leave the old set's status stale. Re-Extr
 returns a document to Unclassified only when no PO number is printed on it; a
 manually placed document keeps its manual PO through every re-read. If the
 wrong placement makes the set quarantine, the operator Deletes (archives) the
-set and adds the files again; a set that only sits `pending` needs the
-administrator.
+set and adds the files again. A set that only sits `pending` (or is
+`mismatched`, `quarantined` or `blocked_customs`) can now be moved out with
+**Move to quarantine and remove set** (section 8, N), so the administrator is
+no longer needed for it.
 
 **Real-world consequence.** A typo can strand one document in a stray set until an
 administrator fixes it. It cannot cause a wrong merge: the stray set has nothing
@@ -1203,7 +1284,7 @@ detection; UOM conversion; price reconciliation.
 
 ## 10. Operating notes
 
-**No authentication.** Anyone with LAN access can force-merge or delete. This is
+**No authentication.** Anyone with LAN access can force-merge, archive or remove a set (the removal copies the files to the quarantine folder first). This is
 a documented accepted risk, not an oversight. The audit log is the
 accountability record, not access control.
 

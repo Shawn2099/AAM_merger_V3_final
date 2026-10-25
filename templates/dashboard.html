@@ -48,16 +48,18 @@
     <!-- Instant Search Input -->
     <div class="search-box">
       <span class="search-icon">🔍</span>
-      <input 
-        type="text" 
+      <input
+        type="text"
+        aria-label="Search PO sets by PO number or status"
         placeholder="Filter by PO number or status…"
-        x-model="query" 
+        x-model="query"
         @input="filterRows()"
       >
     </div>
 
     <!-- Status Filter Dropdown + Quick Tabs -->
     <form method="get" action="/dashboard" id="filter-form" style="display:flex; align-items:center; gap:8px;">
+      <label for="status-filter" class="sr-only">Filter by status</label>
       <select name="status" id="status-filter" onchange="this.form.submit()" style="padding:6px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); font-size:0.85rem; background:#fff; font-weight:500;">
         <option value="" {% if not current_status %}selected{% endif %}>All statuses</option>
         <option value="pending" {% if current_status == 'pending' %}selected{% endif %}>pending</option>

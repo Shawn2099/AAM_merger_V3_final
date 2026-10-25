@@ -4,6 +4,7 @@ Cross-platform via pathlib. No hardcoded paths. Sync def handlers."""
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 from datetime import UTC, datetime
@@ -13,14 +14,15 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.routes.po_sets import _scrub_paths
+from app.api.templating import templates
 from app.core.config import load_config
 from app.core.database import get_engine
 from app.models import (
+    AuditAction,
     AuditLog,
     DocType,
     Document,
@@ -30,6 +32,7 @@ from app.models import (
     POSetStatus,
 )
 from app.models.base import Base
+from app.services.extraction import is_unsplit_bundle, unsplit_bundle_clause
 from app.services.locking import acquire_lock, is_locked, release_if_stale, release_lock
 
 router = APIRouter()
@@ -50,8 +53,8 @@ _HAND_ASSIGNABLE_DOC_TYPES = frozenset(
     }
 )
 
-# Jinja templates — directory = "templates" (cross-platform, not hardcoded absolute)
-_templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[4] / "templates"))
+# Shared Jinja templates (with the `ist` display filter), see api/templating.py
+_templates = templates
 
 # 5 statuses as defined in SPEC §6.3 — enum values are the source of truth
 _ALLOWED_STATUSES = {s.value for s in POSetStatus}
@@ -90,6 +93,9 @@ def _holding_area_query(session: Session):
         # set's detail page; listing it here invited the operator to reclassify
         # it out of a merged set.
         Document.po_set_id.is_(None),
+        # An unsplit multi-document PDF is set aside to the Files set aside list (D9):
+        # its content was never used, so it is not waiting for a human here.
+        ~unsplit_bundle_clause(),
     )
 
 
@@ -120,6 +126,36 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
     )
     doc_counts = {r[0]: r[1] for r in doc_count_rows if r[0] is not None}
 
+    from app.services.grouping import PLACED_BY_NUMBER
+
+    po_doc_rows = (
+        session.query(Document.po_set_id, func.count(Document.id))
+        .filter(
+            Document.po_set_id.in_(po_set_ids),
+            Document.archived_at.is_(None),
+            Document.doc_type == DocType.PO,
+        )
+        .group_by(Document.po_set_id)
+        .all()
+    )
+    po_doc_counts = {r[0]: r[1] for r in po_doc_rows if r[0] is not None}
+    dn_number_sets = {
+        r[0]
+        for r in session.query(Document.po_set_id)
+        .filter(
+            Document.po_set_id.in_(po_set_ids),
+            Document.archived_at.is_(None),
+            Document.po_no_source == PLACED_BY_NUMBER,
+        )
+        .distinct()
+        .all()
+        if r[0] is not None
+    }
+    single_po = bool(getattr(cfg.reconciliation, "single_po_document", False))
+    shortfalls = _shortfall_shapes(
+        session, [ps.id for ps in pools if ps.status == POSetStatus.mismatched], cfg
+    )
+
     out = []
     for ps in pools:
         status_val = ps.status.value if hasattr(ps.status, "value") else str(ps.status)
@@ -127,6 +163,7 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
             ps.merged_output_path
             and _resolve_db_path(ps.merged_output_path, cfg.paths.output_folder)
         )
+        po_docs = po_doc_counts.get(ps.id, 0)
         out.append(
             {
                 "id": ps.id,
@@ -135,6 +172,11 @@ def _po_sets_with_doc_count(session: Session, status_filter: str | None, cfg) ->
                 "status_val": status_val,
                 "doc_count": doc_counts.get(ps.id, 0),
                 "has_merged_file": has_merged_file,
+                # Display-only worklist facts (Batch 1 step 8). Nothing is written.
+                "shortfall": shortfalls.get(ps.id, ""),
+                "po_doc_count": po_docs,
+                "multi_po_decision": single_po and po_docs > 1,
+                "dn_number_only": ps.id in dn_number_sets,
                 "updated_at": ps.updated_at,
                 # Age is the set's age (created_at). updated_at is bumped by every
                 # lock/unlock in every sweep, so it would read "just now" forever.
@@ -625,6 +667,8 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
             and _resolve_db_path(ps.merged_output_path, cfg.paths.output_folder)
         )
         unclassified_count = _holding_area_query(s).count()
+        packet_has_customs = _packet_has_customs(s, ps, docs)
+        set_shortfall = _shortfall_shape(s, ps, cfg) if ps.status == POSetStatus.mismatched else ""
 
         return _templates.TemplateResponse(
             request,
@@ -646,9 +690,111 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
                 "unclassified_count": unclassified_count,
                 "notice": notice,
                 "is_archived": ps.archived_at is not None,
+                "is_merged": ps.status == POSetStatus.merged,
+                "set_shortfall": set_shortfall,
+                "packet_has_customs": packet_has_customs,
                 "archive_folder": str(cfg.paths.archive_folder),
             },
         )
+
+
+def _shortfall_shapes(s: Session, set_ids: list[int], cfg) -> dict[int, str]:
+    """For mismatched sets: "under" when every disagreeing quantity is below the PO.
+
+    "under" means the delivery or the invoice is short, so the set is waiting for
+    the rest. Anything else (over-delivery, a line not on the PO) is "review".
+    Display only: the same comparison the detail page shows; the engine verdict
+    and the status do not change (D16). Note (review L4): the label only reads
+    quantity flags. If a non-quantity mismatch reason is ever added, it must be
+    checked here, or it would be labelled "Waiting (part delivered)".
+
+    Batched (review A6): the documents and line items of every set are loaded in
+    two queries, however many sets are asked about. The dashboard poll uses this
+    once per refresh, and the set page uses it for one set.
+    """
+    from app.services.reconciliation import compare_po_set_lines
+
+    if not set_ids:
+        return {}
+    docs = (
+        s.query(Document.id, Document.po_set_id, Document.doc_type)
+        .filter(Document.po_set_id.in_(set_ids), Document.archived_at.is_(None))
+        .all()
+    )
+    type_of = {
+        d_id: (d_type.value if hasattr(d_type, "value") else str(d_type))
+        for d_id, _set_id, d_type in docs
+    }
+    set_of = {d_id: set_id for d_id, set_id, _d_type in docs}
+    items_by_set: dict[int, list[dict]] = {set_id: [] for set_id in set_ids}
+    if type_of:
+        for li in s.query(LineItem).filter(LineItem.document_id.in_(list(type_of))).all():
+            set_id = set_of.get(li.document_id)
+            if set_id is None:
+                continue
+            items_by_set[set_id].append(
+                {
+                    "line_item_no": li.line_item_no,
+                    "description": li.description,
+                    "quantity": li.quantity,
+                    "doc_type": type_of.get(li.document_id, ""),
+                    "document_id": li.document_id,
+                }
+            )
+
+    threshold = getattr(cfg.matching, "fuzzy_description_threshold", 85)
+    shapes: dict[int, str] = {}
+    sets_with_docs = set(set_of.values())
+    for set_id in set_ids:
+        if set_id not in sets_with_docs:
+            shapes[set_id] = "review"
+            continue
+        enriched = items_by_set[set_id]
+        comparison = compare_po_set_lines(
+            [li for li in enriched if li["doc_type"] == "PO"],
+            [li for li in enriched if li["doc_type"] == "DN"],
+            [li for li in enriched if li["doc_type"] == "SI"],
+            threshold,
+            line_fallback=cfg.matching.line_number_fallback,
+        )
+        flags = comparison["flags"]
+        quantity_flags = [f for f in flags if f.get("type") == "quantity"]
+        identification = any(f.get("type") == "identification" for f in flags)
+        short = bool(quantity_flags) and all(
+            f.get("po_quantity") is not None and (f.get("vendor_quantity") or 0) < f["po_quantity"]
+            for f in quantity_flags
+        )
+        shapes[set_id] = "under" if (short and not identification) else "review"
+    return shapes
+
+
+def _shortfall_shape(s: Session, ps: POSet, cfg) -> str:
+    """One set's shortfall shape (the set page). Same rule as the batch version."""
+    return _shortfall_shapes(s, [ps.id], cfg).get(ps.id, "review")
+
+
+def _packet_has_customs(s: Session, ps: POSet, docs: list[Document]) -> bool:
+    """True when a delivered packet contains customs or shipping pages.
+
+    Worked out from the app's own records, not by reading the PDF: a customs or
+    shipping document attached before the packet was merged is in it, and a
+    recorded customs append added the rest. Not meaningful for other statuses.
+    """
+    if ps.status != POSetStatus.merged or ps.merged_at is None:
+        return False
+    attached = [
+        d
+        for d in docs
+        if d.archived_at is None and d.doc_type in (DocType.CUSTOMS, DocType.SHIPPING)
+    ]
+    if any(d.created_at is not None and d.created_at <= ps.merged_at for d in attached):
+        return True
+    appended = (
+        s.query(AuditLog.id)
+        .filter(AuditLog.po_set_id == ps.id, AuditLog.action == AuditAction.customs_append)
+        .first()
+    )
+    return appended is not None
 
 
 def _resolve_db_path(path: str | Path, root: str | Path) -> Path | None:
@@ -1173,6 +1319,15 @@ def _audit_entries(rows: list[AuditLog]) -> list[dict]:
         except Exception:  # pragma: no cover - defence against a future shape
             logger.warning("Could not summarise audit row %s", entry.id, exc_info=True)
             summary = ""
+        # A removed set (step 13): its rows are gone, so the row names the old set id
+        # and the folder that holds the files.
+        if action == "quarantine_delete" and detail.get("deleted") is True:
+            label = "Set Removed"
+            removed_id = detail.get("removed_po_set_id")
+            folder = detail.get("folder") or "_removed_sets"
+            summary = (
+                f"Removed PO Set #{removed_id} (removed); files in quarantine folder: {folder}"
+            )
         views.append(
             {
                 "action": action,
@@ -1210,6 +1365,24 @@ def audit_log(request: Request):
 # ---------------------------------------------------------------------------
 # Quarantine — full page + HTMX fragment
 # ---------------------------------------------------------------------------
+
+
+def _set_aside_query(session: Session):
+    """Unattached documents the system could not process: failed reads and combined bundles.
+
+    They stay on the holding list until moved (D9). The Quarantine page lists them as
+    "Files set aside" so every file the system could not process is in one place.
+    """
+    return session.query(Document).filter(
+        Document.archived_at.is_(None),
+        Document.po_set_id.is_(None),
+        or_(
+            Document.extraction_status == ExtractionStatus.failed,
+            and_(
+                unsplit_bundle_clause(),
+            ),
+        ),
+    )
 
 
 @router.get("/quarantine", response_class=HTMLResponse)
@@ -1255,12 +1428,21 @@ def quarantine_view(request: Request):
             for ps in qs
         ]
         unclassified_count = _holding_area_query(s).count()
+        set_aside_docs = _set_aside_query(s).order_by(Document.created_at.desc()).all()
+        quarantine_root = Path(cfg.paths.quarantine_folder)
+        set_aside_in_folder: dict[int, str | None] = {}
+        for d in set_aside_docs:
+            folder_name = Path(d.stored_path).name.replace(".pdf", "")
+            has_copy = (quarantine_root / "_documents" / folder_name / "QUARANTINE.txt").is_file()
+            set_aside_in_folder[d.id] = f"_documents/{folder_name}" if has_copy else None
         return _templates.TemplateResponse(
             request,
             "quarantine.html",
             {
                 "request": request,
                 "po_sets": enriched,
+                "set_aside_docs": set_aside_docs,
+                "set_aside_in_folder": set_aside_in_folder,
                 "unclassified_count": unclassified_count,
                 "now_ts": _now_ts(),
                 "archive_folder": str(cfg.paths.archive_folder),
@@ -1383,9 +1565,58 @@ def unclassified_view(request: Request):
                 "ambiguous_count": ambiguous_count,
                 "unplaced_count": unplaced_count,
                 "hold_notes": hold_notes,
+                # Which rows already have a quarantine copy: the row text must not claim
+                # a copy that does not exist (I-52).
+                "in_quarantine_folder": {
+                    d.id: (
+                        Path(cfg.paths.quarantine_folder)
+                        / "_documents"
+                        / Path(d.stored_path).name.replace(".pdf", "")
+                        / "QUARANTINE.txt"
+                    ).is_file()
+                    for d in docs
+                },
                 "attempt_cap": int(getattr(cfg.extraction, "max_retries", 3) or 3),
             },
         )
+
+
+@router.post("/unclassified/{doc_id}/set_aside", response_class=HTMLResponse)
+def set_aside_route(doc_id: int, request: Request):
+    """Move one held document into the quarantine folder and off the holding list (D10).
+
+    The file is copied, not deleted: the operator splits or fixes it and puts it
+    back in the input folder. Refused while a sync is reading documents.
+    """
+    from app.services import sync_lock
+    from app.services.quarantine import SetAsideRefused, set_aside_document
+
+    cfg = load_config()
+    if sync_lock._is_sync_running():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Moves and removals are paused while a sync reads documents. "
+                "They resume when the sync finishes; a large batch can take an hour or more."
+            ),
+        )
+    try:
+        folder = set_aside_document(doc_id, cfg)
+    except SetAsideRefused as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    if request.headers.get("HX-Request") != "true":
+        return RedirectResponse(url="/unclassified", status_code=303)
+    where = html.escape(str(folder)) if folder is not None else "the quarantine folder"
+    return HTMLResponse(
+        content=(
+            f'<tr id="doc-row-{doc_id}" data-testid="set-aside-result">'
+            '<td colspan="6" style="padding:12px 14px; background:#f0fdf4;">'
+            f"Moved to the quarantine folder: <code>{where}</code>. "
+            "Fix or split it, then put it back in the input folder."
+            "</td></tr>"
+        )
+    )
 
 
 @router.get("/unclassified/normalize")
@@ -1497,6 +1728,23 @@ def reclassify_document(
         if doc is None:
             raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
         if doc.archived_at is not None:
+            # Only a document actually moved from the holding page gets the quarantine
+            # message: it has a quarantine report. A removed CUSTOMS/SHIPPING file has
+            # none, and keeps the archived-set message (review M1).
+            report = (
+                Path(cfg.paths.quarantine_folder)
+                / "_documents"
+                / Path(doc.stored_path).name.replace(".pdf", "")
+                / "QUARANTINE.txt"
+            )
+            if doc.po_set_id is None and report.is_file():
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "This document was moved to the quarantine folder. Put the corrected "
+                        "copy back in the input folder."
+                    ),
+                )
             raise HTTPException(
                 status_code=409,
                 detail="This document belongs to an archived PO Set and is read-only.",
@@ -1544,6 +1792,16 @@ def reclassify_document(
         # it forever left a readable packet in no set and on no page — the
         # operator's only recovery is to reclassify it here, so that case is
         # allowed (and the row stops pretending to be a parent).
+        # An unsplit multi-document PDF holds several documents and its content was never
+        # used, so it cannot be placed as one document. It is in the quarantine folder.
+        if is_unsplit_bundle(doc):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This file holds several documents in one PDF. It is in the "
+                    "quarantine folder; split it and put the parts in the input folder."
+                ),
+            )
         if getattr(doc, "is_split_parent", False):
             if getattr(doc, "split_completed_at", None) is not None:
                 raise HTTPException(
@@ -1566,6 +1824,8 @@ def reclassify_document(
                 )
             doc.is_split_parent = False
             doc.split_completed_at = None
+        old_doc_type = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
+        old_po_raw = doc.po_no_raw
         doc.doc_type = new_doc_type
         if po_no and po_no.strip():
             from app.services.grouping import normalize_po_no
@@ -1681,6 +1941,36 @@ def reclassify_document(
                     and cnt == 2
                 ):
                     ps_target.customs_append_pending = True
+        # Every manual type or PO change leaves a trace (I-38). Refusals raise
+        # before this point, so they write nothing.
+        new_type_value = new_doc_type.value
+        note = (
+            f"Reclassified {doc.original_filename} (document #{doc.id}) "
+            f"from {old_doc_type} to {new_type_value}"
+        )
+        if doc.po_no_raw and doc.po_no_raw != old_po_raw:
+            note += f", PO {doc.po_no_raw}"
+        if doc.po_set_id is not None:
+            note += f", placed in PO Set #{doc.po_set_id}"
+        s.add(
+            AuditLog(
+                po_set_id=doc.po_set_id,
+                action=AuditAction.manual_status_change,
+                detail=json.dumps(
+                    {
+                        "reclassified": True,
+                        "document_id": doc.id,
+                        "filename": doc.original_filename,
+                        "old_doc_type": old_doc_type,
+                        "new_doc_type": new_type_value,
+                        "po_no_raw": doc.po_no_raw,
+                        "po_set_id": doc.po_set_id,
+                        "note": note,
+                    }
+                ),
+                source="operator",
+            )
+        )
         s.commit()
 
     # A document the operator has just placed must not wait for the next
