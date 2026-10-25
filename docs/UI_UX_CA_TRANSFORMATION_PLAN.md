@@ -36,6 +36,25 @@ Chartered Accountants and commercial audit managers evaluate the software agains
 3. **Statutory Gating:** Customs Bill of Entry and Transshipment Air Waybills (AWB) are legal prerequisites for payment release. They must be presented as a clear compliance checklist.
 4. **Defensible Accountability:** Management overrides ("Force Merge") must not look like reckless developer bypasses; they must serve as **Authorized Exception Certificates** complete with variance logs, business justification, and authorizer attribution.
 
+### 2.1 Operational Reality & Role Dynamics (Small-to-Mid Scale CA Firm)
+* **The Trainee vs Partner Split:**
+  * **Article Trainees / Audit Assistants:** Primary day-to-day operators. They monitor the input folder, route unclassified documents, attach Customs Bills of Entry & Air Waybills, and review initial 3-way line matches. *UI Requirement:* Foolproof, guard-railed, zero cognitive ambiguity, clear next steps.
+  * **Senior CAs / Audit Partners:** Inspect exceptions, check flagged discrepancies, and authorize overrides (Force Merges). *UI Requirement:* A Partner needs to review an exception packet, read the discrepancy delta, approve or reject, and exit in under 30 seconds.
+* **The Pipeline Reality (Verification & Gatekeeper Terminal):**
+  * **Input:** Unsorted PDF streams dumped directly into `data/input`.
+  * **Engine:** Autonomous grouping by PO digits, VLM extraction, and 3-way quantity matching.
+  * **UI Terminal Role:** The UI is *not* a heavy ERP; it is a **Verification, Customs Gating, and Approval Cockpit**. Its primary jobs:
+    1. Verify automated 3-way match.
+    2. Upload missing Customs Clearance and Shipping documents.
+    3. Resolve holding/unclassified files.
+    4. Authorize final packet compilation.
+  * **Output:** Merged, statutory-compliant PDF packets delivered to `data/output`.
+* **Discrepancy Treatment (Under-Delivery vs Over-Billing):**
+  * **Partial Shipments ($DN < PO$):** Routine commercial hold. The firm expects to wait for subsequent shipments. *UI must display this calmly as "Awaiting balance (20 units)", not as a scary red error.*
+  * **Over-Billing ($SI > DN$ or un-ordered lines):** High-risk audit exception. Must be visually isolated for client notification or credit note request.
+* **Firm Scale (Multi-Client Operation):**
+  * The firm services **many clients**. While the engine groups by PO digits, the UI should minimize cross-client confusion by prominently displaying vendor/client names and providing fast search/filtering.
+
 ---
 
 ## 3. Screen-by-Screen Audit & Redesign Blueprint
