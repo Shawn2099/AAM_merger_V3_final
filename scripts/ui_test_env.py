@@ -341,6 +341,92 @@ SCENARIOS: dict[str, dict] = {
             ("SI", "INV-7000028.pdf", "7000028", [L("1", "2", "Pin")]),
         ],
     },
+    # Batch 1 audit: a mutable mismatched set for the remove-set browser test.
+    "remove_set_target": {
+        "po": "7000030",
+        "mutable": True,
+        "docs": [
+            ("PO", "PO-7000030.pdf", None, [L("1", "10", "Bearing")]),
+            ("DN", "DN-7000030.pdf", "7000030", [L("1", "6", "Bearing")]),
+            ("SI", "INV-7000030.pdf", "7000030", [L("1", "10", "Bearing")]),
+        ],
+    },
+    # Batch 1 audit: customs ON with both files attached, no DN yet. Turning the
+    # requirement OFF must be refused until the files are deleted.
+    "customs_toggle_refusal_target": {
+        "po": "7000031",
+        "mutable": True,
+        "customs_toggle": True,
+        "supporting": [("CUSTOMS", "CUSTOMS-7000031.pdf"), ("SHIPPING", "AWB-7000031.pdf")],
+        "docs": [
+            ("PO", "PO-7000031.pdf", None, [L("1", "4", "Gasket")]),
+            ("SI", "INV-7000031.pdf", "7000031", [L("1", "4", "Gasket")]),
+        ],
+    },
+    # Batch 1 audit: a merged packet that really contains customs pages.
+    "merged_with_customs": {
+        "po": "7000032",
+        "customs_toggle": True,
+        "supporting": [("CUSTOMS", "CUSTOMS-7000032.pdf"), ("SHIPPING", "AWB-7000032.pdf")],
+        "docs": [
+            ("PO", "PO-7000032.pdf", None, [L("1", "5", "Bolt")]),
+            ("DN", "DN-7000032.pdf", "7000032", [L("1", "5", "Bolt")]),
+            ("SI", "INV-7000032.pdf", "7000032", [L("1", "5", "Bolt")]),
+        ],
+    },
+    # Batch 1 audit: customs OFF, but the packet was written with the files
+    # attached, so the page must say "Yes" and show the "switched off" note.
+    "merged_customs_off_with_docs": {
+        "po": "7000033",
+        "supporting": [("CUSTOMS", "CUSTOMS-7000033.pdf"), ("SHIPPING", "AWB-7000033.pdf")],
+        "docs": [
+            ("PO", "PO-7000033.pdf", None, [L("1", "6", "Nut")]),
+            ("DN", "DN-7000033.pdf", "7000033", [L("1", "6", "Nut")]),
+            ("SI", "INV-7000033.pdf", "7000033", [L("1", "6", "Nut")]),
+        ],
+    },
+    # Batch 1 audit: pending (no DN), so Re-Match reports a reason, not a merge.
+    "rematch_toast_target": {
+        "po": "7000034",
+        "mutable": True,
+        "docs": [
+            ("PO", "PO-7000034.pdf", None, [L("1", "7", "Hinge")]),
+            ("SI", "INV-7000034.pdf", "7000034", [L("1", "7", "Hinge")]),
+        ],
+    },
+    # Batch 1 audit: two toggles in a row must leave two audit rows.
+    "customs_toggle_audit_target": {
+        "po": "7000035",
+        "mutable": True,
+        "docs": [
+            ("PO", "PO-7000035.pdf", None, [L("1", "5", "Fan")]),
+            ("SI", "INV-7000035.pdf", "7000035", [L("1", "5", "Fan")]),
+        ],
+    },
+    # Batch 1 audit: a mismatched set used to produce a force-merged dashboard label.
+    "force_merge_label_target": {
+        "po": "7000036",
+        "mutable": True,
+        "docs": [
+            ("PO", "PO-7000036.pdf", None, [L("1", "10", "Clamp")]),
+            ("DN", "DN-7000036.pdf", "7000036", [L("1", "9", "Clamp")]),
+            ("SI", "INV-7000036.pdf", "7000036", [L("1", "10", "Clamp")]),
+        ],
+    },
+    # Batch 1 audit: a PO line with no number, linked by description.
+    "description_match_target": {
+        "po": "7000037",
+        "docs": [
+            (
+                "PO",
+                "PO-7000037.pdf",
+                None,
+                [{"line_item_no": None, "description": "Widget", "quantity": 5, "dn_no": None}],
+            ),
+            ("DN", "DN-7000037.pdf", "7000037", [L("1", "5", "Widget")]),
+            ("SI", "INV-7000037.pdf", "7000037", [L("1", "5", "Widget")]),
+        ],
+    },
 }
 
 # Documents that stay in the holding area (the Unclassified page). `po_ref` None means the
@@ -410,6 +496,33 @@ HELD: dict[str, dict] = {
         "state": "read",
         "mutable": True,
         "lines": [L("1", "2", "Count item")],
+    },
+    # Batch 1 audit: a valid held document, for the set-aside report test.
+    "held_set_aside_target": {
+        "kind": "DN",
+        "file": "DN-SET-ASIDE.pdf",
+        "po_ref": None,
+        "state": "read",
+        "mutable": True,
+        "lines": [L("1", "3", "Orphan item")],
+    },
+    # Batch 1 audit: a failed held document, for the quarantine-page redirect test.
+    "held_set_aside_failed_target": {
+        "kind": "UNKNOWN",
+        "file": "FAILED-SET-ASIDE.pdf",
+        "po_ref": None,
+        "state": "failed",
+        "mutable": True,
+        "lines": [],
+    },
+    # Batch 1 audit: reclassify this one and check the audit row.
+    "held_reclassify_audit_target": {
+        "kind": "DN",
+        "file": "DN-RECLASSIFY-AUDIT.pdf",
+        "po_ref": None,
+        "state": "read",
+        "mutable": True,
+        "lines": [L("1", "4", "Audit item")],
     },
 }
 

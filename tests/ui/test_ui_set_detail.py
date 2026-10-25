@@ -211,8 +211,12 @@ def test_ui_s_09_matrix_totals_equal_the_database_for_every_set(page: Page, db):
         page.goto(f"/po_sets/{set_id}/view")
         expect(page.get_by_test_id("set-po")).to_be_visible()
         rows = page.get_by_test_id("matrix-row")
+        # A PO line with no printed number is keyed by its description
+        # (matching.po_item_key), so the matrix has a row for it. Count the
+        # same key here; a bare count(distinct line_item_no) ignores it.
         expected_rows = db.execute(
-            "select count(distinct li.line_item_no) from line_items li "
+            "select count(distinct coalesce(li.line_item_no, 'd:' || coalesce(li.description, ''))) "
+            "from line_items li "
             "join documents d on d.id = li.document_id "
             "where d.po_set_id = ? and d.doc_type = 'PO'",
             (set_id,),

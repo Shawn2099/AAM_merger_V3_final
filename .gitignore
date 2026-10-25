@@ -22,6 +22,7 @@ data/logs/*
 !data/logs/.gitkeep
 data/samples/*
 !data/samples/.gitkeep
+data/real_samples/
 data/Automation/
 data/backup/
 data/combined/

@@ -16,9 +16,14 @@ def _pdf_bytes() -> bytes:
     return buf.getvalue()
 
 
-def test_is_file_stable(tmp_path):
+def test_is_file_stable(tmp_path, monkeypatch):
     p = tmp_path / "a.pdf"
     p.write_bytes(b"x")
+    # Patch the function's OWN module globals. A test that reloads
+    # app.services.ingestion can leave this imported function bound to the old
+    # module, while the autouse fixture patches the new one; the 30 s age then
+    # makes this test fail only in a full-suite order.
+    monkeypatch.setitem(is_file_stable.__globals__, "MIN_FILE_AGE_SECONDS", 0)
     # 2sx2 stable if not growing
     assert is_file_stable(p, interval=0, count=2) is True  # 0 for fast test, real 2s
 
