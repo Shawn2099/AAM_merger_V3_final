@@ -277,7 +277,9 @@ def test_input_pdfs_are_discovered_exactly_once(tmp_path):
 
     assert sorted(p.name for p in found) == ["DN.pdf", "PO.pdf", "SI.pdf", "upper.PDF"]
     assert len(found) == len(set(found)), "a file was discovered twice"
-    assert found == sorted(found), "order must be stable"
+    assert found == sorted(found, key=lambda p: (p.stat().st_mtime, str(p))), (
+        "order must be oldest modified first"
+    )
     assert "notes.txt" not in [p.name for p in found]
     assert "sub" not in [p.name for p in found]
 

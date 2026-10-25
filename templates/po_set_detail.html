@@ -8,13 +8,13 @@
    must still say so, or it is indistinguishable from a successful one. #}
 {% if notice %}
 <div class="card" style="border-left:4px solid var(--clr-blocked-border, #fed7aa); margin-bottom:16px;">
-  <div class="muted" style="font-size:0.9rem;">{{ notice }}</div>
+  <div class="muted" data-testid="notice" style="font-size:0.9rem;">{{ notice }}</div>
 </div>
 {% endif %}
 
 {% if is_archived %}
 <div class="card" style="border-left:4px solid #6b7280; margin-bottom:16px; background:#f9fafb;">
-  <div style="font-weight:700; color:#374151; margin-bottom:4px;">📦 Archived PO Set — read-only</div>
+  <div data-testid="archived-banner" style="font-weight:700; color:#374151; margin-bottom:4px;">📦 Archived PO Set — read-only</div>
   <div class="muted" style="font-size:0.9rem;">
     Archived {{ po_set.archived_at.strftime('%Y-%m-%d %H:%M:%S UTC') if po_set.archived_at else '—' }}
     by {{ po_set.archived_by or 'unknown' }}. The records and files are kept for audit and analysis.
@@ -88,7 +88,7 @@
     <div style="display:flex; gap:10px; align-items:center;">
       {% if status_str == 'merged' and has_merged_file %}
         <a 
-          href="/po_sets/{{ po_set.id }}/merged_pdf" 
+          data-testid="btn-download-merged" href="/po_sets/{{ po_set.id }}/merged_pdf" 
           class="btn btn-success" 
           download 
           title="Download the compiled merged PDF packet"
@@ -273,17 +273,17 @@
           <td style="font-weight:500;">{{ r.description }}</td>
           
           <td style="text-align:right;">
-            <span class="qty-val" style="color:#0f172a;">{{ '{:g}'.format(r.po_qty) }}</span>
+            <span class="qty-val" data-testid="cell-po-qty" style="color:#0f172a;">{{ '{:g}'.format(r.po_qty) }}</span>
           </td>
 
           <td style="text-align:right;">
-            <span class="qty-val {% if r.dn_agg_qty != r.po_qty %}text-danger{% endif %}">
+            <span data-testid="cell-dn-qty" class="qty-val {% if r.dn_agg_qty != r.po_qty %}text-danger{% endif %}">
               {{ '{:g}'.format(r.dn_agg_qty) }}
             </span>
           </td>
 
           <td style="text-align:right;">
-            <span class="qty-val {% if r.si_agg_qty != r.po_qty %}text-danger{% endif %}">
+            <span data-testid="cell-si-qty" class="qty-val {% if r.si_agg_qty != r.po_qty %}text-danger{% endif %}">
               {{ '{:g}'.format(r.si_agg_qty) }}
             </span>
           </td>

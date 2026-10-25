@@ -244,7 +244,29 @@ The first week is supervised. **Nobody runs the system unattended.** A one-digit
 
 ---
 
-## 9. Who to call
+## 9. Before a large run (hundreds of files)
+
+- **Set the PC to never sleep.** The installer does this on AC power. A sleeping PC stops the poller, the midnight run and LAN access.
+- **Smoke-test with one file first.** Use the paid key, send one PDF, and watch the credit balance on the OpenRouter account. A missing key or used-up credit makes every document wait through retries, and that can waste hours.
+- **Copy first, then scan.** Copy all the PDFs into the input folder, then press **Scan Input Folder**. Do not let files trickle in during the pass.
+- **Expect "a sync is running" (409).** While the pass runs, operator actions such as Force Merge, Remove or Archive may answer "a sync is running". That is expected. Wait until the pass ends, then review.
+- **Switch off the folder watcher while reviewing.** If the watcher is on, turn it off on the Settings page while you review.
+- **Files are read oldest first.** The app reads each PDF in order of its own last-modified time, oldest first. A copy that keeps the source's time is read in the source's place in that order.
+
+---
+
+## 10. Known open items
+
+These are known and not yet fixed.
+
+- **Force Merge on a set that is already merged** returns OK and writes a second audit row.
+- **An orphan sync marker** can block operator actions for up to 20 minutes unless **Scan Input Folder** is pressed.
+- **A document left mid-read** waits up to 15 minutes before it is read again.
+- **A stray `.tmp` file** can remain in the output folder after a killed write. It is harmless; delete it.
+
+---
+
+## 11. Who to call
 
 | Problem | Who | Contact |
 |---|---|---|

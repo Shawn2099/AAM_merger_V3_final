@@ -46,9 +46,9 @@ def _load_env_module():
     return module
 
 
-@pytest.fixture(scope="session")
-def ui_env(tmp_path_factory):
-    root = tmp_path_factory.mktemp("ui_test_env")
+def _start_env(tmp_path_factory, name: str):
+    """Build and serve one throwaway harness environment."""
+    root = tmp_path_factory.mktemp(name)
     # Blank, not popped: the config loader reads `.env` files itself and
     # `override=False` honours a variable that is present. An empty string is
     # present, so the developer's real key cannot come back (H-01).
@@ -64,18 +64,45 @@ def ui_env(tmp_path_factory):
     module = _load_env_module()
     proc, base = module.serve(root)
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    return SimpleNamespace(
+        base=base, root=root, manifest=manifest, db_path=root / "aam_merger.db", proc=proc
+    )
+
+
+@pytest.fixture(scope="session")
+def ui_env(tmp_path_factory):
+    env = _start_env(tmp_path_factory, "ui_test_env")
     try:
-        yield SimpleNamespace(
-            base=base, root=root, manifest=manifest, db_path=root / "aam_merger.db"
-        )
+        yield env
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:  # pragma: no cover
-            proc.kill()
-        if proc.stdout is not None:
-            proc.stdout.close()
+        _stop(env.proc)
+
+
+@pytest.fixture(scope="session")
+def scan_env(tmp_path_factory):
+    """A second, throwaway environment for the one test that presses Scan (D-12).
+
+    `POST /sync` runs the real flow in the web process: it re-reconciles every
+    open set with the poller's settle window OFF (`SETTLE_MINUTES` is only set
+    by the poller), so it merges a set that is merely waiting for its settle
+    window. A suite that also checks that state cannot share the database with
+    the click, and every other seeded state must stay as the build left it.
+    """
+    env = _start_env(tmp_path_factory, "ui_test_scan_env")
+    try:
+        yield env
+    finally:
+        _stop(env.proc)
+
+
+def _stop(proc) -> None:
+    proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:  # pragma: no cover
+        proc.kill()
+    if proc.stdout is not None:
+        proc.stdout.close()
 
 
 @pytest.fixture(scope="session")
@@ -99,9 +126,20 @@ def db(ui_env):
 
 
 @pytest.fixture(scope="session")
-def browser_context_args(browser_context_args):
+def browser_context_args(browser_context_args, base_url):
+    """The context every UI test gets.
+
+    `base_url` is named explicitly, not inherited indirectly: pytest-playwright
+    builds the session-scoped context args ONCE, and a browser test that runs
+    earlier in a combined suite (test_manual_merger_e2e.py) can instantiate them
+    while no UI `base_url` fixture is in play. Relying on the plugin's cached
+    dict then left the context without a base URL, and every relative
+    `page.goto("/dashboard")` in this directory failed with "Cannot navigate to
+    invalid URL" only when the whole suite was run.
+    """
     return {
         **browser_context_args,
+        "base_url": base_url,
         "accept_downloads": True,
         "viewport": {"width": 1440, "height": 900},
     }

@@ -8,7 +8,7 @@
     <div>
       <h2 class="card-title">
         <span>❓ Unclassified Documents Holding Area</span>
-        <span class="badge badge-gray" style="font-size:0.8rem;">{{ documents|length }} awaiting classification</span>
+        <span class="badge badge-gray" data-testid="unclassified-count" style="font-size:0.8rem;">{{ documents|length }} awaiting classification</span>
         {% if failed_count %}
         <span class="badge badge-failed" style="font-size:0.8rem;" title="Extraction permanently failed — these will not be retried automatically.">{{ failed_count }} failed</span>
         {% endif %}
@@ -118,7 +118,7 @@
                 @input.debounce.300ms="refreshNorm()"
                 style="padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); width:150px; font-family:ui-monospace, monospace;"
               >
-              <div x-show="norm.length > 0" class="muted" style="font-size:0.72rem; margin-top:2px;">
+              <div data-testid="po-key-preview" x-show="norm.length > 0" class="muted" style="font-size:0.72rem; margin-top:2px;">
                 Server key: <strong x-text="norm" style="color:var(--primary);"></strong>
               </div>
             </td>
@@ -131,7 +131,7 @@
                   data-preview-url="/documents/{{ doc.id }}/preview"
                   data-preview-name="{{ doc.original_filename }}"
                   @click="$store.pdfDrawer.open($el.dataset.previewUrl, $el.dataset.previewName)"
-                  title="Preview PDF in slide-over drawer"
+                  data-testid="btn-preview" title="Preview PDF in slide-over drawer"
                 >
                   <span>👁️ Preview</span>
                 </button>

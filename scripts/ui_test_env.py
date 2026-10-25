@@ -226,6 +226,121 @@ SCENARIOS: dict[str, dict] = {
             ("SI", "INV-7000018.pdf", "7000018", [L("1", "5", "Rivet")]),
         ],
     },
+    # Settle window (D5): reconciled, but the newest file is younger than the
+    # settle time, so the engine holds it. Only these sets are reconciled with
+    # SETTLE_MINUTES set (see build()).
+    "settling": {
+        "po": "7000019",
+        "settle_minutes": 240,
+        "docs": [
+            ("PO", "PO-7000019.pdf", None, [L("1", "4", "Spring")]),
+            ("DN", "DN-7000019.pdf", "7000019", [L("1", "4", "Spring")]),
+            ("SI", "INV-7000019.pdf", "7000019", [L("1", "4", "Spring")]),
+        ],
+    },
+    "settling_merge_now_target": {
+        "po": "7000020",
+        "mutable": True,
+        "settle_minutes": 240,
+        "docs": [
+            ("PO", "PO-7000020.pdf", None, [L("1", "6", "Washer")]),
+            ("DN", "DN-7000020.pdf", "7000020", [L("1", "6", "Washer")]),
+            ("SI", "INV-7000020.pdf", "7000020", [L("1", "6", "Washer")]),
+        ],
+    },
+    # D9: the "-b" DN prints no PO number. Its DN number (DN-<po>, same as the
+    # first DN) places it by number only, so the set holds. It carries a
+    # DIFFERENT line number, or after Confirm the duplicate-DN guard would
+    # quarantine the set instead of merging it.
+    "placed_by_number_only": {
+        "po": "7000021",
+        "docs": [
+            ("PO", "PO-7000021.pdf", None, [L("1", "5", "Gear"), L("2", "3", "Shaft")]),
+            ("DN", "DN-7000021-a.pdf", "7000021", [L("1", "5", "Gear")]),
+            ("DN", "DN-7000021-b.pdf", None, [L("2", "3", "Shaft")]),
+            ("SI", "INV-7000021.pdf", "7000021", [L("1", "5", "Gear"), L("2", "3", "Shaft")]),
+        ],
+    },
+    "confirm_placement_target": {
+        "po": "7000022",
+        "mutable": True,
+        "docs": [
+            ("PO", "PO-7000022.pdf", None, [L("1", "5", "Cog"), L("2", "3", "Axle")]),
+            ("DN", "DN-7000022-a.pdf", "7000022", [L("1", "5", "Cog")]),
+            ("DN", "DN-7000022-b.pdf", None, [L("2", "3", "Axle")]),
+            ("SI", "INV-7000022.pdf", "7000022", [L("1", "5", "Cog"), L("2", "3", "Axle")]),
+        ],
+    },
+    # S-13's own target (pending_no_dn is changed by U-04, so it cannot be used).
+    "rematch_target": {
+        "po": "7000023",
+        "mutable": True,
+        "docs": [
+            ("PO", "PO-7000023.pdf", None, [L("1", "7", "Hinge")]),
+            ("SI", "INV-7000023.pdf", "7000023", [L("1", "7", "Hinge")]),
+        ],
+    },
+    "merge_now_mismatch_target": {
+        "po": "7000024",
+        "mutable": True,
+        "docs": [
+            ("PO", "PO-7000024.pdf", None, [L("1", "10", "Valve seat")]),
+            ("DN", "DN-7000024.pdf", "7000024", [L("1", "8", "Valve seat")]),
+            ("SI", "INV-7000024.pdf", "7000024", [L("1", "10", "Valve seat")]),
+        ],
+    },
+    # S-14b's own target (S-14 owns merge_now_mismatch_target).
+    "merge_now_reason_target": {
+        "po": "7000029",
+        "mutable": True,
+        "docs": [
+            ("PO", "PO-7000029.pdf", None, [L("1", "10", "Seal ring")]),
+            ("DN", "DN-7000029.pdf", "7000029", [L("1", "8", "Seal ring")]),
+            ("SI", "INV-7000029.pdf", "7000029", [L("1", "10", "Seal ring")]),
+        ],
+    },
+    # A-02's own target: a force merge with a justification, then the audit page.
+    "audit_force_merge_target": {
+        "po": "7000025",
+        "mutable": True,
+        "docs": [
+            ("PO", "PO-7000025.pdf", None, [L("1", "10", "Flange")]),
+            ("DN", "DN-7000025.pdf", "7000025", [L("1", "9", "Flange")]),
+            ("SI", "INV-7000025.pdf", "7000025", [L("1", "10", "Flange")]),
+        ],
+    },
+    # A-03's own target: archiving it must leave a `quarantine_delete` audit row.
+    "audit_archive_target": {
+        "po": "7000026",
+        "mutable": True,
+        "docs": [
+            ("PO", "PO-7000026.pdf", None, [L("1", "5", "Gland")]),
+            ("DN", "DN-7000026.pdf", "7000026", [L("9", "5", "Gland")]),
+            ("SI", "INV-7000026.pdf", "7000026", [L("1", "5", "Gland")]),
+        ],
+    },
+    # Quarantined, then archived during build(): S-20 checks it is read-only.
+    "archived_readonly": {
+        "po": "7000027",
+        "archive_in_build": True,
+        "docs": [
+            ("PO", "PO-7000027.pdf", None, [L("1", "5", "Bush")]),
+            ("DN", "DN-7000027.pdf", "7000027", [L("8", "5", "Bush")]),
+            ("SI", "INV-7000027.pdf", "7000027", [L("1", "5", "Bush")]),
+        ],
+    },
+    # X-02: the second PO document's stored filename is replaced by HTML after
+    # the build loop (before reconcile, so the reason names it too).
+    "hostile_name_in_set": {
+        "po": "7000028",
+        "hostile_doc_index": 1,
+        "docs": [
+            ("PO", "PO-7000028-p1.pdf", None, [L("1", "2", "Pin")]),
+            ("PO", "PO-7000028-p2.pdf", None, [L("1", "2", "Pin")]),
+            ("DN", "DN-7000028.pdf", "7000028", [L("1", "2", "Pin")]),
+            ("SI", "INV-7000028.pdf", "7000028", [L("1", "2", "Pin")]),
+        ],
+    },
 }
 
 # Documents that stay in the holding area (the Unclassified page). `po_ref` None means the
@@ -286,6 +401,15 @@ HELD: dict[str, dict] = {
         "state": "read",
         "mutable": True,
         "lines": [L("1", "2", "Held item")],
+    },
+    # U-10's own document: reclassified as a DN with a fresh PO number (7000090).
+    "held_count_target": {
+        "kind": "DN",
+        "file": "DN-COUNT.pdf",
+        "po_ref": None,
+        "state": "read",
+        "mutable": True,
+        "lines": [L("1", "2", "Count item")],
     },
 }
 
@@ -412,6 +536,13 @@ def build(root: Path) -> dict:
             ids.append(doc_id)
         scenario_docs[name] = ids
 
+    for name, sc in SCENARIOS.items():
+        idx = sc.get("hostile_doc_index")
+        if idx is not None:
+            with Session(eng) as s:
+                s.get(Document, scenario_docs[name][idx]).original_filename = HOSTILE_NAME
+                s.commit()
+
     held_ids: dict[str, int] = {}
     for name, h in HELD.items():
         doc_id = make_doc(
@@ -468,10 +599,35 @@ def build(root: Path) -> dict:
                 ps.customs_doc_count = (ps.customs_doc_count or 0) + 1
                 s.commit()
 
+    from app.services.reconciliation import SETTLE_MINUTES
+
+    settle_by_po = {
+        sc["po"]: sc["settle_minutes"] for sc in SCENARIOS.values() if sc.get("settle_minutes")
+    }
     with Session(eng) as s:
-        ids = [r[0] for r in s.query(POSet.id).order_by(POSet.id)]
-    for ps_id in ids:
-        reconcile_po_set(ps_id, cfg)
+        ids = [(r[0], r[1]) for r in s.query(POSet.id, POSet.po_no_normalized).order_by(POSet.id)]
+    for ps_id, po_no in ids:
+        minutes = settle_by_po.get(po_no)
+        if minutes:
+            # Only a poller-started sync sets this in production (D5).
+            token = SETTLE_MINUTES.set(minutes)
+            try:
+                reconcile_po_set(ps_id, cfg)
+            finally:
+                SETTLE_MINUTES.reset(token)
+        else:
+            reconcile_po_set(ps_id, cfg)
+
+    from app.services.quarantine import delete_quarantined
+
+    for sc in SCENARIOS.values():
+        if sc.get("archive_in_build"):
+            with Session(eng) as s:
+                ps = s.query(POSet).filter(POSet.po_no_normalized == sc["po"]).one()
+                ps_id, status = ps.id, ps.status.value
+            if status != "quarantined":
+                raise SystemExit(f"{sc['po']} must be quarantined before archiving, got {status}")
+            delete_quarantined(ps_id, cfg, justification=None, source="ui_test_env")
 
     # Operator history: a couple of audit rows so the Audit page has content.
     with Session(eng) as s:
@@ -497,6 +653,8 @@ def build(root: Path) -> dict:
                 "status": ps.status.value,
                 "reason": ps.reconcile_reason,
                 "mutable": bool(sc.get("mutable")),
+                "archived": ps.archived_at is not None,
+                "settle_minutes": sc.get("settle_minutes", 0),
                 "line_mapping_rule": ps.line_mapping_rule,
                 "merged_output_path": ps.merged_output_path,
                 "docs": [
@@ -505,6 +663,7 @@ def build(root: Path) -> dict:
                         "type": d.doc_type.value,
                         "file": d.original_filename,
                         "lines": len(d.line_items),
+                        "po_no_source": d.po_no_source,
                     }
                     for d in docs
                 ],

@@ -76,6 +76,34 @@ if (-not $isAdmin) {
     Write-Warning "Not running as Administrator: installing files, config and database only. Services, firewall and the backup task are skipped."
 }
 
+# Both steps below only warn: neither may stop the install.
+if ($isAdmin) {
+    # A sleeping PC suspends the poller, the midnight run and LAN access.
+    try {
+        powercfg /change standby-timeout-ac 0 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "powercfg standby-timeout-ac exited $LASTEXITCODE" }
+        powercfg /change hibernate-timeout-ac 0 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "powercfg hibernate-timeout-ac exited $LASTEXITCODE" }
+        Write-Host "Sleep on AC power disabled so the service keeps running" -ForegroundColor Green
+    } catch {
+        Write-Warning "Could not disable sleep on AC power ($($_.Exception.Message)). Set the power plan to never sleep by hand."
+    }
+}
+
+# The PDF reader (PyMuPDF) needs the Visual C++ runtime.
+try {
+    $vcRuntimeKey = "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+    $vcInstalled = $null
+    if (Test-Path $vcRuntimeKey) {
+        $vcInstalled = (Get-ItemProperty -Path $vcRuntimeKey -Name Installed -ErrorAction Stop).Installed
+    }
+    if ($vcInstalled -ne 1) {
+        Write-Host "Microsoft Visual C++ 2015-2022 x64 runtime not found; PDF reading (PyMuPDF) may fail. Install it from https://aka.ms/vs/17/release/vc_redist.x64.exe and re-run." -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "Microsoft Visual C++ 2015-2022 x64 runtime not found; PDF reading (PyMuPDF) may fail. Install it from https://aka.ms/vs/17/release/vc_redist.x64.exe and re-run." -ForegroundColor Yellow
+}
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..")).Path
 Set-Location $ProjectRoot

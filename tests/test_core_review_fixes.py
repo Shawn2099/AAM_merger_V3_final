@@ -152,6 +152,17 @@ def test_two_copies_of_a_dn_with_no_readable_number_are_a_duplicate(cfg):
     assert "(no number)" in res["detail"]
 
 
+def test_a_numbered_dn_and_an_unreadable_copy_of_it_are_a_duplicate(cfg):
+    """Opus review B2: DN-77 scanned twice, one scan's number unreadable, must not both sum."""
+    _ps, res = _dups(cfg, [("DN-77", [("1", 5000)]), (None, [("1", 5000)])])
+    assert res["status"] == "quarantined" and res["reason"] == "duplicate_document_number"
+
+
+def test_dn_numbers_that_differ_only_by_o_and_zero_are_the_same_document(cfg):
+    _ps, res = _dups(cfg, [("GDN-RHO-25-513", [("1", 5000)]), ("GDN-RH0-25-513", [("1", 5000)])])
+    assert res["status"] == "quarantined" and res["reason"] == "duplicate_document_number"
+
+
 def test_dn_numbers_that_differ_only_by_leading_zeros_are_the_same_document(cfg):
     _ps, res = _dups(cfg, [("DN-0077", [("1", 5000)]), ("DN-077", [("1", 5000)])])
     assert res["status"] == "quarantined" and res["reason"] == "duplicate_document_number"

@@ -40,6 +40,21 @@ def _number_key(raw: str | None) -> str:
     return re.sub(r"\d+", lambda m: m.group().lstrip("0") or "0", key)
 
 
+_CONFUSABLE = str.maketrans("OIL", "011")
+
+
+def _duplicate_key(raw: str | None) -> str:
+    """`_number_key` with look-alike characters folded (O/0, I/L/1), for the duplicate guard only.
+
+    A re-scan can read `RHO` as `RH0`; folding makes those the same number, so the guard holds
+    the set. The cost is an occasional extra hold, never a missed duplicate. Not used for
+    grouping or matching.
+    """
+    return _number_key(
+        "".join(c for c in (raw or "") if c.isalnum()).upper().translate(_CONFUSABLE)
+    )
+
+
 def _aware(value: datetime) -> datetime:
     """SQLite hands back naive datetimes; they were written as UTC."""
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
@@ -690,11 +705,28 @@ def _reconcile_po_set_inner(po_set_id: int, cfg: AppConfig) -> dict:
                 # Leading zeros are not part of the identity ("DN-0077" is "DN-77"),
                 # and documents with no readable number are compared among themselves:
                 # two number-less copies of one DN must not both be summed.
-                key = _number_key(raw_no)
+                key = _duplicate_key(raw_no)
                 by_number.setdefault(key, []).append(d)
                 shown.setdefault(key, (raw_no or "").strip() or "(no number)")
             clashes: list[str] = []
             for key, group in sorted(by_number.items()):
+                if key == "":
+                    # A copy whose number could not be read may be a re-scan of ANY other
+                    # document here, so it is compared with all of them, not only with
+                    # other number-less copies.
+                    for blank in group:
+                        mine = {normalize_line_no(li.line_item_no) for li in blank.line_items}
+                        hit = [blank]
+                        for other in vendor_docs:
+                            if other is blank:
+                                continue
+                            theirs = {normalize_line_no(li.line_item_no) for li in other.line_items}
+                            if "" in mine or "" in theirs or mine & theirs:
+                                hit.append(other)
+                        if len(hit) > 1:
+                            names = ", ".join(sorted(d.original_filename or "?" for d in hit))
+                            clashes.append(f"{shown[key]}: {names}")
+                    continue
                 if len(group) < 2:
                     continue
                 seen_lines: set[str] = set()

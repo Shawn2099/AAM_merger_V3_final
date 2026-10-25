@@ -526,6 +526,11 @@ def resolve_unattached_documents(cfg) -> set[int]:
                 # attach by a filename resemblance what the other sweep
                 # deliberately leaves for a human.
                 continue
+            if doc.po_no_normalized:
+                # The document prints its own PO. `attach_unattached_to_open_sets` places it
+                # by that PO; a DN number shared with another vendor's document must not
+                # pull it into an unrelated set (which would then be quarantined for good).
+                continue
             matched_ps_id: int | None = None
             matched_po_norm: str | None = None
             matched_by_number_only = False

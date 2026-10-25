@@ -21,7 +21,7 @@
         <td>
           <span class="badge badge-quarantined">🚨 Quarantined</span>
         </td>
-        <td class="reason-cell" style="max-width:420px;">
+        <td class="reason-cell" data-testid="quarantine-row-reason" style="max-width:420px;">
           {% if ps.reconcile_reason %}
             {{ ps.reconcile_reason }}
           {% else %}
@@ -34,12 +34,12 @@
         </td>
         <td style="text-align:right;">
           <div style="display:inline-flex; gap:6px;">
-            <a href="/po_sets/{{ ps.id }}/view" class="btn btn-secondary btn-sm">Inspect &amp; Resolve</a>
+            <a href="/po_sets/{{ ps.id }}/view" class="btn btn-secondary btn-sm" data-testid="btn-inspect-row">Inspect &amp; Resolve</a>
             <button class="btn btn-danger btn-sm" data-testid="btn-archive-row" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.add('open')">Archive</button>
           </div>
 
           <!-- Quarantine Delete Modal -->
-          <div id="qd-modal-{{ ps.id }}" class="modal-backdrop">
+          <div id="qd-modal-{{ ps.id }}" data-testid="archive-row-modal" class="modal-backdrop">
             <div class="modal-dialog" role="dialog" aria-modal="true" style="text-align:left;">
               <h3 style="color:#991b1b; margin-bottom:8px;">Archive Quarantined PO Set?</h3>
               <p class="muted" style="margin-bottom:16px;">
@@ -49,8 +49,8 @@
                 An audit log entry (<code>quarantine_delete</code>) records the archive.
               </p>
               <div style="display:flex; gap:8px; justify-content:flex-end;">
-                <button class="btn btn-secondary" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.remove('open')">Cancel</button>
-                <button class="btn btn-danger" hx-delete="/po_sets/{{ ps.id }}/quarantine" hx-swap="none" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.remove('open')">Archive</button>
+                <button class="btn btn-secondary" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.remove('open')" data-testid="btn-cancel-archive-row">Cancel</button>
+                <button class="btn btn-danger" data-testid="btn-confirm-archive-row" hx-delete="/po_sets/{{ ps.id }}/quarantine" hx-swap="none" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.remove('open')">Archive</button>
               </div>
             </div>
           </div>

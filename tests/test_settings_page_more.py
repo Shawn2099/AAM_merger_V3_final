@@ -46,6 +46,17 @@ def cfg_file(tmp_path, monkeypatch) -> Path:
     return path
 
 
+@pytest.fixture(autouse=True)
+def _isolated_config_memory(monkeypatch):
+    """Start and finish each test with no last-good config or bad-file markers left by
+    earlier tests in the suite (module-level state in app.core.config)."""
+    monkeypatch.setattr(config_module, "_LAST_GOOD", {})
+    monkeypatch.setattr(config_module, "_REPORTED_BAD", set())
+    yield
+    monkeypatch.setattr(config_module, "_LAST_GOOD", {})
+    monkeypatch.setattr(config_module, "_REPORTED_BAD", set())
+
+
 @pytest.fixture
 def client(cfg_file):
     from app.main import create_app
@@ -98,6 +109,12 @@ def _set(data: dict, dotted: str, value) -> None:
 
 def _backups(cfg_file: Path) -> list[Path]:
     return sorted((cfg_file.parent / svc.BACKUP_FOLDER_NAME).glob("config-*.yaml"))
+
+
+def config_version(html: str) -> str:
+    match = re.search(r'name="config_version" value="([0-9a-f]+)"', html)
+    assert match, "the page carries no config_version"
+    return match.group(1)
 
 
 # ------------------------------------------------------------------------ B-01
@@ -268,21 +285,39 @@ def test_b_07_a_plain_integer_is_accepted_and_written_plain(client, cfg_file, ra
 # ------------------------------------------------------------------------ B-08
 
 
-def test_b_08_a_broken_file_keeps_the_last_good_settings(tmp_path, caplog):
+def test_b_08_a_broken_file_keeps_the_last_good_settings(tmp_path):
     """`load_config` serves the last good copy, and says so once per edit."""
+    import logging
+
     path = tmp_path / "config.yaml"
     good_v1 = _example_text().replace("poll_interval_seconds: 60", "poll_interval_seconds: 61")
     path.write_text(good_v1, encoding="utf-8")
 
-    caplog.set_level("ERROR", logger="app.core.config")
-    assert config_module.load_config(path).schedule.poll_interval_seconds == 61
+    # A handler on the module's own logger: caplog relies on propagation, which an earlier
+    # test in a full run may have switched off (the log setup does).
+    seen: list[logging.LogRecord] = []
 
-    path.write_text("paths: [broken: \n  x: {\n", encoding="utf-8")
-    for _ in range(5):
+    class _Keep(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            seen.append(record)
+
+    cfg_logger = logging.getLogger(config_module.__name__)
+    keep = _Keep(level=logging.ERROR)
+    was_disabled = cfg_logger.disabled
+    cfg_logger.disabled = False  # dictConfig in an earlier test can disable existing loggers
+    cfg_logger.addHandler(keep)
+    try:
         assert config_module.load_config(path).schedule.poll_interval_seconds == 61
 
-    not_valid = [r for r in caplog.records if "not valid" in r.getMessage()]
-    assert len(not_valid) == 1, [r.getMessage() for r in not_valid]
+        path.write_text("paths: [broken: \n  x: {\n", encoding="utf-8")
+        for _ in range(5):
+            assert config_module.load_config(path).schedule.poll_interval_seconds == 61
+
+        not_valid = [r for r in seen if "not valid" in r.getMessage()]
+        assert len(not_valid) == 1, [r.getMessage() for r in not_valid]
+    finally:
+        cfg_logger.removeHandler(keep)
+        cfg_logger.disabled = was_disabled
 
     good_v2 = _example_text().replace("poll_interval_seconds: 60", "poll_interval_seconds: 62")
     path.write_text(good_v2, encoding="utf-8")
@@ -466,6 +501,7 @@ def test_b_13_a_raised_lock_timeout_is_what_the_page_shows(client, cfg_file):
     cfg_file.write_text(text, encoding="utf-8")
 
     html = client.get("/settings").text
+    assert config_version(html) == svc.file_version(cfg_file)
     row = re.search(
         r'data-testid="field-concurrency\.po_set_lock_timeout_seconds"[\s\S]{0,200}?value="(\d+)"',
         html,

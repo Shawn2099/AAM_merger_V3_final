@@ -120,3 +120,177 @@ def test_ui_d_07_an_unknown_status_filter_shows_a_page_not_json(page: Page):
     expect(page.get_by_text("not recognised", exact=False)).to_be_visible()
     page.get_by_role("link", name="Back to dashboard").click()
     page.wait_for_url(re.compile(r"/dashboard$"))
+
+
+def _held_document_count(db) -> int:
+    """The holding area query `_holding_area_query` counts (managed copy).
+
+    Every document not in a set and not archived, except a split parent whose
+    split completed (its children own the content).
+    """
+    return db.execute(
+        "select count(*) from documents where archived_at is null and po_set_id is null "
+        "and (coalesce(is_split_parent, 0) = 0 or (split_completed_at is null "
+        "and extraction_status = 'failed'))"
+    ).fetchone()[0]
+
+
+def test_ui_d_06_the_status_dropdown_filters_like_the_tabs_and_keeps_the_choice(page: Page, db):
+    """D-06: the select under the search box is a second way into the tabs' filter."""
+    sets = _active_sets(db)
+    wanted = {sid for sid, ps in sets.items() if ps["status"] == "mismatched"}
+    page.goto("/dashboard")
+    select = page.locator("#status-filter")
+    expect(select).to_have_value("")
+    with page.expect_navigation():
+        select.select_option("mismatched")
+    assert re.search(r"status=mismatched", page.url), page.url
+    # The choice survives the page it caused.
+    expect(select).to_have_value("mismatched")
+    rows = page.get_by_test_id("po-row")
+    expect(rows).to_have_count(len(wanted))
+    shown = {int(rows.nth(i).get_attribute("data-set-id")) for i in range(rows.count())}
+    assert shown == wanted, f"dropdown showed {shown}; mismatched sets are {wanted}"
+    for i in range(rows.count()):
+        assert rows.nth(i).get_attribute("data-status") == "mismatched"
+
+    # "All statuses" goes back to the whole list, and the select follows.
+    with page.expect_navigation():
+        select.select_option("")
+    expect(select).to_have_value("")
+    expect(page.get_by_test_id("po-row")).to_have_count(len(_active_sets(db)))
+
+
+def test_ui_d_08_the_table_polls_itself_without_a_reload(page: Page):
+    """D-08: the dashboard refreshes its rows with an HTMX poll (every 5 s)."""
+    page.goto("/dashboard")
+    with page.expect_response(re.compile(r"/dashboard/table"), timeout=7000) as resp:
+        pass
+    assert resp.value.status == 200
+    assert resp.value.request.headers.get("hx-request") == "true"
+    assert "text/html" in resp.value.headers["content-type"]
+    # It is a fragment swap, not a navigation: the page never left the dashboard.
+    assert page.url.endswith("/dashboard")
+
+
+def test_ui_d_09_the_nav_reaches_each_page_and_counts_the_held_documents(page: Page, db):
+    """D-09: every nav link opens its own page, and the badge is the holding area."""
+    held = _held_document_count(db)
+    page.goto("/dashboard")
+    badge = page.get_by_test_id("nav-unclassified")
+    numbers = re.findall(r"\d+", badge.inner_text())
+    if held:
+        assert numbers and int(numbers[-1]) == held, badge.inner_text()
+    else:
+        assert not numbers, (
+            f"the badge shows a count with an empty holding area: {badge.inner_text()}"
+        )
+
+    pages = [
+        ("nav-dashboard", re.compile(r"/dashboard$"), "Dashboard — AAM Merger V3"),
+        (
+            "nav-unclassified",
+            re.compile(r"/unclassified$"),
+            "Unclassified Documents — AAM Merger V3",
+        ),
+        ("nav-quarantine", re.compile(r"/quarantine$"), "Quarantine Review — AAM Merger V3"),
+        ("nav-audit", re.compile(r"/audit$"), "Audit Log — AAM Merger V3"),
+        ("nav-merger", re.compile(r"/manual/merger$"), "Merge PDF files — AAM Merger V3"),
+    ]
+    for testid, url, title in pages:
+        page.get_by_test_id(testid).click()
+        page.wait_for_url(url)
+        assert page.title() == title, f"{url.pattern} has title {page.title()!r}"
+        if testid == "nav-unclassified":
+            # The page's own count is the same number, and it is the row count.
+            expect(page.get_by_test_id("unclassified-count")).to_have_text(
+                f"{held} awaiting classification"
+            )
+            expect(page.get_by_test_id("unclassified-row")).to_have_count(held)
+
+    # /health is a JSON endpoint but it is in the nav, so it must answer too.
+    page.get_by_role("link", name=re.compile("Service Online")).click()
+    page.wait_for_url(re.compile(r"/health$"))
+    expect(page.get_by_text("status", exact=False).first).to_be_visible()
+
+
+def test_ui_d_10_the_mapped_set_says_which_rule_paired_the_lines(page: Page, manifest):
+    """D-10: a merge that only worked because line numbers were paired must say so."""
+    sc = manifest["scenarios"]["merged_mapped_x10"]
+    assert sc["line_mapping_rule"] == "x10"
+    page.goto("/dashboard")
+    row = page.locator(f'[data-testid="po-row"][data-set-id="{sc["id"]}"]')
+    expect(row).to_contain_text("lines mapped (x10)")
+
+
+def test_ui_d_11_the_customs_blocked_row_names_the_requirement(page: Page, manifest, db):
+    """D-11: a customs hold must not look like an ordinary wait."""
+    sc = manifest["scenarios"]["awaiting_customs"]
+    reason = db.execute("select reconcile_reason from po_sets where id=?", (sc["id"],)).fetchone()[
+        0
+    ]
+    page.goto("/dashboard")
+    row = page.locator(f'[data-testid="po-row"][data-set-id="{sc["id"]}"]')
+    expect(row).to_contain_text("Awaiting Customs")
+    shown = row.get_by_test_id("row-reason").inner_text()
+    assert reason[:40] in shown, f"row reason is {shown!r}, DB starts {reason[:40]!r}"
+    assert "CUSTOMS" in shown and "SHIPPING" in shown, shown
+
+
+def test_ui_d_13_a_settling_row_is_pending_and_says_why(page: Page, manifest, db):
+    """D-13: every gate passed; only the settle clock is left, and the row says so."""
+    from app.services.reconciliation import SETTLING_PREFIX
+
+    sc = manifest["scenarios"]["settling"]
+    reason = db.execute("select reconcile_reason from po_sets where id=?", (sc["id"],)).fetchone()[
+        0
+    ]
+    assert reason.startswith(SETTLING_PREFIX), reason
+    page.goto("/dashboard")
+    row = page.locator(f'[data-testid="po-row"][data-set-id="{sc["id"]}"]')
+    assert row.get_attribute("data-status") == "pending"
+    expect(row).to_contain_text("Pending / Waiting")
+    shown = row.get_by_test_id("row-reason").inner_text()
+    assert reason[:40] in shown, f"row reason is {shown!r}, DB starts {reason[:40]!r}"
+    assert re.search(r"merges after \d{2}:\d{2}", shown), shown
+
+
+def test_ui_d_14_a_row_placed_by_its_dn_number_says_why(page: Page, manifest, db):
+    """D-14: a number-only placement is a human decision, and the row says so."""
+    sc = manifest["scenarios"]["placed_by_number_only"]
+    reason = db.execute("select reconcile_reason from po_sets where id=?", (sc["id"],)).fetchone()[
+        0
+    ]
+    page.goto("/dashboard")
+    row = page.locator(f'[data-testid="po-row"][data-set-id="{sc["id"]}"]')
+    assert row.get_attribute("data-status") == "pending"
+    shown = row.get_by_test_id("row-reason").inner_text()
+    assert reason[:40] in shown, f"row reason is {shown!r}, DB starts {reason[:40]!r}"
+    assert "was placed in this set only because its DN number matches" in shown, shown
+
+
+def test_ui_d_12_the_scan_button_starts_a_sync_and_says_so(page: Page, scan_env):
+    """D-12: pressing Scan posts /sync, reports it, and stays on the dashboard.
+
+    Runs on a SECOND environment: the route runs the real sync flow inside the
+    web process, which re-reconciles every open set with the poller's settle
+    window off (`SETTLE_MINUTES` is only set by the poller). On the shared
+    environment that merges `settling_target`, i.e. it destroys the state S-22
+    checks. This test therefore drags its own database.
+    """
+    base = scan_env.base
+    page.goto(base + "/dashboard")
+    button = page.get_by_test_id("btn-scan-input")
+    expect(button).to_be_enabled()
+    with page.expect_response(re.compile(r"/sync$")) as resp:
+        button.click()
+    assert resp.value.status == 200, resp.value.text()
+    assert resp.value.request.method == "POST"
+    assert resp.value.json()["status"] == "sync started"
+
+    # The only feedback the operator gets is this toast; the sync is a
+    # background job, so the page must not navigate or break.
+    expect(page.locator(".toast-success")).to_contain_text("Sync scan triggered")
+    expect(page.locator("nav.app-navbar")).to_be_visible()
+    expect(page.get_by_test_id("po-row").first).to_be_visible()
+    assert page.url.endswith("/dashboard")

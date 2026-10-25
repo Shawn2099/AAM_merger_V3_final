@@ -1122,8 +1122,14 @@ set stays `pending` with reason `placed_by_number_only` until an operator presse
 "Confirm it belongs here" on the set page (audited) or Force Merges. Placement through the
 PO's own per-line DN reference is not marked. Pinned by
 `test_a_dn_placed_by_its_number_alone_holds_the_set_instead_of_merging`,
-`test_the_operator_confirms_the_placement_and_it_is_audited` and
-`test_known_limitation_dn_number_collision_attaches`.
+`test_the_operator_confirms_the_placement_and_it_is_audited`.
+Since 2026-10-25 (Opus review B3) the DN-number sweep skips a document that prints its own PO
+number: it stays for the PO-based attach sweep, so another vendor's repeated DN number can no
+longer pull it into an unrelated set. Pinned by
+`test_dn_number_collision_does_not_attach_a_document_with_its_own_po`. The duplicate
+DN/SI guard (Opus review B2) now also compares a copy with an unreadable number against every
+other document in the pool, and folds look-alike characters (O/0, I/L/1) in the number it
+compares; this only adds holds.
 
 ### L — reclassify attaches a document before it takes the set lock
 

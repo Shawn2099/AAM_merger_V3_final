@@ -79,10 +79,11 @@ def test_known_limitation_auth_fault_is_attempted_once_per_document(tmp_path, mo
 # --- M: DN-number match has no vendor check ----------------------------------
 
 
-def test_known_limitation_dn_number_collision_attaches(cfg):
-    # The sweep attaches by DN number alone, without checking the vendor or the
-    # printed PO. The set then quarantines on po_reference_mismatch, but only
-    # after the attach has happened.
+def test_dn_number_collision_does_not_attach_a_document_with_its_own_po(cfg):
+    # Was a pinned limitation (Opus review B3, fixed 2026-10-25): the DN-number sweep
+    # attached by number alone, so another vendor's DN with a repeated number pulled a
+    # document into an unrelated set, which then quarantined. A document that prints its
+    # own PO is left to the PO-based attach sweep.
     anchor = _set(cfg, "PO-REAL")
     dn_id = _doc(cfg, anchor, DocType.DN, "real-dn.pdf", LINE, po_no="PO-REAL")
     with Session(get_engine(cfg)) as s:
@@ -94,7 +95,7 @@ def test_known_limitation_dn_number_collision_attaches(cfg):
     stranger = _loose(cfg, "other-vendor-dn.pdf", DocType.DN, "PO-OTHER", dn_no="DN-77")
     resolve_unattached_documents(cfg)
     with Session(get_engine(cfg)) as s:
-        assert s.get(Document, stranger).po_set_id == anchor
+        assert s.get(Document, stranger).po_set_id is None
 
 
 # --- L: missing audit rows ----------------------------------------------------

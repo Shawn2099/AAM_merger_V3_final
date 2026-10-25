@@ -309,6 +309,11 @@ def batch(tmp_path_factory):
         (inp / "notes.txt").write_text("not a pdf", encoding="utf-8")
         # The good PO again, byte-identical, under a long unicode name with spaces.
         (inp / LONG_UNICODE).write_bytes(good_bytes)
+        # Sync reads oldest modified first: the long-named copy is the older one, so it
+        # is the copy whose name the single PO row carries (see the assertions below).
+        now = time.time()
+        os.utime(inp / LONG_UNICODE, (now - 1000, now - 1000))
+        os.utime(inp / "good_PO.pdf", (now - 1000 + 10, now - 1000 + 10))
 
         result = run_sync()
         yield {
