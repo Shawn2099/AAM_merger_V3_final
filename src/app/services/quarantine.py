@@ -622,10 +622,29 @@ def _remove_input_duplicates(cfg, sha: str) -> None:
 def set_aside_document(doc_id: int, cfg) -> Path | None:
     """Move an unattached document off the holding list into the quarantine folder.
 
+    The whole move runs under the sync lock, so a sync cannot attach or read the
+    document in the middle of it. Returns the quarantine folder, or None when the
+    document was already moved.
+    """
+    from app.services import sync_lock
+
+    lock = sync_lock.acquire_sync_lock()
+    if lock is None:
+        raise SetAsideRefused(
+            409, "A sync is currently reading documents; try again when it finishes."
+        )
+    try:
+        return _set_aside_locked(doc_id, cfg)
+    finally:
+        sync_lock.release_sync_lock(lock)
+
+
+def _set_aside_locked(doc_id: int, cfg) -> Path | None:
+    """The set-aside steps. The caller holds the sync lock.
+
     The stored copy and the quarantine copy are kept. If the document already has
     a quarantine copy (a rejected file, or an earlier quarantine), its original
-    reason is kept and no second copy is made. Returns the quarantine folder, or
-    None when the document was already moved.
+    reason is kept and no second copy is made.
     """
     eng = get_engine(cfg)
     Base.metadata.create_all(eng)
@@ -647,15 +666,27 @@ def set_aside_document(doc_id: int, cfg) -> Path | None:
         folder = Path(cfg.paths.quarantine_folder) / "_documents" / stem
         sha = doc.sha256_hash
         rejected = doc.ingest_reject_reason
-        in_quarantine_root = (
-            Path(doc.stored_path)
-            .resolve()
-            .is_relative_to(Path(cfg.paths.quarantine_folder).resolve())
+        stored = Path(doc.stored_path)
+        stored_exists = stored.is_file()
+        in_quarantine_root = stored.resolve().is_relative_to(
+            Path(cfg.paths.quarantine_folder).resolve()
         )
 
     report = folder / "QUARANTINE.txt"
     has_copy = report.is_file() or (rejected is not None and in_quarantine_root)
     if has_copy:
+        # Never remove an input copy unless a quarantine PDF really exists (review L3).
+        pdf_present = (folder.is_dir() and any(folder.glob("*.pdf"))) or (
+            rejected is not None and in_quarantine_root and stored_exists
+        )
+        if not pdf_present:
+            if not stored_exists:
+                raise SetAsideRefused(
+                    409,
+                    "The quarantine copy and the stored file are both missing; nothing was moved.",
+                )
+            folder.mkdir(parents=True, exist_ok=True)
+            shutil.copy(str(stored), str(folder / stored.name))
         text = (
             report.read_text(encoding="utf-8")
             if report.is_file()

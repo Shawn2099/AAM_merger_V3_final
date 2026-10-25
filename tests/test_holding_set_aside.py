@@ -203,3 +203,33 @@ def test_a_document_being_read_cannot_be_moved(cfg, client):
 def test_a_missing_document_is_404(cfg, client):
     resp = client.post("/unclassified/999999/set_aside", headers={"HX-Request": "true"})
     assert resp.status_code == 404
+
+
+def test_a_set_aside_is_refused_while_the_sync_lock_is_held(cfg, client, monkeypatch):
+    """Review A1: the move itself takes the sync lock, not only the route pre-check."""
+    from app.services import quarantine as q
+    from app.services import sync_lock
+
+    doc_id, _sha, input_copy = _held_valid_si(cfg, name="SIV-LOCKED.pdf")
+    monkeypatch.setattr(sync_lock, "acquire_sync_lock", lambda *a, **k: None)
+    with pytest.raises(q.SetAsideRefused) as exc:
+        q.set_aside_document(doc_id, cfg)
+    assert exc.value.status_code == 409
+    assert input_copy.is_file()
+    with Session(get_engine(cfg)) as s:
+        assert s.get(Document, doc_id).archived_at is None
+
+
+def test_a_rejected_row_whose_stored_file_is_missing_keeps_its_input_copy(cfg, client):
+    """Review L3: no quarantine PDF and no stored file means nothing is removed."""
+    from app.services import quarantine as q
+
+    sha = "7" * 64
+    doc_id = _held_rejected(cfg, sha=sha)
+    stem = f"rejected_{sha[:8]}"
+    (Path(cfg.paths.quarantine_folder) / "_documents" / f"{stem}.pdf").unlink()
+    with pytest.raises(q.SetAsideRefused) as exc:
+        q.set_aside_document(doc_id, cfg)
+    assert exc.value.status_code == 409
+    with Session(get_engine(cfg)) as s:
+        assert s.get(Document, doc_id).archived_at is None
