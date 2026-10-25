@@ -132,6 +132,18 @@ if (-not (Test-Path $configPath)) {
     Write-Host "  config.yaml missing. Copying config.example.yaml..." -ForegroundColor Yellow
     Copy-Item (Join-Path $ProjectRoot "config.example.yaml") $configPath
     Write-Host "  Created config.yaml (please review paths for production)." -ForegroundColor Yellow
+    # A fresh config must not be the open ["*"] list the installer refuses: allow this machine
+    # by name and by its current LAN address(es). If the address changes (DHCP), add the new one
+    # on the Fixed-by-IT list in config.yaml, or give the PC a static address.
+    $hosts = @("localhost", "127.0.0.1", $env:COMPUTERNAME.ToLower())
+    $hosts += @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |
+        ForEach-Object { $_.IPAddress })
+    $hostList = "[" + (($hosts | Select-Object -Unique | ForEach-Object { "`"$_`"" }) -join ", ") + "]"
+    $raw = Get-Content -Raw $configPath
+    $raw = $raw -replace '(?m)^(\s*)allowed_hosts:\s*\["\*"\].*$', ("`$1allowed_hosts: " + $hostList)
+    Set-Content -Path $configPath -Value $raw -NoNewline -Encoding UTF8
+    Write-Host "  Allowed hosts set to $hostList" -ForegroundColor Green
 } else {
     Write-Host "  config.yaml present." -ForegroundColor Green
 }
