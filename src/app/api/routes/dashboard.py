@@ -32,6 +32,7 @@ from app.models import (
     POSetStatus,
 )
 from app.models.base import Base
+from app.services.extraction import is_unsplit_bundle, unsplit_bundle_clause
 from app.services.locking import acquire_lock, is_locked, release_if_stale, release_lock
 
 router = APIRouter()
@@ -92,9 +93,9 @@ def _holding_area_query(session: Session):
         # set's detail page; listing it here invited the operator to reclassify
         # it out of a merged set.
         Document.po_set_id.is_(None),
-        # An unsplit COMBINED bundle is set aside to the Files set aside list (D9):
+        # An unsplit multi-document PDF is set aside to the Files set aside list (D9):
         # its content was never used, so it is not waiting for a human here.
-        ~and_(Document.doc_type == DocType.COMBINED, Document.is_split_parent.is_(False)),
+        ~unsplit_bundle_clause(),
     )
 
 
@@ -1351,8 +1352,7 @@ def _set_aside_query(session: Session):
         or_(
             Document.extraction_status == ExtractionStatus.failed,
             and_(
-                Document.doc_type == DocType.COMBINED,
-                Document.is_split_parent.is_(False),
+                unsplit_bundle_clause(),
             ),
         ),
     )
@@ -1748,9 +1748,9 @@ def reclassify_document(
         # it forever left a readable packet in no set and on no page — the
         # operator's only recovery is to reclassify it here, so that case is
         # allowed (and the row stops pretending to be a parent).
-        # An unsplit COMBINED bundle holds several documents and its content was never
+        # An unsplit multi-document PDF holds several documents and its content was never
         # used, so it cannot be placed as one document. It is in the quarantine folder.
-        if doc.doc_type == DocType.COMBINED and not getattr(doc, "is_split_parent", False):
+        if is_unsplit_bundle(doc):
             raise HTTPException(
                 status_code=409,
                 detail=(
