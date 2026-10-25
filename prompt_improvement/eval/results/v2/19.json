@@ -1,0 +1,95 @@
+{
+  "doc_id": 19,
+  "label": "V2",
+  "model": "openai/gpt-6-luna",
+  "variant": "ocr",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 6.81,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9255",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "CLIP GLOVE GRABBER W/BELT CLIP LINE",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 2969,
+          "completion_tokens": 150,
+          "reasoning_tokens": 0,
+          "cost": 0.00244275,
+          "latency_s": 6.79
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.68,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GBN-ARS-25-9255",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "CLIP GLOVE GRABBER W/BELT CLIP LINE",
+            "quantity": null,
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 2810,
+          "completion_tokens": 496,
+          "reasoning_tokens": 344,
+          "cost": 0.002595875,
+          "latency_s": 11.67
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.76,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GBN-ARS-25-9255",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "CLIP GLOVE GRABBER W/BELT CLIP LINE",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 2810,
+          "completion_tokens": 367,
+          "reasoning_tokens": 215,
+          "cost": 0.002531375,
+          "latency_s": 9.75
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

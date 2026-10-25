@@ -1,0 +1,71 @@
+{
+  "doc_id": 272,
+  "label": "V1",
+  "model": "openai/gpt-6-luna",
+  "variant": "native",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.38,
+      "result": {
+        "document_type": "PO",
+        "document_number": "C13717",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [],
+        "_usage": {
+          "prompt_tokens": 5924,
+          "completion_tokens": 173,
+          "reasoning_tokens": 67,
+          "cost": 0.00015789,
+          "latency_s": 5.37
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 2.71,
+      "result": {
+        "document_type": "PO",
+        "document_number": "C13717",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [],
+        "_usage": {
+          "prompt_tokens": 5924,
+          "completion_tokens": 104,
+          "reasoning_tokens": 0,
+          "cost": 0.00012339,
+          "latency_s": 2.7
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.53,
+      "result": {
+        "document_type": "PO",
+        "document_number": "C13717",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [],
+        "_usage": {
+          "prompt_tokens": 5924,
+          "completion_tokens": 104,
+          "reasoning_tokens": 0,
+          "cost": 0.00012339,
+          "latency_s": 3.51
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

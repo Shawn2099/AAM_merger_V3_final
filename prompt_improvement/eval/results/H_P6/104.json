@@ -1,0 +1,96 @@
+{
+  "doc_id": 104,
+  "label": "H_P6",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P6.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.91,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-DTS-25-521",
+        "po_reference": "4500496514",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Cotter Pin Galvanized M5X152MM",
+            "quantity": "250.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6199,
+          "completion_tokens": 262,
+          "reasoning_tokens": 118,
+          "cost": 0.0009025,
+          "latency_s": 7.74
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.19,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-DTS-25-521",
+        "po_reference": "4500496514",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Cotter Pin Galvanized M5X152MM",
+            "quantity": "250.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6199,
+          "completion_tokens": 269,
+          "reasoning_tokens": 125,
+          "cost": 0.00020864,
+          "latency_s": 8.97
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.74,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-DTS-25-521",
+        "po_reference": "4500496514",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Cotter Pin Galvanized M5X152MM",
+            "quantity": "250.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6199,
+          "completion_tokens": 274,
+          "reasoning_tokens": 127,
+          "cost": 0.00021114,
+          "latency_s": 9.55
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "doc_id": 23,
+  "label": "P4",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P4.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.73,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9175",
+        "po_reference": "50117194",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": null,
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5977,
+          "completion_tokens": 830,
+          "reasoning_tokens": 691,
+          "cost": 0.00115875,
+          "latency_s": 11.65
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.78,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9175",
+        "po_reference": "50317194",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": null,
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5977,
+          "completion_tokens": 656,
+          "reasoning_tokens": 516,
+          "cost": 0.00039992,
+          "latency_s": 8.67
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.94,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9175",
+        "po_reference": "50117194",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": null,
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5977,
+          "completion_tokens": 795,
+          "reasoning_tokens": 656,
+          "cost": 0.00046942,
+          "latency_s": 8.84
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

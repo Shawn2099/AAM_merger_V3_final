@@ -1,0 +1,114 @@
+{
+  "doc_id": 195,
+  "label": "baseline",
+  "model": "openai/gpt-6-luna",
+  "prompt_source": "live",
+  "prompt_hash": "c826512ea909",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.63,
+      "result": {
+        "document_type": "DN",
+        "has_po_section": false,
+        "has_dn_section": true,
+        "has_si_section": false,
+        "page_count": 1,
+        "components": [
+          {
+            "doc_type": "DN",
+            "document_type": "DN",
+            "page_start": 1,
+            "page_end": 1
+          }
+        ],
+        "document_number": "GDN-RAK-25-3108",
+        "po_no_raw": "90139625",
+        "po_reference": "90139625",
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES WLL",
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "OPTIMA Red Top (RT S 4.2), Model No: 8002-250, Part No: 802 250 000 888 2 Line Item - 1",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 6.34,
+      "result": {
+        "document_type": "DN",
+        "has_po_section": false,
+        "has_dn_section": true,
+        "has_si_section": false,
+        "page_count": 1,
+        "components": [
+          {
+            "doc_type": "DN",
+            "document_type": "DN",
+            "page_start": 1,
+            "page_end": 1
+          }
+        ],
+        "document_number": "GDN-RAK-25-3108",
+        "po_no_raw": "90139625",
+        "po_reference": "90139625",
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES WLL",
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "OPTIMA Red Top (RT S 4.2), Model No: 8002-250, Part No: 802 250 000 888 2 Line Item - 1",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.23,
+      "result": {
+        "document_type": "DN",
+        "has_po_section": false,
+        "has_dn_section": true,
+        "has_si_section": false,
+        "page_count": 1,
+        "components": [
+          {
+            "doc_type": "DN",
+            "document_type": "DN",
+            "page_start": 1,
+            "page_end": 1
+          }
+        ],
+        "document_number": "GDN-RAK-25-3108",
+        "po_no_raw": "90139625",
+        "po_reference": "90139625",
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES WLL",
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "OPTIMA Red Top (RT S 4.2), Model No: 8002-250, Part No: 802 250 000 888 2 Line Item - 1",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 2
+    }
+  ]
+}

@@ -1,0 +1,137 @@
+{
+  "doc_id": 21,
+  "label": "V4",
+  "model": "openai/gpt-6-luna",
+  "variant": "img200",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.28,
+      "result": {
+        "document_type": "PO",
+        "document_number": "50119501",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "4",
+            "description": "GLOVES, KONG RIGGER, SIZE L; Line/Rel No: 4/1; Part Main Group: CONS; Material AD103528; MFG Name: IRONCLAD PERFORMANCE WEAR; MFG Part No: KRIG-04-L",
+            "quantity": "15",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "GLOVES, KONG RIGGER, SIZE XL; Line/Rel No: 5/1; Part Main Group: CONS; Material AD103529; MFG Name: IRONCLAD PERFORMANCE WEAR; MFG Part No: KRIG-05-XL",
+            "quantity": "15",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "CLIP, GLOVE GRABBER/W/BELT CLIP, LIME; Line/Rel No: 6/1; Part Main Group: CONS; Material AD047995; MFG Name: ERGODYNE; ECCN Code: EAR99; MFG Part No: 3405",
+            "quantity": "50",
+            "unit_price": "3.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7011,
+          "completion_tokens": 502,
+          "reasoning_tokens": 147,
+          "cost": 0.001124,
+          "latency_s": 7.18
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.53,
+      "result": {
+        "document_type": "PO",
+        "document_number": "50119501",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "4",
+            "description": "GLOVES,KONG RIGGER,SIZE L; Line\\Rel No: 4\\1; Part Main Group: CONS",
+            "quantity": "15",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "GLOVES,KONG RIGGER,SIZE XL; Line\\Rel No: 5\\1; Part Main Group: CONS",
+            "quantity": "15",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "CLIP GLOVE GRABBER/W/BELT CLIP,LIME; Line\\Rel No: 6\\1; Part Main Group: CONS",
+            "quantity": "50",
+            "unit_price": "3.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7011,
+          "completion_tokens": 554,
+          "reasoning_tokens": 290,
+          "cost": 0.00035926,
+          "latency_s": 8.41
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.99,
+      "result": {
+        "document_type": "PO",
+        "document_number": "50119501",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "4",
+            "description": "GLOVES,KONG RIGGER,SIZE L LinqRel No: 411 Part Main Group: CONS",
+            "quantity": "15",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "GLOVES,KONG RIGGER,SIZE XL LinqRel No: 511 Part Main Group: CONS",
+            "quantity": "15",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "CLIP GLOVE GRABBER/W/BELT CLIP,LIME LinqRel No: 611 Part Main Group: CONS",
+            "quantity": "50",
+            "unit_price": "3.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7011,
+          "completion_tokens": 250,
+          "reasoning_tokens": 0,
+          "cost": 0.00020726,
+          "latency_s": 5.89
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

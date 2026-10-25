@@ -1,0 +1,96 @@
+{
+  "doc_id": 271,
+  "label": "H_V0",
+  "model": "openai/gpt-6-luna",
+  "variant": "native",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 6.28,
+      "result": {
+        "document_type": "DN",
+        "document_number": null,
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Air vent ducting Flexible, suitable for 12 Inch ID air blower, 50 meter in length Line Item - 1",
+            "quantity": "120.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4633,
+          "completion_tokens": 394,
+          "reasoning_tokens": 250,
+          "cost": 0.00077275,
+          "latency_s": 6.27
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.06,
+      "result": {
+        "document_type": "DN",
+        "document_number": null,
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Air vent ducting Flexible, suitable for 12 Inch ID air blower, 50 meter in length Line Item - 1",
+            "quantity": "120.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4633,
+          "completion_tokens": 297,
+          "reasoning_tokens": 153,
+          "cost": 0.00020698,
+          "latency_s": 5.04
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 2.83,
+      "result": {
+        "document_type": "DN",
+        "document_number": null,
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Air vent ducting Flexible, suitable for 12 Inch ID air blower, 50 meter in length Line Item - 1",
+            "quantity": "120.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4633,
+          "completion_tokens": 142,
+          "reasoning_tokens": 0,
+          "cost": 0.00012948,
+          "latency_s": 2.81
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

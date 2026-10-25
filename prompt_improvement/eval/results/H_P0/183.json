@@ -1,0 +1,138 @@
+{
+  "doc_id": 183,
+  "label": "H_P0",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 16.1,
+      "result": {
+        "document_type": "PO",
+        "document_number": "13060",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 7,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "WHEEL CHOCK, WIDTH-10\", HEIGHT 4-1/2\", DEPTH-5\", MATERIAL: RUBBER -BLACK, GROOVED; INCLUDES-36\" ROPE, FOR HELICOPTER WHEELS - MFG: GRAINGER - P/N# 3W666",
+            "quantity": "2",
+            "unit_price": "380",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "HELIDECK TY DOWN STRAPS - MFG: DRAGER - P.N: SG03860",
+            "quantity": "4",
+            "unit_price": "270",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "BOOK, IATA DANGEROUS GOODS REGULATIONS - MFG: IATA -PN: GP247",
+            "quantity": "1",
+            "unit_price": "2699",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 19872,
+          "completion_tokens": 448,
+          "reasoning_tokens": 170,
+          "cost": 0.002704625,
+          "latency_s": 15.61
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 13.91,
+      "result": {
+        "document_type": "PO",
+        "document_number": "13060",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 7,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "WHEEL CHOCK, WIDTH-10\", HEIGHT 4-1/2\", DEPTH-5\", MATERIAL: RUBBER -BLACK, GROOVED; INCLUDES-36\" ROPE, FOR HELICOPTER WHEELS - MFG: GRAINGER - P/N# 3W666",
+            "quantity": "2",
+            "unit_price": "380",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "HELIDECK TY DOWN STRAPS - MFG: DRAGER - P.N: SG03860",
+            "quantity": "4",
+            "unit_price": "270",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "BOOK, IATA DANGEROUS GOODS REGULATIONS - MFG: IATA -PN: GP247",
+            "quantity": "1",
+            "unit_price": "2699",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 19872,
+          "completion_tokens": 419,
+          "reasoning_tokens": 141,
+          "cost": 0.00042037,
+          "latency_s": 13.24
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 16.07,
+      "result": {
+        "document_type": "PO",
+        "document_number": "13060",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 7,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "WHEEL CHOCK, WIDTH-10\", HEIGHT 4-1/2\", DEPTH-5\", MATERIAL: RUBBER -BLACK, GROOVED; INCLUDES-36\" ROPE, FOR HELICOPTER WHEELS - MFG: GRAINGER - P/N# 3W666",
+            "quantity": "2",
+            "unit_price": "380",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "HELIDECK TY DOWN STRAPS - MFG: DRAGER - P.N: SG03860",
+            "quantity": "4",
+            "unit_price": "270",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "BOOK, IATA DANGEROUS GOODS REGULATIONS - MFG: IATA -PN: GP247",
+            "quantity": "1",
+            "unit_price": "2699",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 19872,
+          "completion_tokens": 450,
+          "reasoning_tokens": 172,
+          "cost": 0.00043587,
+          "latency_s": 15.45
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

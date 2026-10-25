@@ -1,0 +1,96 @@
+{
+  "doc_id": 235,
+  "label": "H_V0",
+  "model": "openai/gpt-6-luna",
+  "variant": "native",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 2.96,
+      "result": {
+        "document_type": "PO",
+        "document_number": "P213899",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "GASKET, PLATE CLEAN OUT SLUSH PUMP TRIPL",
+            "quantity": "4",
+            "unit_price": "115.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 8275,
+          "completion_tokens": 140,
+          "reasoning_tokens": 0,
+          "cost": 0.001101,
+          "latency_s": 2.94
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.62,
+      "result": {
+        "document_type": "PO",
+        "document_number": "P213899",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "GASKET, PLATE CLEAN OUT SLUSH PUMP TRIPL",
+            "quantity": "4",
+            "unit_price": "115.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 8275,
+          "completion_tokens": 140,
+          "reasoning_tokens": 0,
+          "cost": 0.0001649,
+          "latency_s": 3.6
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.45,
+      "result": {
+        "document_type": "PO",
+        "document_number": "P213899",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "GASKET, PLATE CLEAN OUT SLUSH PUMP TRIPL",
+            "quantity": "4",
+            "unit_price": "115.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 8275,
+          "completion_tokens": 140,
+          "reasoning_tokens": 0,
+          "cost": 0.0001649,
+          "latency_s": 3.44
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

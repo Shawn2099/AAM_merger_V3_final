@@ -1,0 +1,96 @@
+{
+  "doc_id": 229,
+  "label": "P4",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P4.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.48,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079657",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "BOLT-HEX,1-1/4-7 X 4-3/4 IN L,2-1/2 IN THREAD,SAE J429,GR 8,ZINC COATED,PRICED PER EA; SAE J429 Grade 8 Ø1 1/4\" (CADMIUM PLATED) YIELD STRESS = 130,000 PSI, THD LG = 2 1/2\", BOLTED LG = 4-3/4\"",
+            "quantity": "20.00",
+            "unit_price": "40.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 8396,
+          "completion_tokens": 517,
+          "reasoning_tokens": 278,
+          "cost": 0.001304625,
+          "latency_s": 11.31
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 13.4,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079657",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "BOLT-HEX,1-1/4-7 X 4-3/4 IN L,2-1/2 IN THREAD,SAE J429,GR 8,ZINC COATED,PRICED PER EA\nSAE J429 Grade 8 Ø1 1/4\" (CADMIUM PLATED) YIELD STRESS = 130,000 PSI, THD LG = 2 1/2\", BOLTED LG = 4-3/4\"",
+            "quantity": "20.00",
+            "unit_price": "40.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 8396,
+          "completion_tokens": 555,
+          "reasoning_tokens": 315,
+          "cost": 0.00037361,
+          "latency_s": 13.24
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.64,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079657",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "BOLT-HEX,1-1/4-7 X 4-3/4 IN L,2-1/2 IN THREAD,SAE J429,GR 8,ZINC COATED,PRICED PER EA\nSAE J429 Grade 8 Ø1 1/4\" (CADMIUM PLATED) YIELD STRESS = 130,000 PSI, THD LG = 2 1/2\", BOLTED LG = 4-3/4\"",
+            "quantity": "20.00",
+            "unit_price": "40.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 8396,
+          "completion_tokens": 394,
+          "reasoning_tokens": 154,
+          "cost": 0.00029311,
+          "latency_s": 11.47
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

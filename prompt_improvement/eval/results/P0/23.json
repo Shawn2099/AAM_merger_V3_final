@@ -1,0 +1,96 @@
+{
+  "doc_id": 23,
+  "label": "P0",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 12.69,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9175",
+        "po_reference": "50177194",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "GASKET 1.5\" REINFORCED 3/4 IN 21 CM",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 712,
+          "reasoning_tokens": 554,
+          "cost": 0.00041783,
+          "latency_s": 12.61
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.54,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9175",
+        "po_reference": "50117194",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "GATE VALVE 1 1/2 IN 150# SW 2\" ...",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 559,
+          "reasoning_tokens": 402,
+          "cost": 0.00034133,
+          "latency_s": 10.46
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.77,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9175",
+        "po_reference": "5017194",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "GATE VALVE 3/4 IN 3000# SOCKET WELD",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 602,
+          "reasoning_tokens": 447,
+          "cost": 0.00036283,
+          "latency_s": 9.68
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

@@ -1,0 +1,114 @@
+{
+  "doc_id": 196,
+  "label": "baseline",
+  "model": "openai/gpt-6-luna",
+  "prompt_source": "live",
+  "prompt_hash": "c826512ea909",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.91,
+      "result": {
+        "document_type": "PO",
+        "has_po_section": true,
+        "has_dn_section": false,
+        "has_si_section": false,
+        "page_count": 2,
+        "components": [
+          {
+            "doc_type": "PO",
+            "document_type": "PO",
+            "page_start": 1,
+            "page_end": 2
+          }
+        ],
+        "document_number": "90139625",
+        "po_no_raw": "90139625",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES",
+        "line_items": [
+          {
+            "line_item_no": "10",
+            "description": "BATTERY, SEALED LEAD ACID, SPIRAL WOUND, MODEL RT S 4.2, 12 VOLTS, HIGH POWER, ENGINE STARTING BATTERY, 254 MM x 175 MM x 200 MM, OPTIMA",
+            "quantity": "1",
+            "unit_price": "850.00",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.21,
+      "result": {
+        "document_type": "PO",
+        "has_po_section": true,
+        "has_dn_section": false,
+        "has_si_section": false,
+        "page_count": 2,
+        "components": [
+          {
+            "doc_type": "PO",
+            "document_type": "PO",
+            "page_start": 1,
+            "page_end": 2
+          }
+        ],
+        "document_number": "90139625",
+        "po_no_raw": "90139625",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES",
+        "line_items": [
+          {
+            "line_item_no": "10",
+            "description": "BATTERY, SEALED LEAD ACID, SPIRAL WOUND, MODEL RT S 4.2, 12 VOLTS, HIGH POWER, ENGINE STARTING BATTERY, 254 MM x 175 MM x 200 MM, OPTIMA",
+            "quantity": "1",
+            "unit_price": "850.00",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.31,
+      "result": {
+        "document_type": "PO",
+        "has_po_section": true,
+        "has_dn_section": false,
+        "has_si_section": false,
+        "page_count": 2,
+        "components": [
+          {
+            "doc_type": "PO",
+            "document_type": "PO",
+            "page_start": 1,
+            "page_end": 2
+          }
+        ],
+        "document_number": "90139625",
+        "po_no_raw": "90139625",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES",
+        "line_items": [
+          {
+            "line_item_no": "10",
+            "description": "BATTERY, SEALED LEAD ACID, SPIRAL WOUND, MODEL RT S 4.2, 12 VOLTS, HIGH POWER, ENGINE STARTING BATTERY, 254 MM x 175 MM x 200 MM, OPTIMA",
+            "quantity": "1",
+            "unit_price": "850.00",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 2
+    }
+  ]
+}

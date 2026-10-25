@@ -1,0 +1,96 @@
+{
+  "doc_id": 1,
+  "label": "P3",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P3.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.52,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RHO-26-2182",
+        "po_reference": "LPO26/2360",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Degreaser & Stain Remover Vehicle Washing Liquid Line Item - 1",
+            "quantity": "400.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5921,
+          "completion_tokens": 298,
+          "reasoning_tokens": 149,
+          "cost": 0.00022036,
+          "latency_s": 9.48
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.68,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RHO-26-2182",
+        "po_reference": "LPO26/2360",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Degreaser & Stain Remover Vehicle Washing Liquid Line Item - 1",
+            "quantity": "400.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5921,
+          "completion_tokens": 353,
+          "reasoning_tokens": 197,
+          "cost": 0.00024786,
+          "latency_s": 8.65
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.47,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RHO-26-2182",
+        "po_reference": "LPO26/2360",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Degreaser & Stain Remover Vehicle Washing Liquid Line Item - 1",
+            "quantity": "400.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5921,
+          "completion_tokens": 451,
+          "reasoning_tokens": 295,
+          "cost": 0.00096225,
+          "latency_s": 9.57
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

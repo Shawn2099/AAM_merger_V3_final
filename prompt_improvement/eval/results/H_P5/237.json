@@ -1,0 +1,201 @@
+{
+  "doc_id": 237,
+  "label": "H_P5",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P5.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.97,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RAK-25-3206",
+        "po_reference": "P212528",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "SMITH-BLAIR Repair Clamp: For 1 in Pipe, 6 in Overall Lg, 304 Stainless Steel, Nitrile Rubber Gasket, 4NWP3, P/N : 24500013206000 Line Item - 1",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "SMITH-BLAIR Repair Clamp: For 2 in Pipe, 6 in Overall Lg, 304 Stainless Steel, Nitrile Rubber Gasket, 4NWP7, P/N : 24500023806000 Line Item - 2",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "SMITH-BLAIR Repair Clamp: For 3 in Pipe, 6 in Overall Lg, 304 Stainless Steel, Nitrile Rubber Gasket, 4NWR2, P/N : 24500035006000 Line Item - 3",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "SMITH-BLAIR Repair Clamp: For 4 in Pipe, 6 in Overall Lg, 304 Stainless Steel, Nitrile Rubber Gasket, 4NWR6, P/N : 24500045006000 Line Item - 4",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "Repair Clamp: For 5 in Pipe, 9 in Overall Lg, 304 Stainless Steel, 5WMT2, P/N : 330 -129 Line Item - 5",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "SMITH-BLAIR Repair Clamp: For 6 in Pipe, 6 in Overall Lg, 304 Stainless Steel, Nitrile Rubber Gasket, 4NWT1, P/N : 245-00066306000 Line Item - 6",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5618,
+          "completion_tokens": 661,
+          "reasoning_tokens": 92,
+          "cost": 0.00039883,
+          "latency_s": 10.79
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.05,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RAK-25-3206",
+        "po_reference": "P212528",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "SMITH-BLAIR Repair Clamp: For 1 in Pipe, 6 in Overall Lg, 304 Stainless Steel, Nitrile Rubber Gasket, 4NWP3, P/N : 24500013206000 Line Item - 1",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "SMITH-BLAIR Repair Clamp: For 2 in Pipe, 6 in Overall Lg, 304 Stainless Steel, Nitrile Rubber Gasket, 4NWP7, P/N : 24500023806000 Line Item - 2",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "SMITH-BLAIR Repair Clamp: For 3 in Pipe, 6 in Overall Lg, 304 Stainless Steel, Nitrile Rubber Gasket, 4NWR2, P/N : 24500035006000 Line Item - 3",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "SMITH-BLAIR Repair Clamp: For 4 in Pipe, 6 in Overall Lg, 304 Stainless Steel, Nitrile Rubber Gasket, 4NWR6, P/N : 24500045006000 Line Item - 4",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "Repair Clamp: For 5 in Pipe, 9 in Overall Lg, 304 Stainless Steel, 5WMT2, P/N : 330-129 Line Item - 5",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "SMITH-BLAIR Repair Clamp: For 6 in Pipe, 6 in Overall Lg, 304 Stainless Steel, Nitrile Rubber Gasket, 4NWT1, P/N : 245-00066306000 Line Item - 6",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5618,
+          "completion_tokens": 693,
+          "reasoning_tokens": 124,
+          "cost": 0.001045375,
+          "latency_s": 9.86
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.87,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RAK-25-3206",
+        "po_reference": "P212528",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "SMITH-BLAIR Repair Clamp: For 1 in Pipe, 6 in Overall Lg, 304 Stainless Steel, Nitrile Rubber Gasket, 4NWP3, P/N : 24500013206000 Line Item - 1",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "SMITH-BLAIR Repair Clamp: For 2 in Pipe, 6 in Overall Lg, 304 Stainless Steel, Nitrile Rubber Gasket, 4NWP7, P/N : 24500023806000 Line Item - 2",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "SMITH-BLAIR Repair Clamp: For 3 in Pipe, 6 in Overall Lg, 304 Stainless Steel, Nitrile Rubber Gasket, 4NWR2, P/N : 24500035006000 Line Item - 3",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "SMITH-BLAIR Repair Clamp: For 4 in Pipe, 6 in Overall Lg, 304 Stainless Steel, Nitrile Rubber Gasket, 4NWR6, P/N : 24500045006000 Line Item - 4",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "Repair Clamp: For 5 in Pipe, 9 in Overall Lg, 304 Stainless Steel, 5WMT2, P/N : 330 -129 Line Item - 5",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "SMITH-BLAIR Repair Clamp: For 6 in Pipe, 6 in Overall Lg, 304 Stainless Steel, Nitrile Rubber Gasket, 4NWT1, P/N : 245-00066306000 Line Item - 6",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5618,
+          "completion_tokens": 567,
+          "reasoning_tokens": 0,
+          "cost": 0.00035183,
+          "latency_s": 8.69
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

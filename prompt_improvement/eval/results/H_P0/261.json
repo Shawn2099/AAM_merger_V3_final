@@ -1,0 +1,117 @@
+{
+  "doc_id": 261,
+  "label": "H_P0",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.84,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RHO-26-2105",
+        "po_reference": "13085",
+        "po_reference_ambiguous": true,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "THINNER NO. 02 Line Item - 1",
+            "quantity": "3.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "THINNER NO. 07 Line Item - 2",
+            "quantity": "3.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4890,
+          "completion_tokens": 184,
+          "reasoning_tokens": 0,
+          "cost": 0.000699875,
+          "latency_s": 4.68
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.8,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RHO-26-2105",
+        "po_reference": "60213576",
+        "po_reference_ambiguous": true,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "THINNER NO. 02 Line Item - 1",
+            "quantity": "3.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "THINNER NO. 07 Line Item - 2",
+            "quantity": "3.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4890,
+          "completion_tokens": 478,
+          "reasoning_tokens": 291,
+          "cost": 0.00030005,
+          "latency_s": 8.63
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.49,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RHO-26-2105",
+        "po_reference": "60213576",
+        "po_reference_ambiguous": true,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "THINNER NO. 02 Line Item - 1",
+            "quantity": "3.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "THINNER NO. 07 Line Item - 2",
+            "quantity": "3.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4890,
+          "completion_tokens": 530,
+          "reasoning_tokens": 346,
+          "cost": 0.00032605,
+          "latency_s": 8.32
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

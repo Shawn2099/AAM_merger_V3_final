@@ -1,0 +1,95 @@
+{
+  "doc_id": 18,
+  "label": "R_seed",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+seed=42",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.29,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-ARS-25-7969",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "6",
+            "description": "CLIP,GLOVE GRABBER;W/BELTCLIP,LI ME",
+            "quantity": "50.0",
+            "unit_price": "3.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 157,
+          "reasoning_tokens": 0,
+          "cost": 0.00014033,
+          "latency_s": 5.17
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 6.62,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-ARS-25-7969",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "6",
+            "description": "CLIP,GLOVE GRABBER;W/BELTCLIP,LI ME",
+            "quantity": "50.0",
+            "unit_price": "3.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 157,
+          "reasoning_tokens": 0,
+          "cost": 0.00014033,
+          "latency_s": 6.52
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.71,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-ARS-25-7969",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "6",
+            "description": "CLIP,GLOVE GRABBER;W/BELTCLIP,LI ME",
+            "quantity": "50.0",
+            "unit_price": "3.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 157,
+          "reasoning_tokens": 0,
+          "cost": 0.00014033,
+          "latency_s": 5.62
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

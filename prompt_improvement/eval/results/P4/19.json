@@ -1,0 +1,96 @@
+{
+  "doc_id": 19,
+  "label": "P4",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P4.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.74,
+      "result": {
+        "document_type": "DN",
+        "document_number": null,
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "4",
+            "description": null,
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5977,
+          "completion_tokens": 1026,
+          "reasoning_tokens": 895,
+          "cost": 0.00125675,
+          "latency_s": 11.65
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 12.5,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-15-9855",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "4",
+            "description": null,
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5977,
+          "completion_tokens": 764,
+          "reasoning_tokens": 624,
+          "cost": 0.00045392,
+          "latency_s": 12.42
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 12.48,
+      "result": {
+        "document_type": "DN",
+        "document_number": null,
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": null,
+            "description": null,
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5977,
+          "completion_tokens": 1043,
+          "reasoning_tokens": 912,
+          "cost": 0.00059342,
+          "latency_s": 12.39
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

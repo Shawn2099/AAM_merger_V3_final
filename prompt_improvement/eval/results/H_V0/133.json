@@ -1,0 +1,138 @@
+{
+  "doc_id": 133,
+  "label": "H_V0",
+  "model": "openai/gpt-6-luna",
+  "variant": "native",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.81,
+      "result": {
+        "document_type": "DN",
+        "document_number": null,
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "CUP WIRE BRUSH 75mm M14X2",
+            "quantity": "15.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "WIRE BRUSH 5 LINE *16",
+            "quantity": "5.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "Cotton Rags - White Banyan Cloth ( Good Quality Only)",
+            "quantity": "8.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4628,
+          "completion_tokens": 205,
+          "reasoning_tokens": 0,
+          "cost": 0.000677625,
+          "latency_s": 4.8
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.0,
+      "result": {
+        "document_type": "DN",
+        "document_number": null,
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "CUP WIRE BRUSH 75mm M14X2",
+            "quantity": "15.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "WIRE BRUSH 5 LINE *16",
+            "quantity": "5.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "Cotton Rags - White Banyan Cloth ( Good Quality Only)",
+            "quantity": "8.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4628,
+          "completion_tokens": 205,
+          "reasoning_tokens": 0,
+          "cost": 0.00016093,
+          "latency_s": 4.98
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 6.74,
+      "result": {
+        "document_type": "DN",
+        "document_number": null,
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "CUP WIRE BRUSH 75mm M14X2",
+            "quantity": "15.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "WIRE BRUSH 5 LINE *16",
+            "quantity": "5.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "Cotton Rags - White Banyan Cloth ( Good Quality Only)",
+            "quantity": "8.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4628,
+          "completion_tokens": 372,
+          "reasoning_tokens": 165,
+          "cost": 0.00024443,
+          "latency_s": 6.72
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

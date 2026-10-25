@@ -1,0 +1,159 @@
+{
+  "doc_id": 268,
+  "label": "P5",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P5.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.82,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RHO-26-92",
+        "po_reference": null,
+        "po_reference_ambiguous": true,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "SPRAY PAINT - RAL6011 RESEDA GREEN Line Item - 1",
+            "quantity": "12.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "SELF DRILL SCREW 1/4\"X3/4\" Line Item - 2",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "SELF DRILL SCREW 1/4\"X1\" Line Item - 3",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "SILICONE SEALANT GP200 Line Item - 4",
+            "quantity": "5.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5618,
+          "completion_tokens": 405,
+          "reasoning_tokens": 124,
+          "cost": 0.000901375,
+          "latency_s": 9.61
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.08,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RHO-26-92",
+        "po_reference": null,
+        "po_reference_ambiguous": true,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "SPRAY PAINT - RAL6011 RESEDA GREEN Line Item - 1",
+            "quantity": "12.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "SELF DRILL SCREW 1/4\"X3/4\" Line Item - 2",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "SELF DRILL SCREW 1/4\"X1\" Line Item - 3",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "SILICONE SEALANT GP200 Line Item - 4",
+            "quantity": "5.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5618,
+          "completion_tokens": 467,
+          "reasoning_tokens": 186,
+          "cost": 0.00030183,
+          "latency_s": 10.89
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.31,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RHO-26-92",
+        "po_reference": null,
+        "po_reference_ambiguous": true,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "SPRAY PAINT - RAL6011 RESEDA GREEN Line Item - 1",
+            "quantity": "12.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "SELF DRILL SCREW 1/4\"X3/4\" Line Item - 2",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "SELF DRILL SCREW 1/4\"X1\" Line Item - 3",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "SILICONE SEALANT GP200 Line Item - 4",
+            "quantity": "5.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5618,
+          "completion_tokens": 279,
+          "reasoning_tokens": 0,
+          "cost": 0.00020783,
+          "latency_s": 11.13
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

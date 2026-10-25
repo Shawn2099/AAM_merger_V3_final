@@ -1,0 +1,96 @@
+{
+  "doc_id": 181,
+  "label": "H_V0",
+  "model": "openai/gpt-6-luna",
+  "variant": "native",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.41,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-RAK-25-2876",
+        "po_reference": "13060",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "Ty-Down straps for helideck 9m 5000kg, Drager, P/N : SG03860 Line Item - 2",
+            "quantity": "4.00",
+            "unit_price": "270.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4993,
+          "completion_tokens": 168,
+          "reasoning_tokens": 0,
+          "cost": 0.00070475,
+          "latency_s": 4.4
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.42,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-RAK-25-2876",
+        "po_reference": "13060",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "Ty-Down straps for helideck 9m 5000kg, Drager, P/N : SG03860 Line Item - 2",
+            "quantity": "4.00",
+            "unit_price": "270.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4993,
+          "completion_tokens": 168,
+          "reasoning_tokens": 0,
+          "cost": 0.00014608,
+          "latency_s": 4.41
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.77,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-RAK-25-2876",
+        "po_reference": "13060",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "Ty-Down straps for helideck 9m 5000kg, Drager, P/N : SG03860 Line Item - 2",
+            "quantity": "4.00",
+            "unit_price": "270.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4993,
+          "completion_tokens": 168,
+          "reasoning_tokens": 0,
+          "cost": 0.00014608,
+          "latency_s": 5.76
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

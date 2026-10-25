@@ -1,0 +1,180 @@
+{
+  "doc_id": 96,
+  "label": "H_P6",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P6.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.16,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-DTS-25-505",
+        "po_reference": "TOGA-PO-25-26-163",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "A4 POCKET FILE ROCO 11 PUNCHED HOLE 1 X 100/PKT",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "Ball Point Pen Leeno 0.5 mm-RED",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "GEL PEN PILOT G-2 - 0.7- Blue 1 X 12",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "Ball Point Pen Leeno 0.5 mm- Blue (LE-0239-07) 1 X 12",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "Correction Pen (Whitener) 1 X 12",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6199,
+          "completion_tokens": 593,
+          "reasoning_tokens": 261,
+          "cost": 0.001068,
+          "latency_s": 9.99
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.08,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-DTS-25-505",
+        "po_reference": "TOGA-PO-25-26-163",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "A4 POCKET FILE ROCO 11 PUNCHED HOLE 1 X 100/ PKT",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "Ball Point Pen Leeno 0.5 mm-RED",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "GEL PEN PILOT G-2 - 0.7- Blue 1 X 12",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "Ball Point Pen Leeno 0.5 mm- Blue (LE-0239-07) 1 X 12",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "Correction Pen (Whitener) 1 X 12",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6199,
+          "completion_tokens": 429,
+          "reasoning_tokens": 97,
+          "cost": 0.00028864,
+          "latency_s": 8.92
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.87,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-DTS-25-505",
+        "po_reference": "TOGA-PO-25-26-163",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "A4 POCKET FILE ROCO 11 PUNCHED HOLE 1 X 100/ PKT",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "Ball Point Pen Leeno 0.5 mm-RED",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "GEL PEN PILOT G-2 - 0.7- Blue 1 X 12",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "Ball Point Pen Leeno 0.5 mm- Blue (LE-0239-07) 1 X 12",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "Correction Pen (Whitener) 1 X 12",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6199,
+          "completion_tokens": 454,
+          "reasoning_tokens": 122,
+          "cost": 0.00030114,
+          "latency_s": 7.71
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

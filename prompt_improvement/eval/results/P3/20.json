@@ -1,0 +1,138 @@
+{
+  "doc_id": 20,
+  "label": "P3",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P3.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 13.33,
+      "result": {
+        "document_type": "PO",
+        "document_number": "50119501",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "IRONCLAD EXO HI-VIZ UTILITY YELLOW SIZE XXXL\nLine/Ref No: 1/1\nPart Main Group: CONS\nMFG Name: IRONCLAD PERFORMANCE WEAR\nMFG Part No: EXO2-HSY-07-XXXL",
+            "quantity": "5",
+            "unit_price": "50.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "GLOVES,KONG RIGGER,SIZE S\nLine/Ref No: 2/1\nPart Main Group: CONS\nMFG Name: IRONCLAD PERFORMANCE WEAR\nMFG Part No: KRIG-02-S",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "GLOVES,KONG RIGGER,SIZE M\nLine/Ref No: 3/1\nPart Main Group: CONS\nMFG Name: IRONCLAD PERFORMANCE WEAR\nMFG Part No: KRIG-03-M",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5999,
+          "completion_tokens": 1265,
+          "reasoning_tokens": 927,
+          "cost": 0.001379,
+          "latency_s": 13.25
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.5,
+      "result": {
+        "document_type": "PO",
+        "document_number": "50119501",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "11",
+            "description": "IRONCLAD EXO HI-VIZ UTILITY YELLOW SIZE XXXL Line/Ref No: 11 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "50.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "21",
+            "description": "GLOVES,KONG RIGGER,SIZE S Line/Ref No: 21 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "31",
+            "description": "GLOVES,KONG RIGGER,SIZE M Line/Ref No: 31 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5999,
+          "completion_tokens": 250,
+          "reasoning_tokens": 0,
+          "cost": 0.00019714,
+          "latency_s": 4.42
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.09,
+      "result": {
+        "document_type": "PO",
+        "document_number": "50119501",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "IRONCLAD EXO HI-VIZ UTILITY YELLOW SIZE XXXL Line/Ref No: 1/1 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "50.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "GLOVES,KONG RIGGER,SIZE S Line/Ref No: 2/1 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "GLOVES,KONG RIGGER,SIZE M Line/Ref No: 3/1 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5999,
+          "completion_tokens": 713,
+          "reasoning_tokens": 455,
+          "cost": 0.00042864,
+          "latency_s": 9.01
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

@@ -1,0 +1,114 @@
+{
+  "doc_id": 244,
+  "label": "baseline",
+  "model": "openai/gpt-6-luna",
+  "prompt_source": "live",
+  "prompt_hash": "c826512ea909",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.72,
+      "result": {
+        "document_type": "PO",
+        "has_po_section": true,
+        "has_dn_section": false,
+        "has_si_section": false,
+        "page_count": 2,
+        "components": [
+          {
+            "doc_type": "PO",
+            "document_type": "PO",
+            "page_start": 1,
+            "page_end": 2
+          }
+        ],
+        "document_number": "100060000079573",
+        "po_no_raw": "100060000079573",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES",
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "CABLE-ADAPTER,STARTECH,1P10FFCN-USB-SERIAL,USB 2.0 USB A MALE TO RS232 MALE INTERACE",
+            "quantity": "1.00",
+            "unit_price": "426.00",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.56,
+      "result": {
+        "document_type": "PO",
+        "has_po_section": true,
+        "has_dn_section": false,
+        "has_si_section": false,
+        "page_count": 2,
+        "components": [
+          {
+            "doc_type": "PO",
+            "document_type": "PO",
+            "page_start": 1,
+            "page_end": 2
+          }
+        ],
+        "document_number": "100060000079573",
+        "po_no_raw": "100060000079573",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES",
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "CABLE-ADAPTER,STARTECH,1P10FFCN-USB-SERIAL,USB 2.0 USB A MALE TO RS232 MALE INTERACE",
+            "quantity": "1.00",
+            "unit_price": "426.00",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.59,
+      "result": {
+        "document_type": "PO",
+        "has_po_section": true,
+        "has_dn_section": false,
+        "has_si_section": false,
+        "page_count": 2,
+        "components": [
+          {
+            "doc_type": "PO",
+            "document_type": "PO",
+            "page_start": 1,
+            "page_end": 2
+          }
+        ],
+        "document_number": "100060000079573",
+        "po_no_raw": "100060000079573",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES",
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "CABLE-ADAPTER,STARTECH,1P10FFCN-USB-SERIAL,USB 2.0 USB A MALE TO RS232 MALE INTERACE",
+            "quantity": "1.00",
+            "unit_price": "426.00",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 2
+    }
+  ]
+}

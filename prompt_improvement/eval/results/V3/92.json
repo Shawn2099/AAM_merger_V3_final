@@ -1,0 +1,200 @@
+{
+  "doc_id": 92,
+  "label": "V3",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 13.61,
+      "result": {
+        "document_type": "PO",
+        "document_number": "4500039614",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "10",
+            "description": "124440 Wrench: Adjustable 10\" Long, 1-5/16\" Jaw Capacity, Chrome, Mfg: Proto; Mfr Part Number :J710G",
+            "quantity": "1",
+            "unit_price": "104.50",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "20",
+            "description": "124501 Wrench: Adjustable 12\"; Mfr Part Number :88905-2",
+            "quantity": "2",
+            "unit_price": "34.43",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "30",
+            "description": "124379 Wrench: Adjustable 15\" Lg, 1-11/16\" Jaw Capacity, Plain Grip, (Grainger 3R389), Mfg: Proto; Mfr Part Number :J715L",
+            "quantity": "2",
+            "unit_price": "244.20",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "40",
+            "description": "124520 Wrench: Adjustable 24\" Long, 2-7/16\" Jaw Capacity, Plain Grip, (Grainger 3R405), Mfg: Proto; Mfr Part Number :J724L",
+            "quantity": "1",
+            "unit_price": "674.30",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "50",
+            "description": "123949 Wrench: Pipe 12\", Cast Iron, Heavy-Duty Straight, Mfg: Ridgid; Mfr Part Number :31015",
+            "quantity": "1",
+            "unit_price": "143.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "60",
+            "description": "124441 Wrench: Pipe 14\", Cast Iron, Heavy-Duty Straight, Mfg: Ridgid; Mfr Part Number :31020",
+            "quantity": "1",
+            "unit_price": "163.90",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7543,
+          "completion_tokens": 941,
+          "reasoning_tokens": 484,
+          "cost": 0.00141,
+          "latency_s": 13.49
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.79,
+      "result": {
+        "document_type": "PO",
+        "document_number": "4500039614",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 12,
+        "line_items": [
+          {
+            "line_item_no": "10",
+            "description": "124440 Wrench: Adjustable 10\" Long, 1-5/16\" Jaw Capacity, Chrome, Mfg: Proto; Mfr Part Number: J710G",
+            "quantity": "1",
+            "unit_price": "104.50",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "20",
+            "description": "124501 Wrench: Adjustable 12\"; Mfr Part Number: 88905-2",
+            "quantity": "2",
+            "unit_price": "34.43",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "30",
+            "description": "124379 Wrench: Adjustable 15\" Lg, 1-11/16\" Jaw Capacity, Plain Grip, (Grainger 3R389), Mfg: Proto; Mfr Part Number: J715L",
+            "quantity": "2",
+            "unit_price": "244.20",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "40",
+            "description": "124520 Wrench: Adjustable 24\" Long, 2-7/16\" Jaw Capacity, Plain Grip, (Grainger 3R405), Mfg: Proto; Mfr Part Number: J724L",
+            "quantity": "1",
+            "unit_price": "674.30",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "50",
+            "description": "123949 Wrench: Pipe 12\", Cast Iron, Heavy-Duty Straight, Mfg: Ridgid; Mfr Part Number: 31015",
+            "quantity": "1",
+            "unit_price": "143.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "60",
+            "description": "124441 Wrench: Pipe 14\", Cast Iron, Heavy-Duty Straight, Mfg: Ridgid; Mfr Part Number: 31020",
+            "quantity": "1",
+            "unit_price": "163.90",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7543,
+          "completion_tokens": 924,
+          "reasoning_tokens": 464,
+          "cost": 0.00054958,
+          "latency_s": 11.67
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 12.64,
+      "result": {
+        "document_type": "PO",
+        "document_number": "4500039614",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "10",
+            "description": "124440 Wrench: Adjustable 10\" Long, 1-5/16\" Jaw Capacity, Chrome, Mfg: Proto; Mfr Part Number: J710G",
+            "quantity": "1",
+            "unit_price": "104.50",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "20",
+            "description": "124501 Wrench: Adjustable 12\"; Mfr Part Number: 88905-2",
+            "quantity": "2",
+            "unit_price": "34.43",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "30",
+            "description": "124379 Wrench: Adjustable 15\" Lg, 1-11/16\" Jaw Capacity, Plain Grip, (Grainger 3R389), Mfg: Proto; Mfr Part Number: J715L",
+            "quantity": "2",
+            "unit_price": "244.20",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "40",
+            "description": "124520 Wrench: Adjustable 24\" Long, 2-7/16\" Jaw Capacity, Plain Grip, (Grainger 3R405), Mfg: Proto; Mfr Part Number: J724L",
+            "quantity": "1",
+            "unit_price": "674.30",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "50",
+            "description": "123949 Wrench: Pipe 12\", Cast Iron, Heavy-Duty Straight, Mfg: Ridgid; Mfr Part Number: 31015",
+            "quantity": "1",
+            "unit_price": "143.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "60",
+            "description": "124441 Wrench: Pipe 14\", Cast Iron, Heavy-Duty Straight, Mfg: Ridgid; Mfr Part Number: 31020",
+            "quantity": "1",
+            "unit_price": "163.90",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7543,
+          "completion_tokens": 976,
+          "reasoning_tokens": 516,
+          "cost": 0.00057558,
+          "latency_s": 12.51
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

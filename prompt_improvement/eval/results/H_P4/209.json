@@ -1,0 +1,96 @@
+{
+  "doc_id": 209,
+  "label": "H_P4",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P4.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.74,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-RAK-25-2964",
+        "po_reference": "J255-300115876",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "RS PRO Stainless Steel Pipe Fitting, Straight Circular Barrel Nipple, Male R 1/2in x Male R 1/2in, P/N : 499-3243 Line Item - 2",
+            "quantity": "2.00",
+            "unit_price": "44.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5899,
+          "completion_tokens": 318,
+          "reasoning_tokens": 131,
+          "cost": 0.000893,
+          "latency_s": 7.67
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.42,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-RAK-25-2964",
+        "po_reference": "J255-300115876",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "RS PRO Stainless Steel Pipe Fitting, Straight Circular Barrel Nipple, Male R 1/2in x Male R 1/2in, P/N : 499-3243 Line Item - 2",
+            "quantity": "2.00",
+            "unit_price": "44.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5899,
+          "completion_tokens": 335,
+          "reasoning_tokens": 148,
+          "cost": 0.00023864,
+          "latency_s": 9.35
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.95,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-RAK-25-2964",
+        "po_reference": "J255-300115876",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "RS PRO Stainless Steel Pipe Fitting, Straight Circular Barrel Nipple, Male R 1/2in x Male R 1/2in, P/N : 499-3243 Line Item - 2",
+            "quantity": "2.00",
+            "unit_price": "44.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5899,
+          "completion_tokens": 306,
+          "reasoning_tokens": 119,
+          "cost": 0.00022414,
+          "latency_s": 7.88
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

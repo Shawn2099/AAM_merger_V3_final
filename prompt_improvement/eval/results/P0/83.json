@@ -1,0 +1,159 @@
+{
+  "doc_id": 83,
+  "label": "P0",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.99,
+      "result": {
+        "document_type": "PO",
+        "document_number": "4800466856",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Thread Compound TUBELOK Thread-Locking Compound-(SPN/BRAND Ref: 199-50-BAKERLOK)",
+            "quantity": "100.000",
+            "unit_price": "240.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "DRY MOLY 400 ML SPRAY CAN MFR.AMBERSIL (1X12)-(SPN/BRAND Ref: KSS-MOLY)",
+            "quantity": "25",
+            "unit_price": "600.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "LOCTITE 242-(SPN/BRAND Ref: LOC242)",
+            "quantity": "18.000",
+            "unit_price": "127.50",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "LOCTITE 262-(SPN/BRAND Ref: LOC262)",
+            "quantity": "15.000",
+            "unit_price": "127.50",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 479,
+          "reasoning_tokens": 171,
+          "cost": 0.00030133,
+          "latency_s": 9.82
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.46,
+      "result": {
+        "document_type": "PO",
+        "document_number": "4800466856",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Thread Compound TUBELOK Thread-Locking Compound-(SPN/BRAND Ref: 199-50-BAKERLOK)",
+            "quantity": "100.000",
+            "unit_price": "240.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "DRY MOLY 400 ML SPRAY CAN MFR.AMBERSIL (1X12)-(SPN/BRAND Ref: KSS-MOLY)",
+            "quantity": "25",
+            "unit_price": "600.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "LOCTITE 242-(SPN/BRAND Ref: LOC242)",
+            "quantity": "18.000",
+            "unit_price": "127.50",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "LOCTITE 262-(SPN/BRAND Ref: LOC262)",
+            "quantity": "15.000",
+            "unit_price": "127.50",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 306,
+          "reasoning_tokens": 0,
+          "cost": 0.00021483,
+          "latency_s": 9.29
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 14.12,
+      "result": {
+        "document_type": "PO",
+        "document_number": "4800466856",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Thread Compound TUBELOK Thread-Locking Compound-(SPN/BRAND Ref: 199-50-BAKERLOK)",
+            "quantity": "100.000",
+            "unit_price": "240.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "DRY MOLY 400 ML SPRAY CAN MFR.AMBERSIL (1X12)-(SPN/BRAND Ref: KSS-MOLY)",
+            "quantity": "25",
+            "unit_price": "600.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "LOCTITE 242-(SPN/BRAND Ref: LOC242)",
+            "quantity": "18.000",
+            "unit_price": "127.50",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "LOCTITE 262-(SPN/BRAND Ref: LOC262)",
+            "quantity": "15.000",
+            "unit_price": "127.50",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 690,
+          "reasoning_tokens": 382,
+          "cost": 0.00040683,
+          "latency_s": 13.95
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

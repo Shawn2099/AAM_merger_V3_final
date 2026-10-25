@@ -1,0 +1,135 @@
+{
+  "doc_id": 215,
+  "label": "baseline",
+  "model": "openai/gpt-6-luna",
+  "prompt_source": "live",
+  "prompt_hash": "c826512ea909",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.18,
+      "result": {
+        "document_type": "SI",
+        "has_po_section": false,
+        "has_dn_section": false,
+        "has_si_section": true,
+        "page_count": 1,
+        "components": [
+          {
+            "doc_type": "SI",
+            "document_type": "SI",
+            "page_start": 1,
+            "page_end": 1
+          }
+        ],
+        "document_number": "SIV-RAK-25-2968",
+        "po_no_raw": "300101295",
+        "po_reference": "300101295",
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES WLL",
+        "line_items": [
+          {
+            "line_item_no": "19",
+            "description": "Square D Power pact JJ250 3-Pole Circuit Breaker - New-Open Box Line Item - 19",
+            "quantity": "1.00",
+            "unit_price": "6325.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "21",
+            "description": "RELAY BOARD, MOVINCOOL, P/N : 484500-5320 Line Item - 21",
+            "quantity": "1.00",
+            "unit_price": "1705.00",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 6.57,
+      "result": {
+        "document_type": "SI",
+        "has_po_section": false,
+        "has_dn_section": false,
+        "has_si_section": true,
+        "page_count": 1,
+        "components": [
+          {
+            "doc_type": "SI",
+            "document_type": "SI",
+            "page_start": 1,
+            "page_end": 1
+          }
+        ],
+        "document_number": "SIV-RAK-25-2968",
+        "po_no_raw": "300101295",
+        "po_reference": "300101295",
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES WLL",
+        "line_items": [
+          {
+            "line_item_no": "19",
+            "description": "Square D Power pact JJ250 3-Pole Circuit Breaker - New-Open Box Line Item - 19",
+            "quantity": "1.00",
+            "unit_price": "6,325.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "21",
+            "description": "RELAY BOARD, MOVINCOOL, P/N : 484500-5320 Line Item - 21",
+            "quantity": "1.00",
+            "unit_price": "1,705.00",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.4,
+      "result": {
+        "document_type": "SI",
+        "has_po_section": false,
+        "has_dn_section": false,
+        "has_si_section": true,
+        "page_count": 1,
+        "components": [
+          {
+            "doc_type": "SI",
+            "document_type": "SI",
+            "page_start": 1,
+            "page_end": 1
+          }
+        ],
+        "document_number": "SIV-RAK-25-2968",
+        "po_no_raw": "300101295",
+        "po_reference": "300101295",
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES WLL",
+        "line_items": [
+          {
+            "line_item_no": "19",
+            "description": "Square D Power pact JJ250 3-Pole Circuit Breaker - New-Open Box Line Item - 19",
+            "quantity": "1.00",
+            "unit_price": "6325.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "21",
+            "description": "RELAY BOARD, MOVINCOOL, P/N : 484500-5320 Line Item - 21",
+            "quantity": "1.00",
+            "unit_price": "1705.00",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 2
+    }
+  ]
+}

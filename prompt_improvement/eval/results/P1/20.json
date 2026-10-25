@@ -1,0 +1,138 @@
+{
+  "doc_id": 20,
+  "label": "P1",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P1.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 13.41,
+      "result": {
+        "document_type": "PO",
+        "document_number": "50119501",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "IRONCLAD EXO HI-VIZ UTILITY YELLOW SIZE XXXL LineRef No: 1/1 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "50.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "GLOVES,KONG RIGGER,SIZE S LineRef No: 2/1 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "GLOVES,KONG RIGGER,SIZE M LineRef No: 3/1 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5326,
+          "completion_tokens": 1182,
+          "reasoning_tokens": 927,
+          "cost": 0.001253375,
+          "latency_s": 13.33
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 12.4,
+      "result": {
+        "document_type": "PO",
+        "document_number": "50119501",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "IRONCLAD EXO HI-VIZ UTILITY YELLOW SIZE XXXL\nLineRef No: 1/1\nPart Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "50.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "GLOVES,KONG RIGGER,SIZE S\nLineRef No: 2/1\nPart Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "GLOVES,KONG RIGGER,SIZE M\nLineRef No: 3/1\nPart Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5326,
+          "completion_tokens": 831,
+          "reasoning_tokens": 570,
+          "cost": 0.00048091,
+          "latency_s": 12.32
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.99,
+      "result": {
+        "document_type": "PO",
+        "document_number": "50119501",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "11",
+            "description": "IRONCLAD EXO HI-VIZ UTILITY YELLOW SIZE XXXL Line/Ref No: 11 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "50.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "21",
+            "description": "GLOVES,KONG RIGGER,SIZE S Line/Ref No: 21 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "31",
+            "description": "GLOVES,KONG RIGGER,SIZE M Line/Ref No: 31 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5326,
+          "completion_tokens": 250,
+          "reasoning_tokens": 0,
+          "cost": 0.00019041,
+          "latency_s": 5.91
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

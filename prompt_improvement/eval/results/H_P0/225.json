@@ -1,0 +1,96 @@
+{
+  "doc_id": 225,
+  "label": "H_P0",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.51,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RAK-25-3203",
+        "po_reference": "100060000079633",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "CONDOR Sideshield: Clear, PVC, Slip-On, P/N : 3BE76 Line Item - 1",
+            "quantity": "46.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 165,
+          "reasoning_tokens": 0,
+          "cost": 0.000700125,
+          "latency_s": 7.3
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.83,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RAK-25-3203",
+        "po_reference": "100060000079633",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "CONDOR Sideshield: Clear, PVC, Slip-On, P/N : 3BE76 Line Item - 1",
+            "quantity": "46.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 292,
+          "reasoning_tokens": 125,
+          "cost": 0.00020783,
+          "latency_s": 8.61
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 6.64,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RAK-25-3203",
+        "po_reference": "100060000079633",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "CONDOR Sideshield: Clear, PVC, Slip-On, P/N : 3BE76 Line Item - 1",
+            "quantity": "46.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 165,
+          "reasoning_tokens": 0,
+          "cost": 0.00014433,
+          "latency_s": 6.42
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

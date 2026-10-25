@@ -1,0 +1,197 @@
+comparison mode: app
+
+### Same-call repeat, 2 reads (ordered pairs), rule ID
+
+| label | pairs | A unsafe | unsafe A caught | wrong values caught | PASS A falsely held | all pairs held |
+|---|---|---|---|---|---|---|
+| P5 (img150+eff=high, P5 (ADOPTED)) | 222 | 6 | 4/6 (66.7%) | 4/6 (66.7%) | 8/208 (3.8%) | 14/222 (6.3%) |
+| H_P5 (img150+eff=high, P5 (ADOPTED), held-out) | 174 | 0 | 0/0 (n/a) | 0/0 (n/a) | 0/168 (0.0%) | 0/174 (0.0%) |
+| P0 (img150+eff=high, live prompt) | 222 | 12 | 2/12 (16.7%) | 2/16 (12.5%) | 12/202 (5.9%) | 16/222 (7.2%) |
+| P1 (img150+eff=high, P1) | 222 | 8 | 2/8 (25.0%) | 2/16 (12.5%) | 4/206 (1.9%) | 12/222 (5.4%) |
+| P2 (img150+eff=high, P2) | 222 | 6 | 2/6 (33.3%) | 2/14 (14.3%) | 12/206 (5.8%) | 16/222 (7.2%) |
+| P3 (img150+eff=high, P3) | 222 | 4 | 0/4 (0.0%) | 0/12 (0.0%) | 8/206 (3.9%) | 8/222 (3.6%) |
+| P4 (img150+eff=high, P4) | 222 | 0 | 0/0 (n/a) | 0/0 (n/a) | 8/210 (3.8%) | 8/222 (3.6%) |
+| P6 (img150+eff=high, P6 (37/111 calls failed)) | 146 | 1 | 0/1 (0.0%) | 0/1 (0.0%) | 0/133 (0.0%) | 4/146 (2.7%) | failed pairs 76
+| R_high (img150+eff=high, live) | 222 | 8 | 2/8 (25.0%) | 2/8 (25.0%) | 8/204 (3.9%) | 12/222 (5.4%) |
+| R_med (img150+eff=medium, live) | 222 | 22 | 4/22 (18.2%) | 4/30 (13.3%) | 6/198 (3.0%) | 12/222 (5.4%) |
+| R_low (img150+eff=low, live) | 222 | 20 | 4/20 (20.0%) | 4/24 (16.7%) | 6/200 (3.0%) | 12/222 (5.4%) |
+| R_seed (img150+seed=42, live) | 222 | 18 | 4/18 (22.2%) | 4/22 (18.2%) | 10/200 (5.0%) | 18/222 (8.1%) |
+| V3 (img150, live) | 222 | 20 | 4/20 (20.0%) | 4/24 (16.7%) | 12/200 (6.0%) | 18/222 (8.1%) |
+| V4 (img200, live) | 222 | 18 | 8/18 (44.4%) | 8/18 (44.4%) | 14/196 (7.1%) | 28/222 (12.6%) |
+| V0 (native PDF default, live) | 222 | 28 | 2/28 (7.1%) | 2/36 (5.6%) | 12/182 (6.6%) | 14/222 (6.3%) |
+| V1 (native PDF plugin, live) | 222 | 24 | 4/24 (16.7%) | 4/28 (14.3%) | 8/186 (4.3%) | 12/222 (5.4%) |
+| baseline (native PDF (app at the time), live) | 222 | 24 | 4/24 (16.7%) | 4/32 (12.5%) | 12/182 (6.6%) | 20/222 (9.0%) |
+| V2ok (mistral-ocr plugin, live (20 docs)) | 116 | 26 | 2/26 (7.7%) | 2/38 (5.3%) | 6/90 (6.7%) | 8/116 (6.9%) |
+| v2 (mistral-ocr plugin, live (40 failed)) | 140 | 26 | 2/26 (7.7%) | 2/38 (5.3%) | 6/114 (5.3%) | 8/140 (5.7%) | failed pairs 82
+| H_P0 (img150+eff=high, live, held-out) | 174 | 6 | 0/6 (0.0%) | 0/6 (0.0%) | 4/162 (2.5%) | 8/174 (4.6%) |
+| H_P4 (img150+eff=high, P4, held-out) | 174 | 0 | 0/0 (n/a) | 0/0 (n/a) | 4/168 (2.4%) | 4/174 (2.3%) |
+| H_P6 (img150+eff=high, P6, held-out) | 174 | 0 | 0/0 (n/a) | 0/0 (n/a) | 2/166 (1.2%) | 4/174 (2.3%) |
+| H_V0 (native PDF, live, held-out) | 174 | 6 | 0/6 (0.0%) | 0/6 (0.0%) | 0/132 (0.0%) | 0/174 (0.0%) |
+| POOLED img150 tuning | 2588 | 125 | 28/125 (22.4%) | 28/173 (16.2%) | 94/2373 (4.0%) | 150/2588 (5.8%) |
+| POOLED img150 held-out | 696 | 6 | 0/6 (0.0%) | 0/6 (0.0%) | 10/664 (1.5%) | 16/696 (2.3%) |
+
+### Same-call repeat, 2 reads (ordered pairs), rule FULL
+
+| label | pairs | A unsafe | unsafe A caught | wrong values caught | PASS A falsely held | all pairs held |
+|---|---|---|---|---|---|---|
+| P5 (img150+eff=high, P5 (ADOPTED)) | 222 | 6 | 4/6 (66.7%) | 4/6 (66.7%) | 8/208 (3.8%) | 14/222 (6.3%) |
+| H_P5 (img150+eff=high, P5 (ADOPTED), held-out) | 174 | 0 | 0/0 (n/a) | 0/0 (n/a) | 0/168 (0.0%) | 0/174 (0.0%) |
+| P0 (img150+eff=high, live prompt) | 222 | 12 | 4/12 (33.3%) | 8/16 (50.0%) | 14/202 (6.9%) | 20/222 (9.0%) |
+| P1 (img150+eff=high, P1) | 222 | 8 | 6/8 (75.0%) | 14/16 (87.5%) | 12/206 (5.8%) | 24/222 (10.8%) |
+| P2 (img150+eff=high, P2) | 222 | 6 | 6/6 (100.0%) | 14/14 (100.0%) | 16/206 (7.8%) | 24/222 (10.8%) |
+| P3 (img150+eff=high, P3) | 222 | 4 | 4/4 (100.0%) | 12/12 (100.0%) | 12/206 (5.8%) | 16/222 (7.2%) |
+| P4 (img150+eff=high, P4) | 222 | 0 | 0/0 (n/a) | 0/0 (n/a) | 10/210 (4.8%) | 10/222 (4.5%) |
+| P6 (img150+eff=high, P6 (37/111 calls failed)) | 146 | 1 | 1/1 (100.0%) | 1/1 (100.0%) | 1/133 (0.8%) | 6/146 (4.1%) | failed pairs 76
+| R_high (img150+eff=high, live) | 222 | 8 | 2/8 (25.0%) | 2/8 (25.0%) | 8/204 (3.9%) | 12/222 (5.4%) |
+| R_med (img150+eff=medium, live) | 222 | 22 | 8/22 (36.4%) | 16/30 (53.3%) | 8/198 (4.0%) | 18/222 (8.1%) |
+| R_low (img150+eff=low, live) | 222 | 20 | 6/20 (30.0%) | 10/24 (41.7%) | 8/200 (4.0%) | 16/222 (7.2%) |
+| R_seed (img150+seed=42, live) | 222 | 18 | 6/18 (33.3%) | 10/22 (45.5%) | 12/200 (6.0%) | 22/222 (9.9%) |
+| V3 (img150, live) | 222 | 20 | 6/20 (30.0%) | 10/24 (41.7%) | 14/200 (7.0%) | 22/222 (9.9%) |
+| V4 (img200, live) | 222 | 18 | 8/18 (44.4%) | 8/18 (44.4%) | 14/196 (7.1%) | 28/222 (12.6%) |
+| V0 (native PDF default, live) | 222 | 28 | 6/28 (21.4%) | 10/36 (27.8%) | 16/182 (8.8%) | 22/222 (9.9%) |
+| V1 (native PDF plugin, live) | 222 | 24 | 6/24 (25.0%) | 10/28 (35.7%) | 10/186 (5.4%) | 16/222 (7.2%) |
+| baseline (native PDF (app at the time), live) | 222 | 24 | 6/24 (25.0%) | 10/32 (31.2%) | 14/182 (7.7%) | 24/222 (10.8%) |
+| V2ok (mistral-ocr plugin, live (20 docs)) | 116 | 26 | 10/26 (38.5%) | 18/38 (47.4%) | 10/90 (11.1%) | 20/116 (17.2%) |
+| v2 (mistral-ocr plugin, live (40 failed)) | 140 | 26 | 10/26 (38.5%) | 18/38 (47.4%) | 10/114 (8.8%) | 20/140 (14.3%) | failed pairs 82
+| H_P0 (img150+eff=high, live, held-out) | 174 | 6 | 0/6 (0.0%) | 0/6 (0.0%) | 8/162 (4.9%) | 12/174 (6.9%) |
+| H_P4 (img150+eff=high, P4, held-out) | 174 | 0 | 0/0 (n/a) | 0/0 (n/a) | 4/168 (2.4%) | 4/174 (2.3%) |
+| H_P6 (img150+eff=high, P6, held-out) | 174 | 0 | 0/0 (n/a) | 0/0 (n/a) | 6/166 (3.6%) | 8/174 (4.6%) |
+| H_V0 (native PDF, live, held-out) | 174 | 6 | 0/6 (0.0%) | 0/6 (0.0%) | 4/132 (3.0%) | 4/174 (2.3%) |
+| POOLED img150 tuning | 2588 | 125 | 53/125 (42.4%) | 101/173 (58.4%) | 123/2373 (5.2%) | 204/2588 (7.9%) |
+| POOLED img150 held-out | 696 | 6 | 0/6 (0.0%) | 0/6 (0.0%) | 18/664 (2.7%) | 24/696 (3.4%) |
+
+### 3 reads, hold unless all agree (A = repeat 0), rule ID
+
+| label | docs | unsafe | unsafe caught | wrong values caught | PASS held | held |
+|---|---|---|---|---|---|---|
+| P5 | 37 | 2 | 2/2 (100.0%) | 2/2 (100.0%) | 1/34 (2.9%) | 3/37 (8.1%) |
+| H_P5 | 29 | 0 | 0/0 (n/a) | 0/0 (n/a) | 0/28 (0.0%) | 0/29 (0.0%) |
+| P0 | 37 | 3 | 1/3 (33.3%) | 1/5 (20.0%) | 2/33 (6.1%) | 3/37 (8.1%) |
+| R_high | 37 | 1 | 0/1 (0.0%) | 0/1 (0.0%) | 2/34 (5.9%) | 3/37 (8.1%) |
+| H_P0 | 29 | 1 | 0/1 (0.0%) | 0/1 (0.0%) | 1/27 (3.7%) | 2/29 (6.9%) |
+| H_P4 | 29 | 0 | 0/0 (n/a) | 0/0 (n/a) | 1/28 (3.6%) | 1/29 (3.4%) |
+
+### 3 reads, hold unless all agree (A = repeat 0), rule FULL
+
+| label | docs | unsafe | unsafe caught | wrong values caught | PASS held | held |
+|---|---|---|---|---|---|---|
+| P5 | 37 | 2 | 2/2 (100.0%) | 2/2 (100.0%) | 1/34 (2.9%) | 3/37 (8.1%) |
+| H_P5 | 29 | 0 | 0/0 (n/a) | 0/0 (n/a) | 0/28 (0.0%) | 0/29 (0.0%) |
+| P0 | 37 | 3 | 2/3 (66.7%) | 4/5 (80.0%) | 2/33 (6.1%) | 4/37 (10.8%) |
+| R_high | 37 | 1 | 0/1 (0.0%) | 0/1 (0.0%) | 2/34 (5.9%) | 3/37 (8.1%) |
+| H_P0 | 29 | 1 | 0/1 (0.0%) | 0/1 (0.0%) | 2/27 (7.4%) | 3/29 (10.3%) |
+| H_P4 | 29 | 0 | 0/0 (n/a) | 0/0 (n/a) | 1/28 (3.6%) | 1/29 (3.4%) |
+
+### False holds on the adopted config, by disagreeing field (ordered pairs, PASS A)
+
+- P5: {'docno': 6, 'po': 2}  (held pairs on partly-unscored docs: 6)
+- H_P5: {}  (held pairs on partly-unscored docs: 0)
+
+### Wrong-value catalogue: consistent vs noisy
+
+- img150 tuning: {'noisy': 51, 'CONSISTENT': 10}
+- other transports: {'noisy': 27, 'CONSISTENT': 18}
+- img150 held-out: {'CONSISTENT': 1}
+- all: {'noisy': 78, 'CONSISTENT': 29}
+
+P5 wrong values:
+  doc 22 SI po_reference: gold=50117194 reads=['0117194', '50117194', '50117194'] -> noisy
+  doc 258 DN po_reference: gold=None reads=['260988', None, '260988'] -> noisy
+
+H_P5 wrong values:
+
+All wrong values (img150 labels):
+  P5 doc 22 SI po_reference: gold=50117194 reads=['0117194', '50117194', '50117194'] -> noisy
+  P5 doc 258 DN po_reference: gold=None reads=['260988', None, '260988'] -> noisy
+  P0 doc 21 PO extra:4/1: gold=None reads=[15000, None, None] -> noisy
+  P0 doc 21 PO extra:5/1: gold=None reads=[15000, None, None] -> noisy
+  P0 doc 21 PO extra:6/1: gold=None reads=[50000, None, None] -> noisy
+  P0 doc 113 SI po_reference: gold=22613 reads=['226130', '226130', '226130'] -> CONSISTENT
+  P0 doc 268 DN po_reference: gold=None reads=['260030', '260030', '4500362256'] -> noisy
+  P1 doc 20 PO extra:11: gold=None reads=[None, None, 5000] -> noisy
+  P1 doc 20 PO extra:21: gold=None reads=[None, None, 5000] -> noisy
+  P1 doc 20 PO extra:31: gold=None reads=[None, None, 5000] -> noisy
+  P1 doc 21 PO extra:4:1: gold=None reads=[None, None, 15000] -> noisy
+  P1 doc 21 PO extra:5:1: gold=None reads=[None, None, 15000] -> noisy
+  P1 doc 21 PO extra:6:1: gold=None reads=[None, None, 50000] -> noisy
+  P1 doc 258 DN po_reference: gold=None reads=[None, '260988', '260988'] -> noisy
+  P2 doc 20 PO extra:1\1: gold=None reads=[None, None, 5000] -> noisy
+  P2 doc 20 PO extra:2\1: gold=None reads=[None, None, 5000] -> noisy
+  P2 doc 20 PO extra:3\1: gold=None reads=[None, None, 5000] -> noisy
+  P2 doc 21 PO extra:4/1: gold=None reads=[15000, None, None] -> noisy
+  P2 doc 21 PO extra:5/1: gold=None reads=[15000, None, None] -> noisy
+  P2 doc 21 PO extra:6/1: gold=None reads=[50000, None, None] -> noisy
+  P2 doc 258 DN po_reference: gold=None reads=['260988', None, None] -> noisy
+  P3 doc 20 PO extra:11: gold=None reads=[None, 5000, None] -> noisy
+  P3 doc 20 PO extra:21: gold=None reads=[None, 5000, None] -> noisy
+  P3 doc 20 PO extra:31: gold=None reads=[None, 5000, None] -> noisy
+  P3 doc 21 PO extra:4/1: gold=None reads=[15000, None, None] -> noisy
+  P3 doc 21 PO extra:5/1: gold=None reads=[15000, None, None] -> noisy
+  P3 doc 21 PO extra:6/1: gold=None reads=[50000, None, None] -> noisy
+  P6 doc 84 PO extra:: gold=None reads=[0, None, 'FAILED'] -> noisy
+  R_high doc 113 SI po_reference: gold=22613 reads=['226130', '226130', '226130'] -> CONSISTENT
+  R_high doc 268 DN po_reference: gold=None reads=['4500362256', '260030', '4500362256'] -> noisy
+  R_med doc 1 DN po_reference: gold=LPO26/2360 reads=['262360', '26360', '262360'] -> noisy
+  R_med doc 20 PO extra:1-1: gold=None reads=[None, 5000, None] -> noisy
+  R_med doc 20 PO extra:11: gold=None reads=[5000, None, None] -> noisy
+  R_med doc 20 PO extra:2-1: gold=None reads=[None, 5000, None] -> noisy
+  R_med doc 20 PO extra:21: gold=None reads=[5000, None, None] -> noisy
+  R_med doc 20 PO extra:3-1: gold=None reads=[None, 5000, None] -> noisy
+  R_med doc 20 PO extra:31: gold=None reads=[5000, None, None] -> noisy
+  R_med doc 113 SI po_reference: gold=22613 reads=['226130', '226130', '226130'] -> CONSISTENT
+  R_med doc 258 DN po_reference: gold=None reads=['260988', '260988', '260988'] -> CONSISTENT
+  R_med doc 268 DN po_reference: gold=None reads=['260030', '260030', '260030'] -> noisy
+  R_low doc 1 DN po_reference: gold=LPO26/2360 reads=['262360', '262360', '26360'] -> noisy
+  R_low doc 20 PO extra:11: gold=None reads=[None, 5000, None] -> noisy
+  R_low doc 20 PO extra:21: gold=None reads=[None, 5000, None] -> noisy
+  R_low doc 20 PO extra:31: gold=None reads=[None, 5000, None] -> noisy
+  R_low doc 113 SI po_reference: gold=22613 reads=['226130', '226130', '226130'] -> CONSISTENT
+  R_low doc 258 DN po_reference: gold=None reads=['260988', '260988', '260988'] -> CONSISTENT
+  R_low doc 268 DN po_reference: gold=None reads=['260030', '260030', '260030'] -> noisy
+  R_seed doc 1 DN po_reference: gold=LPO26/2360 reads=['262360', '26360', '262360'] -> noisy
+  R_seed doc 20 PO extra:11: gold=None reads=[None, None, 5000] -> noisy
+  R_seed doc 20 PO extra:21: gold=None reads=[None, None, 5000] -> noisy
+  R_seed doc 20 PO extra:31: gold=None reads=[None, None, 5000] -> noisy
+  R_seed doc 113 SI po_reference: gold=22613 reads=['226130', '226130', '226130'] -> CONSISTENT
+  R_seed doc 258 DN po_reference: gold=None reads=['260988', '260988', '260988'] -> CONSISTENT
+  R_seed doc 268 DN po_reference: gold=None reads=['260030', '4500362256', '260030'] -> noisy
+  V3 doc 1 DN po_reference: gold=LPO26/2360 reads=['262360', '262360', '2632360'] -> noisy
+  V3 doc 20 PO extra:11: gold=None reads=[5000, None, None] -> noisy
+  V3 doc 20 PO extra:21: gold=None reads=[5000, None, None] -> noisy
+  V3 doc 20 PO extra:31: gold=None reads=[5000, None, None] -> noisy
+  V3 doc 113 SI po_reference: gold=22613 reads=['226130', '226130', '226130'] -> CONSISTENT
+  V3 doc 258 DN po_reference: gold=None reads=['260988', '260988', '260988'] -> CONSISTENT
+  V3 doc 268 DN po_reference: gold=None reads=['260030', '260030', '260030'] -> noisy
+  H_P0 doc 114 DN po_reference: gold=22613 reads=['226130', '226130', '226130'] -> CONSISTENT
+
+### Cross-variant second read (A = adopted P5 read, B = differently built read)
+
+| label | pairs (3x3) | A unsafe | unsafe A caught | wrong values caught | PASS A falsely held | all pairs held |
+|---|---|---|---|---|---|---|
+| P5 vs P0 [PO] | 333 | 9 | 9/9 (100.0%) | 9/9 (100.0%) | 15/312 (4.8%) | 36/333 (10.8%) | false-hold fields {'po': 15}
+| P5 vs P0 [ID] | 333 | 9 | 9/9 (100.0%) | 9/9 (100.0%) | 23/312 (7.4%) | 44/333 (13.2%) | false-hold fields {'docno': 8, 'po': 15}
+| P5 vs P0 [FULL] | 333 | 9 | 9/9 (100.0%) | 9/9 (100.0%) | 26/312 (8.3%) | 47/333 (14.1%) | false-hold fields {'docno': 8, 'lines': 3, 'po': 15}
+| P5 vs R_high [PO] | 333 | 9 | 9/9 (100.0%) | 9/9 (100.0%) | 12/312 (3.8%) | 33/333 (9.9%) | false-hold fields {'po': 12}
+| P5 vs R_high [ID] | 333 | 9 | 9/9 (100.0%) | 9/9 (100.0%) | 20/312 (6.4%) | 41/333 (12.3%) | false-hold fields {'docno': 11, 'po': 12}
+| P5 vs R_high [FULL] | 333 | 9 | 9/9 (100.0%) | 9/9 (100.0%) | 20/312 (6.4%) | 41/333 (12.3%) | false-hold fields {'docno': 11, 'po': 12}
+| P5 vs P2 [PO] | 333 | 9 | 7/9 (77.8%) | 7/9 (77.8%) | 6/312 (1.9%) | 14/333 (4.2%) | false-hold fields {'po': 6}
+| P5 vs P2 [ID] | 333 | 9 | 7/9 (77.8%) | 7/9 (77.8%) | 12/312 (3.8%) | 20/333 (6.0%) | false-hold fields {'docno': 6, 'po': 6}
+| P5 vs P2 [FULL] | 333 | 9 | 7/9 (77.8%) | 7/9 (77.8%) | 18/312 (5.8%) | 26/333 (7.8%) | false-hold fields {'docno': 6, 'lines': 6, 'po': 6}
+| P5 vs V1 [PO] | 333 | 9 | 3/9 (33.3%) | 3/9 (33.3%) | 42/312 (13.5%) | 57/333 (17.1%) | false-hold fields {'po': 42}
+| P5 vs V1 [ID] | 333 | 9 | 3/9 (33.3%) | 3/9 (33.3%) | 51/312 (16.3%) | 66/333 (19.8%) | false-hold fields {'po': 42, 'docno': 27}
+| P5 vs V1 [FULL] | 333 | 9 | 3/9 (33.3%) | 3/9 (33.3%) | 54/312 (17.3%) | 69/333 (20.7%) | false-hold fields {'po': 42, 'docno': 27, 'lines': 21}
+| P5 vs V0 [PO] | 333 | 9 | 3/9 (33.3%) | 3/9 (33.3%) | 42/312 (13.5%) | 57/333 (17.1%) | false-hold fields {'po': 42}
+| P5 vs V0 [ID] | 333 | 9 | 3/9 (33.3%) | 3/9 (33.3%) | 51/312 (16.3%) | 66/333 (19.8%) | false-hold fields {'po': 42, 'docno': 27}
+| P5 vs V0 [FULL] | 333 | 9 | 3/9 (33.3%) | 3/9 (33.3%) | 60/312 (19.2%) | 75/333 (22.5%) | false-hold fields {'po': 42, 'docno': 27, 'lines': 27}
+| H_P5 vs H_P0 [PO] | 261 | 0 | 0/0 (n/a) | 0/0 (n/a) | 9/252 (3.6%) | 18/261 (6.9%) | false-hold fields {'po': 9}
+| H_P5 vs H_P0 [ID] | 261 | 0 | 0/0 (n/a) | 0/0 (n/a) | 12/252 (4.8%) | 21/261 (8.0%) | false-hold fields {'po': 9, 'docno': 3}
+| H_P5 vs H_P0 [FULL] | 261 | 0 | 0/0 (n/a) | 0/0 (n/a) | 18/252 (7.1%) | 27/261 (10.3%) | false-hold fields {'po': 9, 'docno': 3, 'lines': 6}
+| H_P5 vs H_V0 [PO] | 261 | 0 | 0/0 (n/a) | 0/0 (n/a) | 54/252 (21.4%) | 63/261 (24.1%) | false-hold fields {'po': 54}
+| H_P5 vs H_V0 [ID] | 261 | 0 | 0/0 (n/a) | 0/0 (n/a) | 63/252 (25.0%) | 72/261 (27.6%) | false-hold fields {'docno': 63, 'po': 54}
+| H_P5 vs H_V0 [FULL] | 261 | 0 | 0/0 (n/a) | 0/0 (n/a) | 66/252 (26.2%) | 75/261 (28.7%) | false-hold fields {'docno': 63, 'po': 54, 'lines': 3}
+| P0 vs P5 [PO] | 333 | 18 | 15/18 (83.3%) | 15/24 (62.5%) | 9/303 (3.0%) | 36/333 (10.8%) | false-hold fields {'po': 9}
+| P0 vs P5 [ID] | 333 | 18 | 15/18 (83.3%) | 15/24 (62.5%) | 17/303 (5.6%) | 44/333 (13.2%) | false-hold fields {'docno': 8, 'po': 9}
+| P0 vs P5 [FULL] | 333 | 18 | 18/18 (100.0%) | 24/24 (100.0%) | 17/303 (5.6%) | 47/333 (14.1%) | false-hold fields {'docno': 8, 'po': 9}
+| H_P0 vs H_P5 [PO] | 261 | 9 | 9/9 (100.0%) | 9/9 (100.0%) | 0/243 (0.0%) | 18/261 (6.9%) | false-hold fields {}
+| H_P0 vs H_P5 [ID] | 261 | 9 | 9/9 (100.0%) | 9/9 (100.0%) | 3/243 (1.2%) | 21/261 (8.0%) | false-hold fields {'docno': 3}
+| H_P0 vs H_P5 [FULL] | 261 | 9 | 9/9 (100.0%) | 9/9 (100.0%) | 9/243 (3.7%) | 27/261 (10.3%) | false-hold fields {'docno': 3, 'lines': 6}

@@ -1,0 +1,96 @@
+{
+  "doc_id": 244,
+  "label": "P5",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P5.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 12.78,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079573",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "CABLE-ADAPTER,STARTECH,1P10FFC N-USB-SERIAL,USB 2.0 USB A MALE TO RS232 MALE INTERFACE",
+            "quantity": "1.00",
+            "unit_price": "426.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 8037,
+          "completion_tokens": 306,
+          "reasoning_tokens": 135,
+          "cost": 0.00024552,
+          "latency_s": 12.63
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.74,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079573",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "CABLE-ADAPTER,STARTECH,1P10FFCN-USB-SERIAL,USB 2.0 USB A MALE TO RS232 MALE INTERFACE",
+            "quantity": "1.00",
+            "unit_price": "426.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 8037,
+          "completion_tokens": 325,
+          "reasoning_tokens": 154,
+          "cost": 0.00116375,
+          "latency_s": 10.59
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.62,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079573",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "CABLE-ADAPTER,STARTECH,1P10FFCN-USB-SERIAL,USB 2.0 USB A MALE TO RS232 MALE INTERFACE",
+            "quantity": "1.00",
+            "unit_price": "426.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 8037,
+          "completion_tokens": 265,
+          "reasoning_tokens": 94,
+          "cost": 0.00022502,
+          "latency_s": 10.47
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

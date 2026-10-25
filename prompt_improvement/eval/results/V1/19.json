@@ -1,0 +1,95 @@
+{
+  "doc_id": 19,
+  "label": "V1",
+  "model": "openai/gpt-6-luna",
+  "variant": "native",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 12.24,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9555",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "FLAT ...",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5440,
+          "completion_tokens": 543,
+          "reasoning_tokens": 402,
+          "cost": 0.00033805,
+          "latency_s": 12.22
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.55,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9555",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "FLEXIBLE JOINT, FABRICATED WELDED TYPE, 9 INCH",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5440,
+          "completion_tokens": 154,
+          "reasoning_tokens": 0,
+          "cost": 0.00014355,
+          "latency_s": 3.54
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.2,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9555",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "FLEX JOINT, ?",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5440,
+          "completion_tokens": 517,
+          "reasoning_tokens": 373,
+          "cost": 0.00032505,
+          "latency_s": 9.18
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

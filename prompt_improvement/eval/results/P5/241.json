@@ -1,0 +1,96 @@
+{
+  "doc_id": 241,
+  "label": "P5",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P5.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 18.3,
+      "result": {
+        "document_type": "PO",
+        "document_number": "13952 , 0",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 6,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "BAG, COMPACTOR 40 CU FT 2000 LB CAPACITY-MFG:TECH OIL PRODUCTS, INC-PN:HV96030",
+            "quantity": "40",
+            "unit_price": "61",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 18025,
+          "completion_tokens": 538,
+          "reasoning_tokens": 379,
+          "cost": 0.00251875,
+          "latency_s": 17.85
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 15.95,
+      "result": {
+        "document_type": "PO",
+        "document_number": "13952 , 0",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 6,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "BAG, COMPACTOR 40 CU FT 2000 LB CAPACITY-MFG:TECH OIL PRODUCTS, INC-PN:HV96030",
+            "quantity": "40",
+            "unit_price": "61",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 18025,
+          "completion_tokens": 351,
+          "reasoning_tokens": 192,
+          "cost": 0.0003679,
+          "latency_s": 15.5
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 20.01,
+      "result": {
+        "document_type": "PO",
+        "document_number": "13952 , 0",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 6,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "BAG, COMPACTOR 40 CU FT 2000 LB CAPACITY-MFG:TECH OIL PRODUCTS, INC-PN:HV96030",
+            "quantity": "40",
+            "unit_price": "61",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 18025,
+          "completion_tokens": 719,
+          "reasoning_tokens": 560,
+          "cost": 0.0005519,
+          "latency_s": 19.56
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

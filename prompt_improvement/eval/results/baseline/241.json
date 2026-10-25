@@ -1,0 +1,114 @@
+{
+  "doc_id": 241,
+  "label": "baseline",
+  "model": "openai/gpt-6-luna",
+  "prompt_source": "live",
+  "prompt_hash": "c826512ea909",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.44,
+      "result": {
+        "document_type": "PO",
+        "has_po_section": true,
+        "has_dn_section": false,
+        "has_si_section": false,
+        "page_count": 6,
+        "components": [
+          {
+            "doc_type": "PO",
+            "document_type": "PO",
+            "page_start": 1,
+            "page_end": 6
+          }
+        ],
+        "document_number": "13952",
+        "po_no_raw": "13952",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES",
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "BAG, COMPACTOR 40 CU FT 2000 LB CAPACITY-MFG:TECH OIL PRODUCTS, INC-PN:HV96030",
+            "quantity": "40",
+            "unit_price": "61",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.15,
+      "result": {
+        "document_type": "PO",
+        "has_po_section": true,
+        "has_dn_section": false,
+        "has_si_section": false,
+        "page_count": 6,
+        "components": [
+          {
+            "doc_type": "PO",
+            "document_type": "PO",
+            "page_start": 1,
+            "page_end": 6
+          }
+        ],
+        "document_number": "13952",
+        "po_no_raw": "13952",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES",
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "BAG, COMPACTOR 40 CU FT 2000 LB CAPACITY-MFG:TECH OIL PRODUCTS, INC-PN:HV96030",
+            "quantity": "40",
+            "unit_price": "61",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.6,
+      "result": {
+        "document_type": "PO",
+        "has_po_section": true,
+        "has_dn_section": false,
+        "has_si_section": false,
+        "page_count": 6,
+        "components": [
+          {
+            "doc_type": "PO",
+            "document_type": "PO",
+            "page_start": 1,
+            "page_end": 6
+          }
+        ],
+        "document_number": "13952",
+        "po_no_raw": "13952",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES",
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "BAG, COMPACTOR 40 CU FT 2000 LB CAPACITY-MFG:TECH OIL PRODUCTS, INC-PN:HV96030",
+            "quantity": "40",
+            "unit_price": "61",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 2
+    }
+  ]
+}

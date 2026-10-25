@@ -1,0 +1,114 @@
+{
+  "doc_id": 229,
+  "label": "baseline",
+  "model": "openai/gpt-6-luna",
+  "prompt_source": "live",
+  "prompt_hash": "c826512ea909",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.31,
+      "result": {
+        "document_type": "PO",
+        "has_po_section": true,
+        "has_dn_section": false,
+        "has_si_section": false,
+        "page_count": 2,
+        "components": [
+          {
+            "doc_type": "PO",
+            "document_type": "PO",
+            "page_start": 1,
+            "page_end": 2
+          }
+        ],
+        "document_number": "100060000079657",
+        "po_no_raw": "100060000079657",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES",
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "BOLT-HEX,1-1/4-7 X 4-3/4 IN L,2-1/2 IN THREAD,SAE J429,GR 8,ZINC COATED,PRICED PER EA",
+            "quantity": "20.00",
+            "unit_price": "40.00",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.44,
+      "result": {
+        "document_type": "PO",
+        "has_po_section": true,
+        "has_dn_section": false,
+        "has_si_section": false,
+        "page_count": 2,
+        "components": [
+          {
+            "doc_type": "PO",
+            "document_type": "PO",
+            "page_start": 1,
+            "page_end": 2
+          }
+        ],
+        "document_number": "10006-0000079657",
+        "po_no_raw": "10006-0000079657",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES",
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "BOLT-HEX,1-1/4-7 X 4-3/4 IN L,2-1/2 IN THREAD,SAE J429,GR 8,ZINC COATED,PRICED PER EA",
+            "quantity": "20.00",
+            "unit_price": "40.00",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.33,
+      "result": {
+        "document_type": "PO",
+        "has_po_section": true,
+        "has_dn_section": false,
+        "has_si_section": false,
+        "page_count": 2,
+        "components": [
+          {
+            "doc_type": "PO",
+            "document_type": "PO",
+            "page_start": 1,
+            "page_end": 2
+          }
+        ],
+        "document_number": "10006-0000079657",
+        "po_no_raw": "10006-0000079657",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "vendor_name": "RAK ENERGY SERVICES & SUPPLIES",
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "BOLT-HEX,1-1/4-7 X 4-3/4 IN L,2-1/2 IN THREAD,SAE J429,GR 8,ZINC COATED,PRICED PER EA",
+            "quantity": "20.00",
+            "unit_price": "40.00",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 2
+    }
+  ]
+}

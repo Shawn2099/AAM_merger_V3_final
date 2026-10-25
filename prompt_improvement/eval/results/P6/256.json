@@ -1,0 +1,117 @@
+{
+  "doc_id": 256,
+  "label": "P6",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P6.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.72,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079731",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 3,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "CARTRIDGE-SENSOR,HONEYWELL,SPX CDXSHXSS,H2S,SENSEPOINT XCD",
+            "quantity": "1.00",
+            "unit_price": "2,300.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2-1",
+            "description": "GAS-CALIBRATION,CALGAZ,HYDROGEN SULFIDE,25 PPM H2S,50 PCT LEL",
+            "quantity": "1.00",
+            "unit_price": "975.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 11115,
+          "completion_tokens": 488,
+          "reasoning_tokens": 264,
+          "cost": 0.00163,
+          "latency_s": 11.53
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.09,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079731",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 3,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "CARTRIDGE-SENSOR,HONEYWELL,SPX CDXSHXSS,H2S,SENSEPOINT XCD",
+            "quantity": "1.00",
+            "unit_price": "2,300.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2-1",
+            "description": "GAS-CALIBRATION,CALGAZ,HYDROGEN SULFIDE,25 PPM H2S,50 PCT LEL",
+            "quantity": "1.00",
+            "unit_price": "975.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 11115,
+          "completion_tokens": 330,
+          "reasoning_tokens": 106,
+          "cost": 0.0002883,
+          "latency_s": 10.89
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.92,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079731",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 3,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "CARTRIDGE-SENSOR,HONEYWELL,SPX CDXSHXSS,H2S,SENSEPOINT XCD",
+            "quantity": "1.00",
+            "unit_price": "2,300.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2-1",
+            "description": "GAS-CALIBRATION,CALGAZ,HYDROGEN SULFIDE,25 PPM H2S,50 PCT LEL",
+            "quantity": "1.00",
+            "unit_price": "975.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 11115,
+          "completion_tokens": 329,
+          "reasoning_tokens": 105,
+          "cost": 0.0002878,
+          "latency_s": 8.73
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

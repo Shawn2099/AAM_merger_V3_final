@@ -1,0 +1,623 @@
+{
+  "233": {
+    "file": "SIV-RAK-25-3061-Borr-1.pdf",
+    "document_type": "SI",
+    "document_number": "SIV-RAK-25-3061",
+    "po_reference": "P213899",
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "4"
+      }
+    ],
+    "dn_reference": "GDN-RAK-25-3173",
+    "notes": "RAK SI to Borr (Qatar). PO has letter prefix P. SL 1 = Line Item - 1.",
+    "confidence": "certain"
+  },
+  "234": {
+    "file": "SIV-RAK-25-3061-Borr-2.pdf",
+    "document_type": "DN",
+    "document_number": "GDN-RAK-25-3173",
+    "po_reference": "P213899",
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "4"
+      }
+    ],
+    "notes": "RAK DN, photocopy with tick mark beside PO; SL 1, Line Item - 1, 4.00 EA.",
+    "confidence": "certain"
+  },
+  "235": {
+    "file": "SIV-RAK-25-3061-Borr-3.pdf",
+    "document_type": "PO",
+    "document_number": "P213899",
+    "po_reference": null,
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "4"
+      }
+    ],
+    "notes": "Borr PO, 2 pages; p2 terms only. Header 'Purchase Order' + 'Revision 0'; line printed under 'Line' column as 1; Qty Due 4.00.",
+    "confidence": "certain"
+  },
+  "236": {
+    "file": "SIV-RAK-25-3062-Borr-1.pdf",
+    "document_type": "SI",
+    "document_number": "SIV-RAK-25-3062",
+    "po_reference": "P212528",
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "2",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "3",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "4",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "5",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "6",
+        "quantity": "2"
+      }
+    ],
+    "dn_reference": "GDN-RAK-25-3206",
+    "notes": "2-page SI; line 6 description wraps onto p2 but its qty 2.00 is printed on p1. All six lines qty 2.00 EA.",
+    "confidence": "certain"
+  },
+  "237": {
+    "file": "SIV-RAK-25-3062-Borr-3.pdf",
+    "document_type": "DN",
+    "document_number": "GDN-RAK-25-3206",
+    "po_reference": "P212528",
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "2",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "3",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "4",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "5",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "6",
+        "quantity": "2"
+      }
+    ],
+    "notes": "RAK DN photocopy, six lines qty 2.00, Total Qty 12.00.",
+    "confidence": "certain"
+  },
+  "238": {
+    "file": "SIV-RAK-25-3062-Borr-4.pdf",
+    "document_type": "PO",
+    "document_number": "P212528",
+    "po_reference": null,
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "2",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "3",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "4",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "5",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "6",
+        "quantity": "2"
+      }
+    ],
+    "notes": "Borr PO, 3 pages; lines 1-2 on p1, 3-6 on p2 (Total 3,602.00). p3 not viewed (expected terms).",
+    "confidence": "certain"
+  },
+  "181": {
+    "file": "SIV-RAK-25-2876-Ades-1.pdf",
+    "document_type": "SI",
+    "document_number": "SIV-RAK-25-2876",
+    "po_reference": "13060",
+    "lines": [
+      {
+        "line_item_no": "2",
+        "quantity": "4"
+      }
+    ],
+    "dn_reference": "GDN-RAK-25-3081",
+    "sl": "1",
+    "line_key_ambiguity": "SL=1 vs 'Line Item - 2'",
+    "notes": "SL column prints 1 but description says 'Line Item - 2' (PO line 2). Gold line key = 2 (Line Item label, matches PO); SL value in `sl`. Qty 4.00 EA.",
+    "confidence": "certain"
+  },
+  "182": {
+    "file": "SIV-RAK-25-2876-Ades-2.pdf",
+    "document_type": "DN",
+    "document_number": "GDN-RAK-25-3081",
+    "po_reference": "13060",
+    "lines": [
+      {
+        "line_item_no": "2",
+        "quantity": "4"
+      }
+    ],
+    "sl": "1",
+    "line_key_ambiguity": "SL=1 vs 'Line Item - 2'",
+    "notes": "Photocopy DN. SL 1, 'Line Item - 2' (same conflict as SI 181); gold key 2.",
+    "confidence": "certain"
+  },
+  "183": {
+    "file": "SIV-RAK-25-2876-Ades-3.pdf",
+    "document_type": "PO",
+    "document_number": "13060",
+    "po_reference": null,
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "2",
+        "quantity": "4"
+      },
+      {
+        "line_item_no": "3",
+        "quantity": "1"
+      }
+    ],
+    "notes": "ADES (Emerald Driller) PO, 7 pages; 3 lines on p1, p2 terms. 'PO , Rev # 13060 , 0'. p3-7 not viewed.",
+    "confidence": "certain"
+  },
+  "240": {
+    "file": "SIV-RAK-25-3126-Ades-2.pdf",
+    "document_type": "DN",
+    "document_number": "GDN-RAK-25-3262",
+    "po_reference": "13952",
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "40"
+      }
+    ],
+    "notes": "RAK DN to ADES, photocopy. SL 1, Line Item - 1, 40.00 EA.",
+    "confidence": "certain"
+  },
+  "224": {
+    "file": "SIV-RAK-25-3058-Ensco-1.pdf",
+    "document_type": "SI",
+    "document_number": "SIV-RAK-25-3058",
+    "po_reference": "10006-0000079633",
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "46"
+      }
+    ],
+    "dn_reference": "GDN-RAK-25-3203",
+    "notes": "RAK SI to Ensco Rowan; hyphenated Valaris PO. Qty 46.00 at 25.00.",
+    "confidence": "certain"
+  },
+  "225": {
+    "file": "SIV-RAK-25-3058-Ensco-2.pdf",
+    "document_type": "DN",
+    "document_number": "GDN-RAK-25-3203",
+    "po_reference": "10006-0000079633",
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "46"
+      }
+    ],
+    "notes": "Skewed photocopy DN; handwritten 30285547 at bottom is not a PO/doc number.",
+    "confidence": "certain"
+  },
+  "209": {
+    "file": "SIV-RAK-25-2964-Noble-1.pdf",
+    "document_type": "SI",
+    "document_number": "SIV-RAK-25-2964",
+    "po_reference": "J255-300115876",
+    "lines": [
+      {
+        "line_item_no": "2",
+        "quantity": "2"
+      }
+    ],
+    "dn_reference": "GDN-RAK-25-2604",
+    "sl": "1",
+    "line_key_ambiguity": "SL=1 vs 'Line Item - 2'",
+    "notes": "Noble PO with rig prefix J255-. SL 1 but 'Line Item - 2' (PO line 2). Gold key 2.",
+    "confidence": "certain"
+  },
+  "210": {
+    "file": "SIV-RAK-25-2964-Noble-2.pdf",
+    "document_type": "DN",
+    "document_number": "GDN-RAK-25-2604",
+    "po_reference": "J255-300115876",
+    "lines": [
+      {
+        "line_item_no": "2",
+        "quantity": "2"
+      }
+    ],
+    "sl": "1",
+    "line_key_ambiguity": "SL=1 vs 'Line Item - 2'",
+    "notes": "Clean DN, SL 1, 'Line Item - 2', qty 2.00 EA.",
+    "confidence": "certain"
+  },
+  "211": {
+    "file": "SIV-RAK-25-2964-Noble-3.pdf",
+    "document_type": "PO",
+    "document_number": "J255-300115876",
+    "po_reference": null,
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "3"
+      },
+      {
+        "line_item_no": "2",
+        "quantity": "3"
+      },
+      {
+        "line_item_no": "3",
+        "quantity": "1"
+      }
+    ],
+    "notes": "Noble PO, 10-page file. p1 header only (no lines, 'Page 1 (3)'), lines on p2 (Total 476.00; columns 'Line/Rel'). p3-10 not viewed.",
+    "confidence": "certain"
+  },
+  "260": {
+    "file": "SIV-RHO-26-1896.pdf",
+    "document_type": "SI",
+    "document_number": "SIV-RHO-26-1896",
+    "po_reference": "60213576",
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "3"
+      },
+      {
+        "line_item_no": "2",
+        "quantity": "3"
+      }
+    ],
+    "dn_reference": "GDN-RHO-26-2105",
+    "notes": "RAAS SI to GARMCO, BHD 3 decimals. Per-line 'Delivery Note No' GDN-RHO-26-2105 (wrapped).",
+    "confidence": "certain"
+  },
+  "261": {
+    "file": "SIV-RHO-26-1896A.pdf",
+    "document_type": "DN",
+    "document_number": "GDN-RHO-26-2105",
+    "po_reference": null,
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "3"
+      },
+      {
+        "line_item_no": "2",
+        "quantity": "3"
+      }
+    ],
+    "ambiguous": true,
+    "po_candidates": [
+      "60213576",
+      "13085"
+    ],
+    "notes": "Two PO numbers print: header 'PO - 60213576' and boxed 'P.O : 13085' (GARMCO supplier ref). po_reference null (ambiguous), same convention as 258. Qty '3.00 CANS'. Handwritten 'PR-10368526' at top.",
+    "confidence": "certain"
+  },
+  "262": {
+    "file": "SIV-RHO-26-1896B.pdf",
+    "document_type": "PO",
+    "document_number": "60213576 OPG",
+    "po_reference": null,
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "15"
+      },
+      {
+        "line_item_no": "2",
+        "quantity": "15"
+      }
+    ],
+    "notes": "GARMCO PO, title 'PURCHASE ORDER # 60213576 OPG', REV 1, 'Page 1 of 3' (only p1 viewed; both lines on it). Qty 15 LITRE vs DN 3 CANS.",
+    "confidence": "certain"
+  },
+  "264": {
+    "file": "SIV-RHO-26-1914 A.pdf",
+    "document_type": "DN",
+    "document_number": "GDN-RHO-26-2183",
+    "po_reference": "4270006645 -SNN",
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "1"
+      }
+    ],
+    "po_printed_raw": "4270006645 -SNN",
+    "notes": "RAAS DN to Bahrain Airport Services; doc no wraps onto two lines; PO has -SNN suffix. 1.00 NOS.",
+    "confidence": "certain"
+  },
+  "266": {
+    "file": "SIV-RHO-26-1914B.pdf",
+    "document_type": "PO",
+    "document_number": "4270006645 - SNN",
+    "po_reference": null,
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "1"
+      }
+    ],
+    "notes": "BAS PO: 'P.O. Number 4270006645 - SNN', line under 'No'. Qty 1 NOS, 42.000 BHD.",
+    "confidence": "certain"
+  },
+  "271": {
+    "file": "SIV-RHO-26-234A.pdf",
+    "document_type": "DN",
+    "document_number": "GDN-RHO-26-270",
+    "po_reference": "C13717",
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "120"
+      }
+    ],
+    "notes": "RAAS DN to IMI, photocopy. PO has letter C. 120.00 EACH.",
+    "confidence": "certain"
+  },
+  "96": {
+    "file": "SIV-DTS-25-477-pages-2.pdf",
+    "document_type": "DN",
+    "document_number": "GDN-DTS-25-505",
+    "po_reference": "TOGA-PO-25-26-163",
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "10"
+      },
+      {
+        "line_item_no": "2",
+        "quantity": "1"
+      },
+      {
+        "line_item_no": "3",
+        "quantity": "1"
+      },
+      {
+        "line_item_no": "4",
+        "quantity": "10"
+      },
+      {
+        "line_item_no": "5",
+        "quantity": "2"
+      }
+    ],
+    "notes": "Pink DTS DN to Tubestar. Alphanumeric hyphenated PO. Total Qty 24.000 reconciles. Rig blank.",
+    "confidence": "certain"
+  },
+  "104": {
+    "file": "SIV-DTS-25-486-pages-2.pdf",
+    "document_type": "DN",
+    "document_number": "GDN-DTS-25-521",
+    "po_reference": "4500496514",
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "250"
+      }
+    ],
+    "notes": "Pink DTS DN to SIES; Rig SIES. Qty 250.00 EACH, Total 250.000.",
+    "confidence": "certain"
+  },
+  "114": {
+    "file": "SIV-DTS-25-517-pages-2.pdf",
+    "document_type": "DN",
+    "document_number": "GDN-DTS-25-548",
+    "po_reference": "22613",
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "1"
+      }
+    ],
+    "po_printed_raw": "22613 , 0",
+    "notes": "Pink DTS DN; PO printed '22613 , 0' (revision). Handwritten rig 505 is not an id. Qty 1.00 circled.",
+    "confidence": "certain"
+  },
+  "133": {
+    "file": "SIV-DTS-25-565-2.pdf",
+    "document_type": "DN",
+    "document_number": "GDN-DTS-25-603",
+    "po_reference": "ARM-PO-25-26-035",
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "15"
+      },
+      {
+        "line_item_no": "2",
+        "quantity": "5"
+      },
+      {
+        "line_item_no": "3",
+        "quantity": "8"
+      }
+    ],
+    "notes": "Pink DTS DN to Tubestar, lines 1-3 (EACH/DZN/BND), Total 28.000.",
+    "confidence": "certain"
+  },
+  "137": {
+    "file": "SIV-DTS-25-566-3.pdf",
+    "document_type": "DN",
+    "document_number": "GDN-DTS-25-571",
+    "po_reference": "TOGA-PO-25-26-204",
+    "lines": [
+      {
+        "line_item_no": "1",
+        "quantity": "100"
+      },
+      {
+        "line_item_no": "2",
+        "quantity": "20"
+      },
+      {
+        "line_item_no": "3",
+        "quantity": "2"
+      },
+      {
+        "line_item_no": "4",
+        "quantity": "16"
+      },
+      {
+        "line_item_no": "5",
+        "quantity": "10"
+      },
+      {
+        "line_item_no": "6",
+        "quantity": "10"
+      },
+      {
+        "line_item_no": "7",
+        "quantity": "10"
+      },
+      {
+        "line_item_no": "8",
+        "quantity": "10"
+      },
+      {
+        "line_item_no": "9",
+        "quantity": "10"
+      }
+    ],
+    "notes": "Pink DTS DN, 9 lines, ticks in margin; P/N 77602 on line 1. Total 188.000 reconciles.",
+    "confidence": "certain"
+  },
+  "4": {
+    "file": "SIV-ARS-25-7230-pages-2.pdf",
+    "document_type": "DN",
+    "po_reference": "4500043712",
+    "lines": [
+      {
+        "line_item_no": "10",
+        "quantity": "3"
+      },
+      {
+        "line_item_no": "20",
+        "quantity": "12"
+      }
+    ],
+    "unscored_reads": {
+      "document_number": "GDN-ARS-25-8330",
+      "note": "third serial digit (83|30) crossed by the box border; not certain"
+    },
+    "notes": "Al-Shab DN to Arabian Drilling; step-10 line numbers; qty circled '3 Each','12 Each'. Rig AD34, S.O. SOD-ARS-25-5800 are not ids. Doc number withheld (see unscored_reads).",
+    "confidence": "certain"
+  },
+  "7": {
+    "file": "SIV-ARS-25-7231-pages-2.pdf",
+    "document_type": "DN",
+    "po_reference": "4500043354",
+    "lines": [
+      {
+        "line_item_no": "10",
+        "quantity": "12"
+      },
+      {
+        "line_item_no": "20",
+        "quantity": "12"
+      }
+    ],
+    "unscored_reads": {
+      "document_number": "GDN-ARS-25-8326",
+      "note": "third serial digit (83|26) crossed by the box border"
+    },
+    "notes": "Al-Shab DN to Arabian Drilling; step-10 lines; qty '12 Each' both. Rig AD73.",
+    "confidence": "certain"
+  },
+  "40": {
+    "file": "SIV-ARS-25-8261-4.pdf",
+    "document_type": "DN",
+    "po_reference": "193165",
+    "confidence": "partial",
+    "unscored_reads": {
+      "document_number": "GDN-ARS-25-9329",
+      "document_number_note": "third serial digit (93|29) crossed by the box border",
+      "duct_tape_line": {
+        "line_item_no": "illegible (4 or 5?)",
+        "quantity": "50"
+      },
+      "lines_certain_rows": [
+        {
+          "line_item_no": "1",
+          "quantity": "20"
+        },
+        {
+          "line_item_no": "2",
+          "quantity": "48"
+        },
+        {
+          "line_item_no": "3",
+          "quantity": "6"
+        },
+        {
+          "line_item_no": "6",
+          "quantity": "36"
+        },
+        {
+          "line_item_no": "7",
+          "quantity": "36"
+        },
+        {
+          "line_item_no": "8",
+          "quantity": "36"
+        },
+        {
+          "line_item_no": "9",
+          "quantity": "10"
+        },
+        {
+          "line_item_no": "10",
+          "quantity": "10"
+        }
+      ],
+      "lines_note": "lines withdrawn from scoring (Opus audit): the page has 9 rows; the duct-tape row's item number is obliterated, so a faithful prediction including it (key 4, 5 or null) would be scored as an extra line and fail. Same treatment as gold.json 121."
+    },
+    "notes": "Al-Shab raster DN to ADES. Duct-tape row (50 Each) sits between 3 and 6 with an illegible item number (smudge): excluded from lines, kept in unscored_reads. Rig 686. Printed 'KOLOR KUT GASOLINE GAUGINGPASTE NET 2.25 OZ' / '10 Each' at the page top is a misregistered overprint of line 10, not a line. Scoring note: pred line count may include the unreadable row. Opus audit: lines moved to unscored_reads; only document_type and po_reference are scored."
+  }
+}
