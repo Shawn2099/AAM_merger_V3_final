@@ -1381,12 +1381,9 @@ def remove_set_to_quarantine(
                 raise SetRemovalRefused(404, f"PO Set {po_set_id} does not exist.")
             if ps.archived_at is not None:
                 raise SetRemovalRefused(409, "This PO Set is archived and read-only.")
-            if ps.status == POSetStatus.merged:
-                raise SetRemovalRefused(
-                    409, "A merged PO Set cannot be removed: its packet has been delivered."
-                )
             po_no = ps.po_no_normalized
             status_before = ps.status.value
+            merged_output_file = ps.merged_output_path
             set_row = _set_row_export(ps)
             docs = s.query(Document).filter(Document.po_set_id == po_set_id).all()
             doc_ids = sorted(d.id for d in docs)
@@ -1460,6 +1457,18 @@ def remove_set_to_quarantine(
                 if not _same_bytes(files_dir / name, data):
                     raise OSError(f"copy verification failed for {d['filename']}")
                 d["quarantine_name"] = name
+
+            if merged_output_file:
+                merged_src = Path(str(merged_output_file))
+                if merged_src.is_file():
+                    out_dir = stage / "output"
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    out_name = _unique_name(out_dir, merged_src.name)
+                    (out_dir / out_name).write_bytes(merged_src.read_bytes())
+                    try:
+                        merged_src.unlink(missing_ok=True)
+                    except OSError:
+                        logger.warning("Could not unlink merged packet %s", merged_src)
 
             exports = {
                 "po_set.json": set_row,

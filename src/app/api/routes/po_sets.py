@@ -619,7 +619,7 @@ def confirm_placement(po_set_id: int, doc_id: int):
 def remove_to_quarantine(po_set_id: int, request: Request, note: str = Form("")):
     """Copy the set's files to the quarantine folder, then delete its rows (step 13).
 
-    Refused while a sync reads documents, and for merged or archived sets. The
+    Refused while a sync reads documents, and for archived read-only sets. The
     set's own lock is held for the whole removal. A browser form gets a page for
     both the result and a refusal; API clients get the JSON detail.
     """

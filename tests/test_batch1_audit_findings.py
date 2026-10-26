@@ -56,12 +56,12 @@ def test_under_delivery_detail_page_is_consistent(cfg, client):
     dashboard = client.get("/dashboard?status=mismatched").text
     page = client.get(f"/po_sets/{pid}/view").text
 
-    assert "Waiting (part delivered)" in dashboard  # already correct
-    assert "Waiting (part delivered)" in page  # top badge: currently Needs Review
+    assert "Partial Delivery" in dashboard  # under-delivery, part delivered
+    assert "Partial Delivery" in page  # top badge
     assert "Why this set is waiting" in page  # already correct
     matrix = re.search(r'data-testid="matrix-row".*?</tr>', page, re.S)
     assert matrix, "no matrix row"
-    assert "Awaiting" in matrix.group(0)  # currently Mismatch
+    assert "Awaiting" in matrix.group(0)  # under-delivery stays pending at line level
 
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@
   --border: #cbd5e1;
   --border-focus: #94a3b8;
   --text-main: #0f172a;
-  --text-muted: #64748b;
+  --text-muted: #5b6b7f;
   --text-light: #94a3b8;
 
   /* Status Colors (High Contrast WCAG AA) */
@@ -405,12 +405,12 @@ nav.app-navbar {
 }
 
 .btn-success {
-  background: #16a34a;
+  background: #15803d;
   color: #ffffff;
 }
 
 .btn-success:hover:not(:disabled) {
-  background: #15803d;
+  background: #166534;
 }
 
 .btn-sm {

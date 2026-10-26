@@ -80,7 +80,7 @@ ignore = ["D", "COM812", "ISC001"]
 "src/app/services/extraction.py" = ["E501", "RUF001"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["src", "app"]
+known-first-party = ["src", "app", "release_helpers"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

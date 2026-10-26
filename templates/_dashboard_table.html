@@ -36,9 +36,10 @@
             {% if not ps.has_merged_file %}
               <span class="badge badge-quarantined" title="The database says merged, but the packet file is missing from the output folder.">Merged - packet missing</span>
             {% elif (ps.description_match_count or 0) > 0 or ps.line_mapping_rule %}
-              <span class="badge badge-desc"
+              <span class="badge badge-merged">Merged &amp; Ready</span>
+              <span class="badge badge-desc" style="font-size:0.72rem; margin-left:4px;"
                     title="The packet merged, but at least one vendor line was attached by DESCRIPTION or paired by a line-numbering rule rather than a printed line number. Check the item descriptions and the line mapping.">
-                Merged • review
+                Review
               </span>
               {% if (ps.description_match_count or 0) > 0 %}
               <span class="badge badge-desc" style="font-size:0.72rem; margin-left:4px;"
@@ -56,16 +57,16 @@
             {% endif %}
           {% elif status_str == 'mismatched' %}
             {% if ps.shortfall == 'under' %}
-            <span class="badge badge-pending" title="Waiting (part delivered): Every disagreeing quantity is below the PO: the delivery or the invoice is short. The set stays counted under Needs Review until the rest arrives.">Waiting (part delivered)</span>
+            <span class="badge badge-pending" title="Waiting (part delivered): Every disagreeing quantity is below the PO: the delivery or the invoice is short. The set stays counted under Needs Review until the rest arrives.">Partial Delivery</span>
             {% else %}
-            <span class="badge badge-mismatched">Quantity Mismatch</span>
+            <span class="badge badge-mismatched" title="Needs Review: Quantity mismatch">Quantity Mismatch</span>
             {% endif %}
           {% elif status_str == 'blocked_customs' %}
             <span class="badge badge-blocked">🔒 Awaiting Customs/Shipping Docs</span>
           {% elif status_str == 'quarantined' %}
             <span class="badge badge-quarantined">🚨 Flagged</span>
           {% elif status_str == 'pending' %}
-            <span class="badge badge-pending">Awaiting Documents</span>
+            <span class="badge badge-pending" title="Pending / Waiting: Awaiting vendor documents">Awaiting Documents</span>
             {% if ps.multi_po_decision %}
             <span class="badge badge-mismatched" style="font-size:0.72rem; margin-left:4px;" title="The PO arrived as several files. Reconciliation will not choose between them.">Needs a decision: {{ ps.po_doc_count }} PO files (Force Merge if both apply, or Remove Set to replace)</span>
             {% endif %}

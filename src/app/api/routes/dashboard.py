@@ -1628,7 +1628,11 @@ def set_aside_route(doc_id: int, request: Request):
                 "</td></tr>"
             )
         )
-    where = html.escape(_scrub_paths(str(folder)))
+    try:
+        where = folder.relative_to(Path(cfg.paths.quarantine_folder).parent).as_posix()
+    except ValueError:  # pragma: no cover - only if the config is unusual
+        where = folder.name
+    where = html.escape(where)
     return HTMLResponse(
         content=(
             f'<tr id="doc-row-{doc_id}" data-testid="set-aside-result">'

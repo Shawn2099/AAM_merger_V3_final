@@ -52,7 +52,7 @@ def test_ui_s_04_quarantined_set_explains_why_and_offers_archive_not_merge_overr
     sc = _open(page, manifest, "quarantined_unmatched_vendor_line")
     expect(page.get_by_test_id("reason-card")).to_contain_text(sc["reason"][:40])
     expect(page.get_by_test_id("flag").first).to_contain_text("has no matching PO line")
-    expect(page.get_by_test_id("btn-archive")).to_be_visible()
+    expect(page.get_by_test_id("remove-set-card")).to_be_visible()
 
 
 def test_ui_s_05_document_preview_opens_the_pdf_in_the_drawer(page: Page, manifest):
@@ -86,9 +86,11 @@ def test_ui_s_06_force_merge_needs_the_modal_and_produces_a_packet(page: Page, m
 
 def test_ui_s_07_archive_removes_the_set_from_the_worklists(page: Page, manifest, db):
     sc = _open(page, manifest, "archive_target")
-    page.get_by_test_id("btn-archive").click()
-    with page.expect_response(re.compile(rf"/po_sets/{sc['id']}/quarantine")) as resp:
-        page.get_by_test_id("btn-confirm-archive").click()
+    page.goto("/quarantine")
+    row = page.locator(f'[data-testid="quarantine-row"][data-set-id="{sc["id"]}"]')
+    row.get_by_test_id("btn-archive-row").click()
+    with page.expect_response(re.compile(rf"/po_sets/{sc['id']}/quarantine$")) as resp:
+        row.get_by_test_id("btn-confirm-archive-row").click()
     assert resp.value.status == 200, resp.value.text()
     page.goto("/dashboard")
     expect(page.locator(f'[data-testid="po-row"][data-set-id="{sc["id"]}"]')).to_have_count(0)

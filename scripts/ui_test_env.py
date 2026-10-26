@@ -427,6 +427,47 @@ SCENARIOS: dict[str, dict] = {
             ("SI", "INV-7000037.pdf", "7000037", [L("1", "5", "Widget")]),
         ],
     },
+    # Release gate: one mutable scenario per destructive check, so the tests do
+    # not depend on another test's leftovers.
+    "release_remove_target": {
+        "po": "7000050",
+        "mutable": True,
+        "docs": [
+            ("PO", "PO-7000050.pdf", None, [L("1", "10", "Bearing")]),
+            ("DN", "DN-7000050.pdf", "7000050", [L("1", "6", "Bearing")]),
+            ("SI", "INV-7000050.pdf", "7000050", [L("1", "10", "Bearing")]),
+        ],
+    },
+    "release_archive_target": {
+        "po": "7000051",
+        "mutable": True,
+        "docs": [
+            ("PO", "PO-7000051.pdf", None, [L("1", "5", "Chain")]),
+            ("DN", "DN-7000051.pdf", "7000051", [L("9", "5", "Chain")]),
+            ("SI", "INV-7000051.pdf", "7000051", [L("1", "5", "Chain")]),
+        ],
+    },
+    # Holds in the settle window so Merge Now is the operator action that writes
+    # the packet (the build must not merge it first).
+    "release_merge_target": {
+        "po": "7000052",
+        "mutable": True,
+        "settle_minutes": 240,
+        "docs": [
+            ("PO", "PO-7000052.pdf", None, [L("1", "5", "Clamp")]),
+            ("DN", "DN-7000052.pdf", "7000052", [L("1", "5", "Clamp")]),
+            ("SI", "INV-7000052.pdf", "7000052", [L("1", "5", "Clamp")]),
+        ],
+    },
+    "release_upload_target": {
+        "po": "7000053",
+        "mutable": True,
+        "customs_toggle": True,
+        "docs": [
+            ("PO", "PO-7000053.pdf", None, [L("1", "5", "Lamp")]),
+            ("SI", "INV-7000053.pdf", "7000053", [L("1", "5", "Lamp")]),
+        ],
+    },
 }
 
 # Documents that stay in the holding area (the Unclassified page). `po_ref` None means the
@@ -523,6 +564,15 @@ HELD: dict[str, dict] = {
         "state": "read",
         "mutable": True,
         "lines": [L("1", "4", "Audit item")],
+    },
+    # Release gate: a valid held document whose move and on-disk copy are checked.
+    "release_set_aside_target": {
+        "kind": "DN",
+        "file": "RELEASE-SET-ASIDE.pdf",
+        "po_ref": None,
+        "state": "read",
+        "mutable": True,
+        "lines": [L("1", "4", "Release item")],
     },
 }
 

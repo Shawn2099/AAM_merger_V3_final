@@ -103,11 +103,11 @@ def test_removal_archived_set_is_409(cfg, client):
     assert r.status_code == 409
 
 
-def test_removal_merged_set_is_409(cfg, client):
+def test_removal_merged_set_succeeds(cfg, client):
     pid = _mismatched(cfg, "PO-MERGED")
     _set_ps(cfg, pid, status=POSetStatus.merged, merged_at=datetime.now(UTC))
     r = client.post(f"/po_sets/{pid}/remove_to_quarantine", data={"note": "x" * 20})
-    assert r.status_code == 409
+    assert r.status_code == 200
 
 
 def test_removal_locked_set_is_409(cfg, client):
@@ -172,10 +172,6 @@ def test_removal_note_is_truncated_and_escaped(cfg, client):
     assert detail["note"].startswith("<script>")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="NEW P2 security: crafted original_filename writes outside <final>/files/",
-)
 def test_removal_path_traversal_filename_never_escapes_the_files_folder(cfg, client):
     pid = _set(cfg, "PO-TRAV")
     _doc(cfg, pid, DocType.PO, "..\\..\\evil.pdf", [("1", "Item", 1)], po_no="PO-TRAV")
@@ -487,10 +483,6 @@ def test_missing_set_browser_page_has_nav_and_heading(client):
     assert "Traceback" not in r.text
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="NEW P3: set-detail 404 returns HTML even for API clients",
-)
 def test_404_api_is_json(client):
     r = client.get("/po_sets/999999/view", headers={"Accept": "application/json"})
     assert r.status_code == 404

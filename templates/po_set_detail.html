@@ -43,9 +43,10 @@
             Merged - packet missing
           </span>
         {% elif (po_set.description_match_count or 0) > 0 or po_set.line_mapping_rule %}
-          <span class="badge badge-desc" style="font-size:0.9rem; padding:6px 14px;"
+          <span class="badge badge-merged" style="font-size:0.9rem; padding:6px 14px;">Merged &amp; Ready</span>
+          <span class="badge badge-desc" style="font-size:0.8rem;"
                 title="The quantities reconcile, but at least one line was attached by description or paired by a line-numbering rule rather than a printed line number. Review the item descriptions and the line mapping below.">
-            Merged • review
+            Review
           </span>
           {% if (po_set.description_match_count or 0) > 0 %}
           <span class="badge badge-desc" style="font-size:0.8rem;"
@@ -70,7 +71,7 @@
         {% endif %}
       {% elif status_str == 'mismatched' %}
         {% if set_shortfall == 'under' %}
-          <span class="badge badge-pending" style="font-size:0.9rem; padding:6px 14px;">Waiting (part delivered)</span>
+          <span class="badge badge-pending" style="font-size:0.9rem; padding:6px 14px;" title="Waiting (part delivered)">Partial Delivery</span>
         {% else %}
           <span class="badge badge-mismatched" style="font-size:0.9rem; padding:6px 14px;">Quantity Mismatch</span>
         {% endif %}
@@ -499,11 +500,13 @@
         name="file" 
         accept=".pdf" 
         required 
+        aria-label="Supporting PDF file"
         style="padding:6px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:#fff;"
       >
       <select 
         name="doc_type" 
         required 
+        aria-label="Supporting document type"
         style="padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:#fff; font-weight:600;"
       >
         <option value="CUSTOMS">CUSTOMS (Clearance / Bill of Entry)</option>
@@ -520,51 +523,6 @@
   </div>
   {% endif %}
 </div>
-
-<!-- Quarantined Archive Card (Only if quarantined and active) -->
-{% if status_str == 'quarantined' and not is_archived %}
-<div class="card" style="border-color:var(--clr-quarantined-border); background:#fff5f5;">
-  <h3 style="color:#991b1b; font-size:1.1rem; margin-bottom:4px;">📦 Move Flagged PO Set to Quarantine Folder</h3>
-  <p class="muted" style="margin-bottom:14px; font-size:0.85rem;">
-    Moves this PO Set to the quarantine folder (<code>data/quarantine/</code>) and hides it from the active
-    worklists. The database rows, every stored PDF and the audit trail are kept. Nothing is destroyed.
-  </p>
-  <button 
-    class="btn btn-danger" 
-    data-testid="btn-archive"
-    onclick="document.getElementById('quarantine-delete-modal').classList.add('open')"
-    {% if is_locked %}disabled{% endif %}
-  >
-    Move to Quarantine Folder
-  </button>
-</div>
-
-<!-- Quarantine Delete Confirmation Modal -->
-<div id="quarantine-delete-modal" class="modal-backdrop">
-  <div class="modal-dialog" role="dialog" aria-modal="true">
-    <h3 style="margin-bottom:8px; color:#991b1b;">Move this Flagged PO Set to Quarantine Folder?</h3>
-    <p class="muted" style="margin-bottom:16px;">
-      This moves the set to the quarantine folder (<code>data/quarantine/</code>) and hides it from the
-      worklists. Its database rows, documents, line items, stored PDFs and audit trail are kept.
-      An audit log entry records the quarantine dismissal.
-    </p>
-    <div style="display:flex; gap:10px; justify-content:flex-end;">
-      <button class="btn btn-secondary" onclick="document.getElementById('quarantine-delete-modal').classList.remove('open')">
-        Cancel
-      </button>
-      <button 
-        class="btn btn-danger" 
-        data-testid="btn-confirm-archive"
-        hx-delete="/po_sets/{{ po_set.id }}/quarantine" 
-        hx-swap="none" 
-        onclick="document.getElementById('quarantine-delete-modal').classList.remove('open')"
-      >
-        Move to Quarantine Folder
-      </button>
-    </div>
-  </div>
-</div>
-{% endif %}
 
 {% if not is_archived %}
 <!-- Force Merge Modal -->
@@ -602,9 +560,7 @@
     </div>
   </div>
 </div>
-{% endif %}
 
-{% if not is_archived and status_str in ['pending', 'mismatched', 'quarantined', 'blocked_customs'] %}
 <div class="card" style="margin-top:20px; border-color:var(--clr-quarantined-border);" data-testid="remove-set-card">
   <h3 style="font-size:1rem; margin-bottom:6px;">Remove Set to Quarantine Folder</h3>
   <p class="muted" style="font-size:0.85rem; margin-bottom:12px;">
@@ -622,6 +578,7 @@
     <button type="submit" class="btn btn-danger" data-testid="btn-confirm-remove-set">Remove Set to Quarantine Folder</button>
   </form>
 </div>
+
 {% endif %}
 
 {% endblock %}

@@ -27,6 +27,7 @@ data/Automation/
 data/backup/
 data/combined/
 data/development/
+data/ui_test_probe/
 data/*.json
 data/extraction_dump.json
 data/raw_extractions/

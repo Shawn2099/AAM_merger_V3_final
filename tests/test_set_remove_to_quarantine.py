@@ -181,15 +181,25 @@ def test_the_input_copy_moves_into_the_folder_and_an_unrelated_file_stays(cfg):
     assert result["moved_input_count"] == 1
 
 
-def test_a_merged_set_is_refused_and_nothing_changes(cfg):
+def test_a_merged_set_can_be_removed_to_quarantine(cfg):
     set_id, doc_ids, _input, _unrelated = _set_with_files(cfg, status=POSetStatus.merged)
-    with pytest.raises(q.SetRemovalRefused) as exc:
-        q.remove_set_to_quarantine(set_id, cfg)
-    assert exc.value.status_code == 409
+    output_dir = Path(cfg.paths.output_folder)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_file = output_dir / "PO8300_merged.pdf"
+    out_file.write_bytes(b"%PDF-1.4 merged packet")
     with Session(get_engine(cfg)) as s:
-        assert s.get(POSet, set_id) is not None
-        assert len(s.scalars(select(Document).where(Document.id.in_(doc_ids))).all()) == 2
-    assert _removed_folders(cfg) == []
+        s.get(POSet, set_id).merged_output_path = str(out_file)
+        s.commit()
+    result = q.remove_set_to_quarantine(set_id, cfg)
+    with Session(get_engine(cfg)) as s:
+        assert s.get(POSet, set_id) is None
+        assert len(s.scalars(select(Document).where(Document.id.in_(doc_ids))).all()) == 0
+    folders = _removed_folders(cfg)
+    assert len(folders) == 1
+    moved_output = list((folders[0] / "output").glob("*.pdf"))
+    assert len(moved_output) == 1
+    assert moved_output[0].read_bytes() == b"%PDF-1.4 merged packet"
+    assert not out_file.exists()
 
 
 def test_an_unknown_set_is_404(cfg):
@@ -249,11 +259,15 @@ def test_the_route_refuses_while_a_sync_reads_documents(cfg, client, monkeypatch
         assert s.get(POSet, set_id) is not None
 
 
-def test_a_removed_set_card_is_shown_only_on_open_sets(cfg, client):
+def test_a_removed_set_card_is_shown_on_open_and_merged_sets_but_not_archived(cfg, client):
     set_id, _doc_ids, _input, _unrelated = _set_with_files(cfg)
     assert "remove-set-card" in client.get(f"/po_sets/{set_id}/view").text
     merged_id, _d, _i, _u = _set_with_files(cfg, po="PO8301", status=POSetStatus.merged)
-    assert "remove-set-card" not in client.get(f"/po_sets/{merged_id}/view").text
+    assert "remove-set-card" in client.get(f"/po_sets/{merged_id}/view").text
+    with Session(get_engine(cfg)) as s:
+        s.get(POSet, set_id).archived_at = datetime.now(UTC)
+        s.commit()
+    assert "remove-set-card" not in client.get(f"/po_sets/{set_id}/view").text
 
 
 def test_a_failed_delete_restores_the_input_files_and_deletes_nothing(cfg):

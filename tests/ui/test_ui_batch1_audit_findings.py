@@ -33,7 +33,11 @@ def _open(page: Page, manifest, name: str):
 
 
 def test_ui_remove_set_card_visibility(page: Page, manifest):
-    """Card is offered only for the statuses the plan allows."""
+    """The card is offered only on active sets that can be replaced.
+
+    A merged set is delivered and terminal; offering removal there would delete
+    a delivered packet's rows. Archived sets are read-only.
+    """
     for name in (
         "pending_no_dn",
         "needs_review_quantity",
@@ -150,16 +154,9 @@ def test_ui_set_aside_from_quarantine_stays(page: Page, manifest):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "P2-01 known issue: under-delivery shows 'Partial Delivery' / 'Waiting (part delivered)' "
-        "but the matrix row says 'Mismatch'. Fix the template/route, then this becomes XPASS."
-    ),
-)
 def test_ui_under_delivery_is_consistent(page: Page, manifest):
     sc = _open(page, manifest, "needs_review_quantity")
-    expect.soft(page.locator("body")).to_contain_text("Waiting (part delivered)")
+    expect.soft(page.locator("body")).to_contain_text("Partial Delivery")
     expect.soft(page.get_by_test_id("reason-card")).to_contain_text("Why this set is waiting")
     expect.soft(page.get_by_test_id("matrix-row").first).to_contain_text("Awaiting")
     assert sc["status"] == "mismatched"

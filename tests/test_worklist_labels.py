@@ -1,7 +1,7 @@
 """Batch 1 step 8: worklist labels on the dashboard.
 
 Display only. The status of a set does not change: a short delivery stays
-`mismatched`, and it is shown as "Waiting (part delivered)" only when every
+`mismatched`, and it is shown as "Partial Delivery" only when every
 disagreeing quantity is below the PO (decision D16).
 """
 
@@ -104,7 +104,7 @@ def _full(po_qty, dn_qty, si_qty):
 def test_under_delivery_reads_as_waiting_and_stays_mismatched(cfg, client):
     _make_set(cfg, "4500000101", POSetStatus.mismatched, _full(100, 60, 60))
     page = client.get("/dashboard").text
-    assert "Waiting (part delivered)" in page
+    assert "Partial Delivery" in page
     filtered = client.get("/dashboard?status=mismatched").text
     assert "4500000101" in filtered
 
@@ -112,8 +112,8 @@ def test_under_delivery_reads_as_waiting_and_stays_mismatched(cfg, client):
 def test_over_delivery_stays_needs_review(cfg, client):
     _make_set(cfg, "4500000102", POSetStatus.mismatched, _full(100, 120, 120))
     page = client.get("/dashboard").text
-    assert "Needs Review" in page
-    assert "Waiting (part delivered)" not in page
+    assert "Quantity Mismatch" in page
+    assert "Partial Delivery" not in page
 
 
 def test_mixed_short_and_over_stays_needs_review(cfg, client):
@@ -124,8 +124,8 @@ def test_mixed_short_and_over_stays_needs_review(cfg, client):
     ]
     _make_set(cfg, "4500000103", POSetStatus.mismatched, rows)
     page = client.get("/dashboard").text
-    assert "Needs Review" in page
-    assert "Waiting (part delivered)" not in page
+    assert "Quantity Mismatch" in page
+    assert "Partial Delivery" not in page
 
 
 def test_two_po_files_are_flagged_as_a_decision(cfg, client):
@@ -143,7 +143,7 @@ def test_two_po_files_are_flagged_as_a_decision(cfg, client):
 def test_one_po_pending_set_has_no_decision_tag(cfg, client):
     _make_set(cfg, "4500000105", POSetStatus.pending, _full(100, 100, 100)[:2])
     page = client.get("/dashboard").text
-    assert "Pending / Waiting" in page
+    assert "Awaiting Documents" in page
     assert "Needs a decision" not in page
 
 

@@ -301,13 +301,18 @@ def test_ui_a_02_a_force_merge_leaves_its_justification_in_the_audit_log(page: P
 
 
 def test_ui_a_03_archiving_a_quarantined_set_is_audited(page: Page, manifest, db):
-    """A-03: the archive action needs a row of its own, attached to that set."""
+    """A-03: the archive action needs a row of its own, attached to that set.
+
+    The set page no longer offers the old archive card; archiving is the
+    flagged-desk row action. The audit requirement is unchanged.
+    """
     sc = manifest["scenarios"]["audit_archive_target"]
     assert sc["mutable"] and sc["status"] == "quarantined"
-    page.goto(f"/po_sets/{sc['id']}/view")
-    page.get_by_test_id("btn-archive").click()
+    page.goto("/quarantine")
+    row = page.locator(f'[data-testid="quarantine-row"][data-set-id="{sc["id"]}"]')
+    row.get_by_test_id("btn-archive-row").click()
     with page.expect_response(re.compile(rf"/po_sets/{sc['id']}/quarantine$")) as resp:
-        page.get_by_test_id("btn-confirm-archive").click()
+        row.get_by_test_id("btn-confirm-archive-row").click()
     assert resp.value.status == 200, resp.value.text()
 
     page.goto("/audit")

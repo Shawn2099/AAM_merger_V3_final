@@ -9,6 +9,7 @@ show an amber review tag so the CA checks the item. These tests pin both halves
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -210,7 +211,7 @@ def test_a_description_match_does_not_mask_a_quantity_mismatch(cfg):
 
 
 # ---------------------------------------------------------------------------
-# The UI: amber "Merged • review" on the dashboard and detail, line tag in matrix
+# The UI: green "Merged & Ready" plus an amber "Review" tag on the dashboard and detail
 # ---------------------------------------------------------------------------
 
 
@@ -229,13 +230,14 @@ def test_dashboard_shows_an_amber_review_tag_for_a_merged_description_match(cfg,
 
     page = client.get("/dashboard")
     assert page.status_code == 200
-    assert "Merged • review" in page.text
+    assert "Merged &amp; Ready" in page.text
+    assert re.search(r'class="badge badge-desc"[^>]*>\s*Review\s*</span>', page.text, re.S)
     assert "Matched by description - needs a second check (2 lines)" in page.text
 
     detail = client.get(f"/po_sets/{set_id}/view")
     assert detail.status_code == 200
     assert "Description Match" in detail.text
-    assert "desc match" in detail.text
+    assert "Description Match" in detail.text
     assert "matched to PO line 1 by description" in detail.text
 
 
@@ -253,4 +255,4 @@ def test_a_plain_merged_set_keeps_the_green_badge(cfg, client):
     assert reconcile_po_set(set_id, cfg)["status"] == "merged"
     page = client.get("/dashboard")
     assert "Merged &amp; Ready" in page.text
-    assert "Merged • review" not in page.text
+    assert not re.search(r'class="badge badge-desc"[^>]*>\s*Review\s*</span>', page.text, re.S)
