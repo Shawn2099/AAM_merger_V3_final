@@ -2,12 +2,7 @@
 {% block title %}PO Set {{ po_set.po_no_normalized }} — 3-Way Reconciliation{% endblock %}
 
 {% block content %}
-<div class="print-only-header">
-  <h1 class="print-title">AAM Document Reconciler — Statutory 3-Way Matching Workpaper</h1>
-  <div class="print-subtitle">
-    Purchase Order: <strong>{{ po_set.po_no_normalized }}</strong> | System Record #{{ po_set.id }} | Generated: {{ po_set.updated_at | ist('%Y-%m-%d %H:%M:%S') }}
-  </div>
-</div>
+
 {% set status_str = po_set.status.value if po_set.status.value is defined else (po_set.status|string) %}
 
 {# Outcome of the last action on this page. An upload that changed nothing
@@ -291,16 +286,12 @@
           <th>Item Description</th>
           <th style="text-align:right;">PO Ordered</th>
           <th style="text-align:right;">DN Delivered</th>
-          <th style="text-align:right;">Delivery Var</th>
           <th style="text-align:right;">SI Invoiced</th>
-          <th style="text-align:right;">Invoice Var</th>
-          <th style="text-align:center;">Audit Verdict</th>
+          <th style="text-align:center;">Match Status</th>
         </tr>
       </thead>
       <tbody>
         {% for r in matrix_rows %}
-        {% set deliv_var = r.dn_agg_qty - r.po_qty %}
-        {% set inv_var = r.si_agg_qty - r.dn_agg_qty %}
         <tr class="{{ r.row_class }}" data-testid="matrix-row" data-line="{{ r.line_item_no }}">
           <td style="font-family:ui-monospace, monospace; font-weight:700;">#{{ r.line_item_no }}
             {% if r.mapped_from %}<span class="badge badge-desc" style="display:block; margin-top:4px; font-size:0.7rem;" title="Paired by a line-number rule, not as printed.">&larr; {{ r.mapped_from }}</span>{% endif %}</td>
@@ -325,29 +316,9 @@
           </td>
 
           <td style="text-align:right;">
-            {% if deliv_var == 0 %}
-              <span class="variance-zero">0</span>
-            {% elif deliv_var < 0 %}
-              <span class="variance-shortage" title="Delivery Shortage">{{ '{:g}'.format(deliv_var) }}</span>
-            {% else %}
-              <span class="variance-over" title="Over-Delivery">+{{ '{:g}'.format(deliv_var) }}</span>
-            {% endif %}
-          </td>
-
-          <td style="text-align:right;">
             <span data-testid="cell-si-qty" class="qty-val {% if r.si_agg_qty != r.po_qty %}text-danger{% endif %}">
               {{ '{:g}'.format(r.si_agg_qty) }}
             </span>
-          </td>
-
-          <td style="text-align:right;">
-            {% if inv_var == 0 %}
-              <span class="variance-zero">0</span>
-            {% elif inv_var < 0 %}
-              <span class="variance-shortage" title="Invoicing Shortage">{{ '{:g}'.format(inv_var) }}</span>
-            {% else %}
-              <span class="variance-over" title="Invoiced Exceeds Delivery">+{{ '{:g}'.format(inv_var) }}</span>
-            {% endif %}
           </td>
 
           <td style="text-align:center;">
@@ -360,42 +331,22 @@
         {% set total_po = matrix_rows|map(attribute='po_qty')|sum %}
         {% set total_dn = matrix_rows|map(attribute='dn_agg_qty')|sum %}
         {% set total_si = matrix_rows|map(attribute='si_agg_qty')|sum %}
-        {% set total_deliv_var = total_dn - total_po %}
-        {% set total_inv_var = total_si - total_dn %}
         <tr>
-          <td colspan="2" style="font-weight:700;">TOTALS SCHEDULE ({{ matrix_rows|length }} Lines)</td>
-          <td style="text-align:right;">
+          <td colspan="2" style="font-weight:700;">TOTAL QUANTITY ({{ matrix_rows|length }} Lines)</td>
+          <td style="text-align:right; font-weight:700;">
             <span class="qty-val" style="color:#0f172a;">{{ '{:g}'.format(total_po) }}</span>
           </td>
-          <td style="text-align:right;">
+          <td style="text-align:right; font-weight:700;">
             <span class="qty-val {% if total_dn != total_po %}text-danger{% endif %}">{{ '{:g}'.format(total_dn) }}</span>
           </td>
-          <td style="text-align:right;">
-            {% if total_deliv_var == 0 %}
-              <span class="variance-zero">0</span>
-            {% elif total_deliv_var < 0 %}
-              <span class="variance-shortage">{{ '{:g}'.format(total_deliv_var) }}</span>
-            {% else %}
-              <span class="variance-over">+{{ '{:g}'.format(total_deliv_var) }}</span>
-            {% endif %}
-          </td>
-          <td style="text-align:right;">
+          <td style="text-align:right; font-weight:700;">
             <span class="qty-val {% if total_si != total_po %}text-danger{% endif %}">{{ '{:g}'.format(total_si) }}</span>
-          </td>
-          <td style="text-align:right;">
-            {% if total_inv_var == 0 %}
-              <span class="variance-zero">0</span>
-            {% elif total_inv_var < 0 %}
-              <span class="variance-shortage">{{ '{:g}'.format(total_inv_var) }}</span>
-            {% else %}
-              <span class="variance-over">+{{ '{:g}'.format(total_inv_var) }}</span>
-            {% endif %}
           </td>
           <td style="text-align:center;">
             {% if total_po == total_dn and total_dn == total_si %}
               <span class="badge badge-merged">Balanced</span>
             {% else %}
-              <span class="badge badge-mismatched">Variance</span>
+              <span class="badge badge-mismatched">Mismatch</span>
             {% endif %}
           </td>
         </tr>
@@ -692,18 +643,5 @@
   </form>
 </div>
 {% endif %}
-
-<div class="print-only-signature">
-  <div class="print-sig-col">
-    <strong>Prepared &amp; Verified By (Audit Assistant):</strong><br><br><br>
-    Signature: _________________________________<br>
-    Date: ______________________________________
-  </div>
-  <div class="print-sig-col">
-    <strong>Reviewed &amp; Approved By (Audit Partner / CA):</strong><br><br><br>
-    Signature: _________________________________<br>
-    Membership No / Date: ______________________
-  </div>
-</div>
 
 {% endblock %}
