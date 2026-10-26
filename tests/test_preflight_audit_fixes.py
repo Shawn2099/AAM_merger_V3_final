@@ -154,3 +154,64 @@ def test_remove_set_unlinks_merged_packet_on_success(audit_cfg):
     archived_packet = removed_folder / "output" / "PO8888_PACKET.pdf"
     assert archived_packet.is_file()
     assert archived_packet.read_bytes() == b"%PDF-1.4 delivered packet to be removed"
+
+
+def test_windows_ctime_fallback_in_last_touched(monkeypatch):
+    """Python 3.11 on Windows lacks st_birthtime; st_ctime is the file creation time."""
+    from types import SimpleNamespace
+
+    from app.services import ingestion
+
+    st = SimpleNamespace(st_mtime=100.0, st_ctime=500.0)
+    monkeypatch.setattr(ingestion.os, "name", "nt")
+    assert ingestion._last_touched(st) == 500.0
+
+
+def test_non_windows_ignores_ctime(monkeypatch):
+    """On Linux/POSIX, ctime is metadata change time and must NOT be used as birthtime."""
+    from types import SimpleNamespace
+
+    from app.services import ingestion
+
+    st = SimpleNamespace(st_mtime=100.0, st_ctime=500.0)
+    monkeypatch.setattr(ingestion.os, "name", "posix")
+    assert ingestion._last_touched(st) == 100.0
+
+
+def test_failed_report_write_still_unlinks_packet(audit_cfg, monkeypatch):
+    """If REMOVED.txt write raises OSError, the delivered packet is still unlinked from output/."""
+    eng = get_engine(audit_cfg)
+    merged_file = Path(audit_cfg.paths.output_folder) / "PO7777_PACKET.pdf"
+    merged_file.write_bytes(b"%PDF-1.4 packet")
+    stored_file = Path(audit_cfg.paths.stored_documents_folder) / "po7777.pdf"
+    stored_file.write_bytes(b"%PDF-1.4 bytes")
+
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO7777", status=POSetStatus.merged, merged_output_path=str(merged_file))
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        s.add(
+            Document(
+                sha256_hash="7" * 64,
+                original_filename="po7777.pdf",
+                stored_path=str(stored_file),
+                doc_type=DocType.PO,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=ps.id,
+            )
+        )
+        s.commit()
+        set_id = ps.id
+
+    real_write = Path.write_text
+
+    def fake_write(self, *a, **kw):
+        if self.name == "REMOVED.txt":
+            raise OSError("Simulated disk error writing REMOVED.txt")
+        return real_write(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "write_text", fake_write)
+    q.remove_set_to_quarantine(set_id, audit_cfg)
+    assert not merged_file.exists(), "Merged packet should still be unlinked even if report write had OSError"
+
