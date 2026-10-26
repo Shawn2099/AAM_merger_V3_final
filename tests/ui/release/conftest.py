@@ -77,14 +77,43 @@ def ui_env(tmp_path_factory):
     try:
         yield env
     finally:
-        proc = env.proc
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:  # pragma: no cover
-            proc.kill()
-        if proc.stdout is not None:
-            proc.stdout.close()
+        _stop_env(env)
+
+
+def _stop_env(env) -> None:
+    proc = env.proc
+    proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:  # pragma: no cover
+        proc.kill()
+    if proc.stdout is not None:
+        proc.stdout.close()
+
+
+@pytest.fixture(scope="session")
+def visual_ui_env(tmp_path_factory):
+    """A third, untouched environment for visual baselines.
+
+    Other release tests change dashboard counts (merge, archive, remove). The
+    tab bar can change height as a count grows, which makes a pixel baseline
+    depend on test order. Visual tests read this environment and never write.
+    """
+    env = _start_release_env(tmp_path_factory, "ui_test_visual_env")
+    try:
+        yield env
+    finally:
+        _stop_env(env)
+
+
+@pytest.fixture(scope="session")
+def visual_base_url(visual_ui_env) -> str:
+    return visual_ui_env.base
+
+
+@pytest.fixture(scope="session")
+def visual_manifest(visual_ui_env) -> dict:
+    return visual_ui_env.manifest
 
 
 @pytest.fixture(scope="session")

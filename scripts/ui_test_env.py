@@ -468,6 +468,17 @@ SCENARIOS: dict[str, dict] = {
             ("SI", "INV-7000053.pdf", "7000053", [L("1", "5", "Lamp")]),
         ],
     },
+    # The product decision of 2026-10-26 allows removing a delivered set. The
+    # export must copy the merged packet and every source PDF before the rows go.
+    "release_remove_merged_target": {
+        "po": "7000054",
+        "mutable": True,
+        "docs": [
+            ("PO", "PO-7000054.pdf", None, [L("1", "5", "Gasket")]),
+            ("DN", "DN-7000054.pdf", "7000054", [L("1", "5", "Gasket")]),
+            ("SI", "INV-7000054.pdf", "7000054", [L("1", "5", "Gasket")]),
+        ],
+    },
 }
 
 # Documents that stay in the holding area (the Unclassified page). `po_ref` None means the

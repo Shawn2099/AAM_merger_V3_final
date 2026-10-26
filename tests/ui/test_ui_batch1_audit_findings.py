@@ -33,21 +33,23 @@ def _open(page: Page, manifest, name: str):
 
 
 def test_ui_remove_set_card_visibility(page: Page, manifest):
-    """The card is offered only on active sets that can be replaced.
+    """The card is offered on every active set, including a delivered one.
 
-    A merged set is delivered and terminal; offering removal there would delete
-    a delivered packet's rows. Archived sets are read-only.
+    The product decision of 2026-10-26 allows replacing a merged set; the
+    removal export copies the delivered packet and every source PDF before the
+    rows are deleted. Archived sets are read-only.
     """
     for name in (
         "pending_no_dn",
         "needs_review_quantity",
         "quarantined_unmatched_vendor_line",
         "awaiting_customs",
+        "merged_basic",
     ):
         _open(page, manifest, name)
         expect(page.get_by_test_id("remove-set-card")).to_be_visible()
 
-    for name in ("merged_basic", "archived_readonly"):
+    for name in ("archived_readonly",):
         _open(page, manifest, name)
         expect(page.get_by_test_id("remove-set-card")).to_have_count(0)
 

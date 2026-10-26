@@ -143,6 +143,51 @@ def test_remove_set_message_and_full_export_on_disk(page: Page, manifest, db, ha
     expect(page.locator("body")).to_contain_text("archived or removed")
 
 
+def test_merged_set_removal_exports_the_delivered_packet(page: Page, manifest, db, harness_paths):
+    """A delivered set may be replaced (2026-10-26 decision); the packet must survive.
+
+    The UI now offers Remove Set on a merged set. The export has to contain both
+    the source PDFs and the delivered packet before the rows disappear.
+    """
+    sc = manifest["scenarios"]["release_remove_merged_target"]
+    assert sc["status"] == "merged"
+    packet_row = db.execute(
+        "select merged_output_path from po_sets where id=?", (sc["id"],)
+    ).fetchone()
+    packet = _absolute(packet_row["merged_output_path"])
+    assert packet.is_file(), f"the scenario has no delivered packet: {packet}"
+    documents = db.execute(
+        "select id, original_filename from documents where po_set_id=?", (sc["id"],)
+    ).fetchall()
+
+    page.goto(f"/po_sets/{sc['id']}/view")
+    expect(page.get_by_test_id("remove-set-card")).to_be_visible()
+    page.once("dialog", lambda dialog: dialog.accept())
+    with page.expect_navigation():
+        page.get_by_test_id("btn-confirm-remove-set").click()
+
+    result = page.get_by_test_id("remove-set-result")
+    expect(result).to_be_visible()
+    assert "Removed PO Set" in result.inner_text()
+    relative = result.locator("code").inner_text().strip()
+    folder = harness_paths["quarantine_folder"] / relative.split("quarantine/", 1)[1]
+    assert folder.is_dir()
+
+    exported_packets = list((folder / "output").glob("*.pdf"))
+    assert exported_packets, f"the delivered packet was not copied into {folder / 'output'}"
+    assert all(copy.stat().st_size > 0 for copy in exported_packets)
+    assert len(PdfReader(str(exported_packets[0])).pages) >= 1
+    assert not packet.exists(), "the output packet should have moved into the removal export"
+
+    files = list((folder / "files").glob("*.pdf"))
+    assert len(files) == len(documents)
+    assert (folder / "REMOVED.txt").is_file()
+    assert (folder / "manifest.json").is_file()
+    assert (
+        db.execute("select count(*) from po_sets where id=?", (sc["id"],)).fetchone()[0] == 0
+    )
+
+
 def test_archive_message_and_export_on_disk(page: Page, manifest, db):
     sc = manifest["scenarios"]["release_archive_target"]
     documents = db.execute(

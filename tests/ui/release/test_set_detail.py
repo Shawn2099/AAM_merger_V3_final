@@ -75,7 +75,7 @@ def test_customs_switch_reflects_the_stored_state(
 @pytest.mark.parametrize(
     "scenario,visible",
     [
-        ("merged_basic", False),
+        ("merged_basic", True),
         ("pending_no_dn", True),
         ("needs_review_quantity", True),
         ("awaiting_customs", True),
