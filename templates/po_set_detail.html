@@ -252,10 +252,10 @@
   <div class="card-header" style="margin-bottom:8px;">
     <div>
       <h2 class="card-title">
-        <span>3-Way Reconciliation Schedule</span>
+        <span>3-Way Reconciliation Matrix</span>
       </h2>
       <p class="card-subtitle">
-        Direct side-by-side comparison of <strong>PO Ordered</strong> vs <strong>DN Delivered</strong> vs <strong>SI Invoiced</strong> quantities with mathematical variance tracking.
+        Direct side-by-side comparison of <strong>PO Ordered</strong> vs <strong>DN Delivered</strong> vs <strong>SI Invoiced</strong> quantities.
       </p>
     </div>
   </div>
@@ -327,30 +327,6 @@
         </tr>
         {% endfor %}
       </tbody>
-      <tfoot>
-        {% set total_po = matrix_rows|map(attribute='po_qty')|sum %}
-        {% set total_dn = matrix_rows|map(attribute='dn_agg_qty')|sum %}
-        {% set total_si = matrix_rows|map(attribute='si_agg_qty')|sum %}
-        <tr>
-          <td colspan="2" style="font-weight:700;">TOTAL QUANTITY ({{ matrix_rows|length }} Lines)</td>
-          <td style="text-align:right; font-weight:700;">
-            <span class="qty-val" style="color:#0f172a;">{{ '{:g}'.format(total_po) }}</span>
-          </td>
-          <td style="text-align:right; font-weight:700;">
-            <span class="qty-val {% if total_dn != total_po %}text-danger{% endif %}">{{ '{:g}'.format(total_dn) }}</span>
-          </td>
-          <td style="text-align:right; font-weight:700;">
-            <span class="qty-val {% if total_si != total_po %}text-danger{% endif %}">{{ '{:g}'.format(total_si) }}</span>
-          </td>
-          <td style="text-align:center;">
-            {% if total_po == total_dn and total_dn == total_si %}
-              <span class="badge badge-merged">Balanced</span>
-            {% else %}
-              <span class="badge badge-mismatched">Mismatch</span>
-            {% endif %}
-          </td>
-        </tr>
-      </tfoot>
     </table>
   </div>
   {% else %}
