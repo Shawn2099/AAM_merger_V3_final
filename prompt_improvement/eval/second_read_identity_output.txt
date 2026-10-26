@@ -1,6 +1,0 @@
-P5: identity-wrong A reads caught 4/6 (66.7%)
-H_P5: identity-wrong A reads caught 0/0
-pooled img150 tuning: identity-wrong A reads caught 28/100 (28.0%)
-pooled img150 held-out: identity-wrong A reads caught 0/6 (0.0%)
-pooled img150 all: identity-wrong A reads caught 28/106 (26.4%)
-distinct gold line values: tuning 90, held-out 66, total 156; rule-of-three bound 3/156 = 0.0192
