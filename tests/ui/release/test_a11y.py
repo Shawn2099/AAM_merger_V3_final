@@ -33,6 +33,7 @@ def test_no_critical_or_serious_axe_violations(page: Page, axe, artifacts, path:
     page.goto(path)
     page.wait_for_load_state("networkidle")
     results = axe.run(page)
+    artifacts.mkdir(parents=True, exist_ok=True)
     (artifacts / f"axe-{path.strip('/').replace('/', '-')}.json").write_text(
         json.dumps(results.response, indent=2), encoding="utf-8"
     )

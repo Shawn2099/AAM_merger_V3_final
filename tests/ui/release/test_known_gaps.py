@@ -1,7 +1,8 @@
-"""Known gaps found by the interactive release pass.
+"""Release-gate checks for the gaps found by the interactive pass.
 
-Each test fails today for a documented product/UX reason and is a strict xfail:
-when the gap is fixed, the test XPASSes and the marker must be removed.
+The tests without a marker are regression guards for issues fixed in
+``d3c7f8a``. The one strict xfail is a remaining product gap: when it is fixed
+it XPASSes, and the marker must be removed.
 """
 
 from __future__ import annotations
@@ -59,3 +60,19 @@ def test_upload_success_shows_an_explicit_confirmation(page: Page, manifest):
         page.get_by_test_id("notice").count() >= 1
         or page.locator(".toast").count() >= 1
     ), "no success message after Upload & Attach"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "P2 remaining: an orphan-line quarantine shows a quantity verdict "
+        "('Mismatch (PO, DN, SI)') while the reason is 'a line could not be matched'. "
+        "The matrix does not name the orphan line."
+    ),
+)
+def test_orphan_line_quarantine_matrix_names_the_orphan(page: Page, manifest):
+    sc = manifest["scenarios"]["quarantined_unmatched_vendor_line"]
+    page.goto(f"/po_sets/{sc['id']}/view")
+    matrix = page.get_by_test_id("matrix-row").first.inner_text().lower()
+    assert "no po line" in matrix or "orphan" in matrix, matrix
+
