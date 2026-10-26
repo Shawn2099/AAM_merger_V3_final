@@ -230,18 +230,18 @@ NAV_ARIA = "".join(
         "- navigation:\n",
         '  - link "⚡ AAM Merger v3":\n',
         "    - /url: /dashboard\n",
-        '  - link "📊 Dashboard":\n',
+        '  - link "📊 Reconciliation Dashboard":\n',
         "    - /url: /dashboard\n",
         # The count follows the holding area, which other tests change. Playwright
         # 1.64 only treats a whole unquoted scalar as a regex, so the link name
         # is one regex with the literal badge text inside it.
-        "  - link /❓ Unclassified \\d+/:\n",
+        "  - link /❓ Unmatched Files \\d+/:\n",
         "    - /url: /unclassified\n",
-        '  - link "🚨 Quarantine":\n',
+        '  - link "🚨 Flagged":\n',
         "    - /url: /quarantine\n",
         '  - link "📜 Audit Log":\n',
         "    - /url: /audit\n",
-        '  - link "🧩 Merge PDFs":\n',
+        '  - link "🧩 Quick PDF Merger":\n',
         "    - /url: /manual/merger\n",
         '  - link "Service Online":\n',
         "    - /url: /health",

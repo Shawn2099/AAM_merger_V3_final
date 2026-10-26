@@ -6,8 +6,8 @@
     <span class="kpi-desc">Managed across pipeline</span>
   </a>
 
-  <a href="/dashboard?status=merged" class="kpi-card kpi-merged" data-testid="kpi-merged" title="Filter by Merged (Ready)">
-    <span class="kpi-title">✅ Merged &amp; Ready</span>
+  <a href="/dashboard?status=merged" class="kpi-card kpi-merged" data-testid="kpi-merged" title="Filter by Matched & Completed">
+    <span class="kpi-title">✅ Matched &amp; Completed</span>
     <span class="kpi-value" style="color:var(--clr-merged-text);">
       {{ stats.merged if stats else 0 }}
       <small style="font-size:0.9rem; font-weight:600;">({{ stats.merged_pct if stats else 0 }}%)</small>
@@ -15,14 +15,14 @@
     <span class="kpi-desc">Fully reconciled packets</span>
   </a>
 
-  <a href="/dashboard?status=mismatched" class="kpi-card kpi-mismatched" data-testid="kpi-mismatched" title="Filter by Mismatched (Needs Review)">
-    <span class="kpi-title">⚠️ Needs Review</span>
+  <a href="/dashboard?status=mismatched" class="kpi-card kpi-mismatched" data-testid="kpi-mismatched" title="Filter by Quantity Discrepancy">
+    <span class="kpi-title">⚠️ Quantity Discrepancy</span>
     <span class="kpi-value" style="color:var(--clr-mismatch-text);">{{ stats.mismatched if stats else 0 }}</span>
     <span class="kpi-desc">Quantity discrepancies</span>
   </a>
 
-  <a href="/dashboard?status=blocked_customs" class="kpi-card kpi-blocked" data-testid="kpi-blocked-customs" title="Filter by Awaiting Customs">
-    <span class="kpi-title">🔒 Awaiting Customs</span>
+  <a href="/dashboard?status=blocked_customs" class="kpi-card kpi-blocked" data-testid="kpi-blocked-customs" title="Filter by Awaiting Customs/Shipping Docs">
+    <span class="kpi-title">🔒 Awaiting Customs/Shipping Docs</span>
     <span class="kpi-value" style="color:var(--clr-blocked-text);">{{ stats.blocked_customs if stats else 0 }}</span>
     <span class="kpi-desc">Needs customs/shipping docs</span>
   </a>

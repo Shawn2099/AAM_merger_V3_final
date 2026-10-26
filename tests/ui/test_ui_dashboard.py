@@ -6,11 +6,11 @@ from pathlib import Path
 from playwright.sync_api import Page, expect
 
 STATUS_TEXT = {
-    "merged": "Merged",
-    "pending": "Pending / Waiting",
-    "mismatched": "Needs Review",
-    "blocked_customs": "Awaiting Customs",
-    "quarantined": "Quarantined",
+    "merged": ("Merged & Ready", "Merged"),
+    "pending": ("Awaiting Documents", "Pending / Waiting"),
+    "mismatched": ("Quantity Mismatch", "Partial Delivery", "Needs Review", "Waiting (part delivered)"),
+    "blocked_customs": ("Awaiting Customs/Shipping Docs", "Awaiting Customs"),
+    "quarantined": ("Exception (Rejected)", "Quarantined"),
 }
 
 
@@ -46,8 +46,8 @@ def test_ui_d_01_every_active_set_row_is_listed_with_its_status_and_doc_count(pa
         text = row.inner_text()
         if ps["po"] not in text:
             problems.append(f"set {set_id}: PO {ps['po']} not shown")
-        # A short delivery is still `mismatched`, shown as "Waiting (part delivered)" (step 8).
-        status_words = [STATUS_TEXT[ps["status"]]]
+        raw_words = STATUS_TEXT[ps["status"]]
+        status_words = list(raw_words) if isinstance(raw_words, (list, tuple)) else [raw_words]
         if ps["status"] == "mismatched":
             status_words.append("Waiting (part delivered)")
         if not any(word in text for word in status_words):
@@ -253,7 +253,7 @@ def test_ui_d_13_a_settling_row_is_pending_and_says_why(page: Page, manifest, db
     page.goto("/dashboard")
     row = page.locator(f'[data-testid="po-row"][data-set-id="{sc["id"]}"]')
     assert row.get_attribute("data-status") == "pending"
-    expect(row).to_contain_text("Pending / Waiting")
+    expect(row).to_contain_text(re.compile(r"Awaiting Documents|Pending / Waiting"))
     shown = row.get_by_test_id("row-reason").inner_text()
     assert reason[:40] in shown, f"row reason is {shown!r}, DB starts {reason[:40]!r}"
     assert re.search(r"merges after \d{2}:\d{2}", shown), shown

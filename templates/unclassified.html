@@ -7,7 +7,8 @@
   <div class="card-header" style="margin-bottom:8px;">
     <div>
       <h2 class="card-title">
-        <span>❓ Unclassified Documents Holding Area</span>
+        <span>❓ Unmatched Files</span>
+        <small style="font-size:0.85rem; color:var(--text-muted); font-weight:normal;">(Unclassified Documents)</small>
         <span class="badge badge-gray" data-testid="unclassified-count" style="font-size:0.8rem;">{{ documents|length }} awaiting classification</span>
         {% if failed_count %}
         <span class="badge badge-failed" style="font-size:0.8rem;" title="Extraction permanently failed — these will not be retried automatically.">{{ failed_count }} failed</span>
@@ -152,7 +153,7 @@
                   hx-confirm="Move this file to the quarantine folder? It leaves this list. The original is kept there, and you can put a fixed copy back in the input folder."
                   title="Copy this file to the quarantine folder and remove it from this list"
                 >
-                  <span>Move to quarantine</span>
+                  <span>Move to Quarantine</span>
                 </button>
 
                 {% if not doc.ingest_reject_reason %}<button 

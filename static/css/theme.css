@@ -918,9 +918,77 @@ table.data-table tbody tr:hover td {
   .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .table-container { overflow-x: auto; }
 }
-@media (max-width: 600px) {
-  .nav-links { flex-wrap: wrap; }
+
+/* Interactive Customs Toggle Button Switch */
+.customs-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+  color: var(--text-main);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
 }
+
+.customs-toggle-btn:hover:not(:disabled) {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.customs-toggle-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.customs-toggle-btn .toggle-track {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  background: #cbd5e1;
+  border-radius: 11px;
+  transition: background-color 0.2s ease;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.customs-toggle-btn .toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s ease;
+}
+
+.customs-toggle-btn.is-active {
+  background: #eff6ff;
+  border-color: #3b82f6;
+  color: #1d4ed8;
+}
+
+.customs-toggle-btn.is-active .toggle-track {
+  background: #2563eb;
+}
+
+.customs-toggle-btn.is-active .toggle-thumb {
+  transform: translateX(16px);
+}
+
+.customs-toggle-btn .toggle-status-text {
+  font-weight: 700;
+  font-size: 0.8rem;
+  min-width: 28px;
+}
+
 
 
 

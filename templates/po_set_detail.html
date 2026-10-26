@@ -70,16 +70,16 @@
         {% endif %}
       {% elif status_str == 'mismatched' %}
         {% if set_shortfall == 'under' %}
-          <span class="badge badge-pending" style="font-size:0.9rem; padding:6px 14px;">Waiting (part delivered)</span>
+          <span class="badge badge-pending" style="font-size:0.9rem; padding:6px 14px;" title="Waiting (part delivered)">Partial Delivery</span>
         {% else %}
-          <span class="badge badge-mismatched" style="font-size:0.9rem; padding:6px 14px;">Needs Review (Discrepancy)</span>
+          <span class="badge badge-mismatched" style="font-size:0.9rem; padding:6px 14px;">Quantity Mismatch</span>
         {% endif %}
       {% elif status_str == 'blocked_customs' %}
-        <span class="badge badge-blocked" style="font-size:0.9rem; padding:6px 14px;">🔒 Awaiting Customs (2 docs needed)</span>
+        <span class="badge badge-blocked" style="font-size:0.9rem; padding:6px 14px;">🔒 Awaiting Customs/Shipping Docs (2 docs needed)</span>
       {% elif status_str == 'quarantined' %}
-        <span class="badge badge-quarantined" style="font-size:0.9rem; padding:6px 14px;">🚨 Quarantined</span>
+        <span class="badge badge-quarantined" style="font-size:0.9rem; padding:6px 14px;">🚨 Exception (Rejected)</span>
       {% elif status_str == 'pending' %}
-        <span class="badge badge-pending" style="font-size:0.9rem; padding:6px 14px;">Pending / Waiting</span>
+        <span class="badge badge-pending" style="font-size:0.9rem; padding:6px 14px;">Awaiting Documents</span>
       {% endif %}
 
       {% if is_locked %}
@@ -137,18 +137,22 @@
       A sync is running (a scan of the input folder). Actions on this set are paused while it runs and resume when it finishes. A large batch can take an hour or more; reload this page after the scan ends.
     </div>
     {% endif %}
-    <!-- Customs Toggle -->
+    <!-- Customs Toggle Switch -->
     <button
+      type="button"
       data-testid="btn-toggle-customs"
-      class="btn {% if po_set.has_customs_toggle %}btn-primary{% else %}btn-secondary{% endif %}"
+      class="customs-toggle-btn {% if po_set.has_customs_toggle %}is-active{% endif %}"
       hx-post="/po_sets/{{ po_set.id }}/toggle_customs"
       hx-swap="none"
       hx-on::after-request="if (event.detail.successful) { let b = {}; try { b = JSON.parse(event.detail.xhr.responseText) } catch (e) {} if (!b.append_pending) location.reload() }"
       title="Toggle whether Customs and Shipping documents are required for this PO Set"
       {% if is_locked or sync_running %}disabled{% endif %}
     >
-      <span>🛡️ Customs Check:</span>
-      <strong>{{ 'ON' if po_set.has_customs_toggle else 'OFF' }}</strong>
+      <span class="customs-toggle-text">🛡️ Customs Requirement:</span>
+      <span class="toggle-track" aria-hidden="true">
+        <span class="toggle-thumb"></span>
+      </span>
+      <span class="toggle-status-text">{{ 'ON' if po_set.has_customs_toggle else 'OFF' }}</span>
     </button>
 
     <!-- Merge now (gated) — use after finishing a manual step, e.g. uploading
