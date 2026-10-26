@@ -9,7 +9,7 @@
       <h2 class="card-title">
         <span>❓ Unmatched Files</span>
         <small style="font-size:0.85rem; color:var(--text-muted); font-weight:normal;">(Unclassified Documents)</small>
-        <span class="badge badge-gray" data-testid="unclassified-count" style="font-size:0.8rem;">{{ documents|length }} awaiting classification</span>
+        <span class="badge badge-gray" id="unclassified-header-count" data-testid="unclassified-count" style="font-size:0.8rem;">{{ documents|length }} awaiting classification</span>
         {% if failed_count %}
         <span class="badge badge-failed" style="font-size:0.8rem;" title="Extraction permanently failed — these will not be retried automatically.">{{ failed_count }} failed</span>
         {% endif %}
@@ -34,20 +34,20 @@
   {% set all_c = documents|length %}
   {% set needs_po_c = all_c - failed_c %}
 
-  <div x-data="{ activeTab: 'all' }" style="margin-top:16px;">
+  <div x-data="{ activeTab: 'needs_po' }" style="margin-top:16px;">
     <!-- Sub-View Quick Filter Tabs -->
-    <div class="status-tabs" style="margin-bottom:12px;">
-      <button type="button" class="tab-btn" :class="{ 'active': activeTab === 'all' }" @click="activeTab = 'all'" data-testid="tab-subview-all">
+    <div class="status-tabs" role="tablist" style="margin-bottom:12px;">
+      <button type="button" class="tab-btn" role="tab" :aria-selected="activeTab === 'all' ? 'true' : 'false'" :class="{ 'active': activeTab === 'all' }" @click="activeTab = 'all'" data-testid="tab-subview-all">
         <span>All Unmatched Files</span>
-        <span class="tab-count">{{ all_c }}</span>
+        <span class="tab-count" id="count-subview-all">{{ all_c }}</span>
       </button>
-      <button type="button" class="tab-btn" :class="{ 'active': activeTab === 'needs_po' }" @click="activeTab = 'needs_po'" data-testid="tab-subview-needs-po">
+      <button type="button" class="tab-btn" role="tab" :aria-selected="activeTab === 'needs_po' ? 'true' : 'false'" :class="{ 'active': activeTab === 'needs_po' }" @click="activeTab = 'needs_po'" data-testid="tab-subview-needs-po">
         <span>Needs PO Number</span>
-        <span class="tab-count">{{ needs_po_c }}</span>
+        <span class="tab-count" id="count-subview-needs-po">{{ needs_po_c }}</span>
       </button>
-      <button type="button" class="tab-btn" :class="{ 'active': activeTab === 'failed' }" @click="activeTab = 'failed'" data-testid="tab-subview-failed">
+      <button type="button" class="tab-btn" role="tab" :aria-selected="activeTab === 'failed' ? 'true' : 'false'" :class="{ 'active': activeTab === 'failed' }" @click="activeTab = 'failed'" data-testid="tab-subview-failed">
         <span>Unreadable / Failed</span>
-        <span class="tab-count">{{ failed_c }}</span>
+        <span class="tab-count" id="count-subview-failed">{{ failed_c }}</span>
       </button>
     </div>
 

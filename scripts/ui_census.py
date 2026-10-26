@@ -104,12 +104,14 @@ def _routes(manifest: dict) -> list[dict]:
         {"id": "settings", "path": "/settings", "expected": 200},
         {"id": "merger", "path": "/manual/merger", "expected": 200},
         {"id": "not-found", "path": "/po_sets/999999/view", "expected": 404},
-        {"id": "bad-filter", "path": "/dashboard?status=nonsense", "expected": 200},
+        {"id": "bad-filter", "path": "/dashboard?status=nonsense", "expected": 422},
     ]
     return routes
 
 
-def _capture(page, axe, record: dict, base: str, out: Path) -> None:
+def _capture(context, axe, record: dict, base: str, out: Path) -> None:
+    """Capture one route in its own page, so listeners cannot leak between routes."""
+    page = context.new_page()
     console: list[dict] = []
     errors: list[str] = []
     failed: list[dict] = []
@@ -180,25 +182,47 @@ def _capture(page, axe, record: dict, base: str, out: Path) -> None:
     record["failed"] = failed
     record["bad_responses"] = bad
 
-    page.remove_listener("console", on_console)
+    page.close()
 
 
 def _problems(record: dict) -> list[str]:
     problems = []
-    if record.get("status") != record.get("expected"):
-        problems.append(f"status {record.get('status')} (expected {record.get('expected')})")
+    expected = record.get("expected")
+    actual = record.get("status")
+    if actual != expected:
+        problems.append(f"status {actual} (expected {expected})")
+
+    # A page that deliberately answers 404/422 is not a defect; the response
+    # for its own URL is expected. Anything else (a missing asset, a 500) is.
+    unexpected_responses = [
+        response
+        for response in record["bad_responses"]
+        if FAVICON not in response["url"]
+        and not (
+            actual == expected
+            and expected is not None
+            and expected >= 400
+            and response["status"] == expected
+        )
+    ]
+
     for message in record["pageerrors"]:
         problems.append(f"JS error: {message}")
     for message in record["console"]:
-        if FAVICON not in (message.get("location") or {}).get("url", ""):
-            problems.append(f"console: {message['text']}")
+        location = (message.get("location") or {}).get("url", "")
+        if FAVICON in location:
+            continue
+        # Chrome logs a generic "Failed to load resource" line for the page's
+        # own expected 404/422 and for the missing favicon. Only keep it when
+        # some response is genuinely unexpected.
+        if message["text"].startswith("Failed to load resource") and not unexpected_responses:
+            continue
+        problems.append(f"console: {message['text']}")
     for request in record["failed"]:
-        problems.append(f"request failed: {request['url']}")
-    for response in record["bad_responses"]:
-        if FAVICON not in response["url"] and not (
-            record.get("expected") == 404 and response["status"] == 404
-        ):
-            problems.append(f"HTTP {response['status']}: {response['url']}")
+        if FAVICON not in request["url"]:
+            problems.append(f"request failed: {request['url']}")
+    for response in unexpected_responses:
+        problems.append(f"HTTP {response['status']}: {response['url']}")
     for violation in record["axe"]["violations"]:
         if violation["impact"] in ("critical", "serious"):
             problems.append(
@@ -374,7 +398,6 @@ def main() -> int:
             context = browser.new_context(
                 viewport={"width": 1440, "height": 900}, accept_downloads=True
             )
-            page = context.new_page()
             axe = Axe()
             for route in _routes(manifest):
                 record = {
@@ -386,7 +409,7 @@ def main() -> int:
                     "screens": {},
                 }
                 try:
-                    _capture(page, axe, record, base, SHOT_DIR)
+                    _capture(context, axe, record, base, SHOT_DIR)
                 except Exception as exc:  # keep the census going
                     record["pageerrors"].append(f"census capture failed: {exc}")
                     record.setdefault("rows", {"po": 0, "quarantine": 0, "unclassified": 0, "audit": 0, "documents": 0})

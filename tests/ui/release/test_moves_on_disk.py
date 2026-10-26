@@ -282,7 +282,7 @@ def test_upload_stores_the_file_and_a_bad_upload_explains_itself(
     sc = manifest["scenarios"]["release_upload_target"]
     page.goto(f"/po_sets/{sc['id']}/view")
     form = page.get_by_test_id("upload-form")
-    data = pdf_bytes()
+    data = pdf_bytes(pages=2)
 
     form.locator('input[type="file"]').set_input_files(
         {"name": "CUSTOMS-release.pdf", "mimeType": "application/pdf", "buffer": data}

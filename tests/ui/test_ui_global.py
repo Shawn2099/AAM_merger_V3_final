@@ -105,12 +105,6 @@ def test_ui_g_01_every_page_loads_without_errors(page: Page, base_url, manifest)
         assert served.status == 200, f"{asset} answered {served.status}"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "SUSPECTED PRODUCT BUG UI-G01: no favicon; every page load logs a 404 for /favicon.ico"
-    ),
-)
 def test_ui_g_01b_a_favicon_is_served(page: Page, base_url):
     """G-01b: the 404 G-01 has to excuse is a real (small) defect."""
     assert page.request.get(f"{base_url}/favicon.ico").status == 200

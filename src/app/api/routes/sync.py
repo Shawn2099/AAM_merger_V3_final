@@ -65,6 +65,16 @@ def trigger_sync():
 
 @router.get("/sync/status")
 def sync_status():
-    """Pollable status for HTMX disable (FR-CONC-3). 200 with running flag."""
+    """Pollable status for HTMX disable (FR-CONC-3) and live progress tracking."""
     running = _is_sync_running()
-    return {"running": running, "detail": "Sync already running" if running else "idle"}
+    data = {"running": running, "detail": "Sync already running" if running else "idle"}
+    if running:
+        try:
+            from app.services.sync_progress import progress_tracker
+
+            snapshot = progress_tracker.snapshot()
+            data.update(snapshot)
+            data["running"] = True  # Ensure running boolean remains canonical
+        except Exception:
+            pass
+    return data

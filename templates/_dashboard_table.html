@@ -12,7 +12,7 @@
         <th scope="col">Why</th>
         <th scope="col">Documents</th>
         <th scope="col">Age</th>
-        <th scope="col" style="text-align:right;">Actions</th>
+        <th scope="col" class="actions-col" style="text-align:right;">Actions</th>
       </tr>
     </thead>
     <tbody id="po-table-body">
@@ -121,16 +121,14 @@
           {% endif %}
         </td>
 
-        <td style="text-align:right;">
-          <div style="display:inline-flex; gap:6px; align-items:center;">
+        <td class="actions-cell" style="text-align:right; white-space:nowrap;">
+          <div style="display:inline-flex; gap:6px; align-items:center; justify-content:flex-end; white-space:nowrap; flex-wrap:nowrap;">
             <a 
               href="/po_sets/{{ ps.id }}/view" 
               class="btn btn-secondary btn-sm"
               title="Inspect 3-Way Match &amp; Documents"
-            >
-              <span>View Set</span>
-              <span style="font-size:0.8rem;">→</span>
-            </a>
+              style="text-decoration:none; white-space:nowrap;"
+            >View Set &rarr;</a>
 
             {% if status_str == 'merged' and ps.has_merged_file %}
               <a 
@@ -138,9 +136,8 @@
                 class="btn btn-success btn-sm"
                 title="Download final merged PDF"
                 download
-              >
-                <span>📥 PDF</span>
-              </a>
+                style="text-decoration:none; white-space:nowrap; display:inline-flex; align-items:center; gap:4px;"
+              >📥 PDF</a>
             {% endif %}
           </div>
         </td>

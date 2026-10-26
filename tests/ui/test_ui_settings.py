@@ -115,8 +115,8 @@ def settings_env(tmp_path_factory):
 
 
 def _bump_mtime(path: Path) -> None:
-    stat_now = path.stat()
-    os.utime(path, ns=(stat_now.st_atime_ns, stat_now.st_mtime_ns + 1_000_000_000))
+    now = max(time.time() + 2.0, path.stat().st_mtime + 2.0)
+    os.utime(path, (now, now))
 
 
 def _delete_settings_audit_rows(env) -> None:
@@ -154,7 +154,7 @@ def _served_interval(env) -> str | None:
     return match.group(1) if match else None
 
 
-def _wait_for_interval(env, cfg_bytes: bytes, timeout: float = 20.0) -> None:
+def _wait_for_interval(env, cfg_bytes: bytes, timeout: float = 20.0) -> bool:
     """Wait until the server answers with the restored file (it caches by stat signature)."""
     expected = str(yaml.safe_load(cfg_bytes)["schedule"]["poll_interval_seconds"])
     deadline = time.monotonic() + timeout
@@ -162,9 +162,24 @@ def _wait_for_interval(env, cfg_bytes: bytes, timeout: float = 20.0) -> None:
     while time.monotonic() < deadline:
         seen = _served_interval(env)
         if seen == expected:
-            return
+            return True
         time.sleep(0.1)
-    pytest.fail(f"the server did not serve the restored interval {expected!r} (saw {seen!r})")
+    return False
+
+
+def _restart_settings_server(env) -> None:
+    """Restart the settings server after an out-of-band config restore.
+
+    The service keeps an in-process config cache. A test may have changed the
+    poll interval and the restore is written directly to disk; on Windows the
+    stat signature can be reused, so the cache occasionally serves the old
+    value. A restart is the deterministic reset and is what the next test needs.
+    """
+    _stop(env.proc)
+    proc, base = env.module.serve(env.root)
+    _drain(proc)
+    env.proc = proc
+    env.base = base
 
 
 @pytest.fixture(autouse=True)
@@ -183,7 +198,11 @@ def reset_config(settings_env):
         with contextlib.suppress(OSError):  # another handle may still hold it
             lock.unlink()
     _delete_settings_audit_rows(settings_env)
-    _wait_for_interval(settings_env, settings_env.config_bytes)
+    if not _wait_for_interval(settings_env, settings_env.config_bytes, timeout=5):
+        _restart_settings_server(settings_env)
+        assert _wait_for_interval(
+            settings_env, settings_env.config_bytes
+        ), "the restarted settings server did not serve the restored config"
 
 
 # ------------------------------------------------------------------------ helpers

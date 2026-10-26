@@ -7,7 +7,7 @@
         <th>Status</th>
         <th>Why</th>
         <th>Attached Documents</th>
-        <th style="text-align:right;">Actions</th>
+        <th class="actions-col" style="text-align:right;">Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -32,10 +32,10 @@
           <span style="font-weight:600;">{{ ps.doc_count }}</span>
           <span class="muted" style="font-size:0.85rem;">docs</span>
         </td>
-        <td style="text-align:right;">
-          <div style="display:inline-flex; gap:6px;">
-            <a href="/po_sets/{{ ps.id }}/view" class="btn btn-secondary btn-sm" data-testid="btn-inspect-row">Inspect &amp; Resolve</a>
-            <button class="btn btn-danger btn-sm" data-testid="btn-archive-row" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.add('open')">Move to Quarantine Folder</button>
+        <td class="actions-cell" style="text-align:right; white-space:nowrap;">
+          <div style="display:inline-flex; gap:6px; align-items:center; justify-content:flex-end; white-space:nowrap; flex-wrap:nowrap;">
+            <a href="/po_sets/{{ ps.id }}/view" class="btn btn-secondary btn-sm" data-testid="btn-inspect-row" style="white-space:nowrap;">Inspect &amp; Resolve</a>
+            <button class="btn btn-danger btn-sm" data-testid="btn-archive-row" onclick="document.getElementById('qd-modal-{{ ps.id }}').classList.add('open')" style="white-space:nowrap;">Move to Quarantine Folder</button>
           </div>
 
           <!-- Quarantine Delete Modal -->
@@ -44,7 +44,7 @@
               <h3 style="color:#991b1b; margin-bottom:8px;">Move to Quarantine Folder?</h3>
               <p class="muted" style="margin-bottom:16px;">
                 This moves PO Set <strong>{{ ps.po_no_normalized }}</strong> to
-                the quarantine folder (<code>data/quarantine/</code>) and removes it from the active worklists.
+                the archive folder (<code>{{ archive_folder_name or 'archive' }}</code>) and removes it from the active worklists.
                 The database rows, every stored PDF and the audit trail are kept — nothing is destroyed.
                 An audit log entry records the quarantine dismissal.
               </p>

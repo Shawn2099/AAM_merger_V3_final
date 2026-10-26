@@ -12,7 +12,7 @@ paths:
   combined_folder: "./data/combined"
   # Delete is an archive action: exported sets (PDFs + JSON + ARCHIVE.txt)
   # are written here. Nothing in the database is deleted.
-  archive_folder: "./data/development/archived_sets"
+  archive_folder: "./data/quarantine/_archived_sets"
   log_folder: "./data/logs"
 
 server:

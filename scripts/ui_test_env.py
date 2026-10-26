@@ -585,6 +585,25 @@ HELD: dict[str, dict] = {
         "mutable": True,
         "lines": [L("1", "4", "Release item")],
     },
+    # Release gate: owns the header/tab count check, so another move cannot
+    # consume the only document that test needs.
+    "release_count_target": {
+        "kind": "DN",
+        "file": "RELEASE-COUNT.pdf",
+        "po_ref": None,
+        "state": "read",
+        "mutable": True,
+        "lines": [L("1", "3", "Count item")],
+    },
+    # Release gate: the reclassify path has its own OOB count update.
+    "release_reclassify_count_target": {
+        "kind": "DN",
+        "file": "RELEASE-RECLASSIFY-COUNT.pdf",
+        "po_ref": None,
+        "state": "read",
+        "mutable": True,
+        "lines": [L("1", "3", "Reclassify count item")],
+    },
 }
 
 

@@ -426,6 +426,17 @@ def create_app(allowed_hosts: list[str] | None = None) -> FastAPI:
     app.include_router(settings_router)
     app.include_router(dashboard_router)
 
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        favicon_file = static_dir / "favicon.ico"
+        if favicon_file.is_file():
+            from starlette.responses import FileResponse
+
+            return FileResponse(str(favicon_file), media_type="image/x-icon")
+        from starlette.responses import Response
+
+        return Response(content=b"", media_type="image/x-icon", status_code=200)
+
     @app.get("/health")
     def health() -> JSONResponse:
         # Liveness only. The old payload printed the input folder, database
