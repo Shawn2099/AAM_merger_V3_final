@@ -124,5 +124,6 @@
     $env:RUN_E2E="1"; uv run pytest tests/ui/test_ui_global.py tests/ui/test_ui_dashboard.py tests/ui/test_ui_batch1_audit_findings.py tests/ui/test_ui_unclassified.py tests/ui/test_ui_set_detail.py
     ```
   - Result: 100% passing across all UI suites.
-- [ ] **Task 6.4: Git Commit & Remote Push**
-  - Commit cleanly to `feat/ui-ca-redesign` and push to remote.
+- [x] **Task 6.4: Git Commit & Remote Push**
+  - Staged all UI changes, test suites (including `tests/ui/release/`), and documentation.
+  - Committed and pushed to `origin feat/ui-ca-redesign` (commit `9a5f28c`).
