@@ -1,0 +1,264 @@
+{
+  "doc_id": 137,
+  "label": "H_P0",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 12.5,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-DTS-25-571",
+        "po_reference": "TOGAPO2526204",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Crimped Wire Cup Brush 100 mm/M14 RPM-8500",
+            "quantity": "100.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "Rexin Apron (WITH WIDE LACE)",
+            "quantity": "20.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "Enamel Paint-White - NATIONAL PAINTS ( With MSDS) 16 Ltr",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "Enamel Paint-White - NATIONAL PAINTS ( With MSDS) 3.5 Ltr",
+            "quantity": "16.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "Cotton Rags - White Banyan Cloth ( Good Quality)",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "Brass Pad Lock - Number Lock - 38-40 mm",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "7",
+            "description": "Brass Pad Lock - Yale - 40 mm",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "8",
+            "description": "Paint Brush 1\" Wooden Handle, MFR-KONA",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "9",
+            "description": "Paint Brush 2\" Wooden Handle, MFR-KONA",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 651,
+          "reasoning_tokens": 185,
+          "cost": 0.000943125,
+          "latency_s": 12.32
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.73,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-DTS-25-571",
+        "po_reference": "TOGAPO2526204",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Crimped Wire Cup Brush 100 mm/M14 RPM-8500",
+            "quantity": "100.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "Rexin Apron (WITH WIDE LACE)",
+            "quantity": "20.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "Enamel Paint-White - NATIONAL PAINTS (With MSDS) 16 Ltr",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "Enamel Paint-White - NATIONAL PAINTS (With MSDS) 3.5 Ltr",
+            "quantity": "16.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "Cotton Rags - White Banyan Cloth ( Good Quality)",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "Brass Pad Lock - Number Lock - 38-40 mm",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "7",
+            "description": "Brass Pad Lock - Yale - 40 mm",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "8",
+            "description": "Paint Brush 1\" Wooden Handle, MFR-KONA",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "9",
+            "description": "Paint Brush 2\" Wooden Handle, MFR-KONA",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 560,
+          "reasoning_tokens": 94,
+          "cost": 0.00034183,
+          "latency_s": 10.55
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.58,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-DTS-25-571",
+        "po_reference": "TOGAPO2526204",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Crimped Wire Cup Brush 100 mm/M14 RPM-8500",
+            "quantity": "100.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "Rexin Apron (WITH WIDE LACE)",
+            "quantity": "20.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "Enamel Paint-White - NATIONAL PAINTS ( With MSDS) 16 Ltr",
+            "quantity": "2.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "Enamel Paint-White - NATIONAL PAINTS ( With MSDS) 3.5 Ltr",
+            "quantity": "16.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "Cotton Rags - White Banyan Cloth ( Good Quality)",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "Brass Pad Lock - Number Lock - 38-40 mm",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "7",
+            "description": "Brass Pad Lock - Yale - 40 mm",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "8",
+            "description": "Paint Brush 1\" Wooden Handle, MFR-KONA",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "9",
+            "description": "Paint Brush 2\" Wooden Handle, MFR-KONA",
+            "quantity": "10.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 636,
+          "reasoning_tokens": 170,
+          "cost": 0.00037983,
+          "latency_s": 11.4
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

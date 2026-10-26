@@ -1,0 +1,138 @@
+{
+  "doc_id": 211,
+  "label": "H_P6",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P6.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 19.79,
+      "result": {
+        "document_type": "PO",
+        "document_number": "J255-300115876",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 10,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "VALVE:BALL; VLV_SZ:1/2\", CONN:BSP, MATR:BRASS, PRESS_RATN:30BAR Mfg Name: TESS Mfg Part No.: 93742-08",
+            "quantity": "3",
+            "unit_price": "67.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "NIPPLE:PIPE; CONN_SZ:1/2\"MBSP X 1/2\"MBSP, MATR:SS, LG:60MM Mfg Name: RS COMPONENTS Mfg Part No.: 499-3243",
+            "quantity": "3",
+            "unit_price": "44.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "COMPOUND THREAD SEALANT WTEFLON LOCTIT Mfg Name: PERMATEX Mfg Part No.: 30561",
+            "quantity": "1",
+            "unit_price": "143.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 28951,
+          "completion_tokens": 978,
+          "reasoning_tokens": 656,
+          "cost": 0.0041045,
+          "latency_s": 19.03
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 16.55,
+      "result": {
+        "document_type": "PO",
+        "document_number": "J255-300115876",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 10,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "VALVE:BALL; VLV_SZ:1/2\", CONN:BSP, MATR:BRASS, PRESS_RATN:30BAR Mfg Name: TESS Mfg Part No.: 93742-08",
+            "quantity": "3",
+            "unit_price": "67.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "NIPPLE:PIPE; CONN_SZ:1/2\"MBSP X 1/2\"MBSP, MATR:SS, LG:60MM Mfg Name: RS COMPONENTS Mfg Part No.: 499-3243",
+            "quantity": "3",
+            "unit_price": "44.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "COMPOUND THREAD SEALANT WTEFLON LOCTIT Mfg Name: PERMATEX Mfg Part No.: 30561",
+            "quantity": "1",
+            "unit_price": "143.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 28951,
+          "completion_tokens": 657,
+          "reasoning_tokens": 335,
+          "cost": 0.00063016,
+          "latency_s": 15.79
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 21.91,
+      "result": {
+        "document_type": "PO",
+        "document_number": "J255-300115876",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 10,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "VALVE:BALL; VLV_SZ:1/2\", CONN:BSP, MATR:BRASS, PRESS_RATN:30BAR Mfg Name: TESS Mfg Part No.: 93742-08",
+            "quantity": "3",
+            "unit_price": "67.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "NIPPLE:PIPE; CONN_SZ:1/2\"MBSP X 1/2\"MBSP, MATR:SS, LG:60MM Mfg Name: RS COMPONENTS Mfg Part No.: 499-3243",
+            "quantity": "3",
+            "unit_price": "44.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "COMPOUND THREAD SEALANT WTEFLON LOCTIT Mfg Name: PERMATEX Mfg Part No.: 30561",
+            "quantity": "1",
+            "unit_price": "143.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 28951,
+          "completion_tokens": 799,
+          "reasoning_tokens": 477,
+          "cost": 0.00070116,
+          "latency_s": 21.16
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

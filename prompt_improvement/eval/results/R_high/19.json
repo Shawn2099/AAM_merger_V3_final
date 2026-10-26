@@ -1,0 +1,95 @@
+{
+  "doc_id": 19,
+  "label": "R_high",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.47,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-15-?955",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "4",
+            "description": "Q.C. CLAMP ...",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 660,
+          "reasoning_tokens": 516,
+          "cost": 0.000947625,
+          "latency_s": 11.39
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.77,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-15-?955",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "4",
+            "description": "C.I. ... WELD ... PIPE",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 661,
+          "reasoning_tokens": 514,
+          "cost": 0.00039233,
+          "latency_s": 9.66
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.31,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9855",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "4",
+            "description": "CLIP, OIL, [unclear] WHEEL [unclear]",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 649,
+          "reasoning_tokens": 495,
+          "cost": 0.00038633,
+          "latency_s": 11.23
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

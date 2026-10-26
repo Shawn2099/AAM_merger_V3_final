@@ -1,0 +1,96 @@
+{
+  "doc_id": 73,
+  "label": "P5",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P5.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 15.17,
+      "result": {
+        "document_type": "PO",
+        "document_number": "18230578",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "RING, SOCKET RETAINING, IMPACT, 1.75\" DIA, F/F 3/4\" SOCKETS",
+            "quantity": "10",
+            "unit_price": "23",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5618,
+          "completion_tokens": 584,
+          "reasoning_tokens": 429,
+          "cost": 0.000990875,
+          "latency_s": 15.0
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 15.11,
+      "result": {
+        "document_type": "PO",
+        "document_number": "18230578",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "RING, SOCKET RETAINING, IMPACT, 1.75\" DIA, F/3/4\" SOCKETS",
+            "quantity": "10",
+            "unit_price": "23",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5618,
+          "completion_tokens": 383,
+          "reasoning_tokens": 229,
+          "cost": 0.00025983,
+          "latency_s": 14.9
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 17.84,
+      "result": {
+        "document_type": "PO",
+        "document_number": "18230578",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "RING, SOCKET RETAINING, IMPACT, 1.75\" DIA, F/34\" SOCKETS",
+            "quantity": "10",
+            "unit_price": "23",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5618,
+          "completion_tokens": 593,
+          "reasoning_tokens": 441,
+          "cost": 0.00036483,
+          "latency_s": 17.64
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

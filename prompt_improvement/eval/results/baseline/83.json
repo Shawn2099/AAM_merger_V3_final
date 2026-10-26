@@ -1,0 +1,177 @@
+{
+  "doc_id": 83,
+  "label": "baseline",
+  "model": "openai/gpt-6-luna",
+  "prompt_source": "live",
+  "prompt_hash": "c826512ea909",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.49,
+      "result": {
+        "document_type": "PO",
+        "has_po_section": true,
+        "has_dn_section": false,
+        "has_si_section": false,
+        "page_count": 1,
+        "components": [
+          {
+            "doc_type": "PO",
+            "document_type": "PO",
+            "page_start": 1,
+            "page_end": 1
+          }
+        ],
+        "document_number": "4800466856",
+        "po_no_raw": "4800466856",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "vendor_name": "IBRAHIM ALI AL SHAB TRADING EST",
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Thread Compound TUBELOK Thread-Locking Compound-(SPN/BRAND Ref: 199-50-BAKERLOK)",
+            "quantity": "100.000",
+            "unit_price": "240.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "DRY MOLY 400 ML SPRAY CAN MFR.AMBERSIL (1X12)-(SPN/BRAND Ref: KSS-MOLY)",
+            "quantity": "25",
+            "unit_price": "600.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "LOCTITE 242-(SPN/BRAND Ref: LOC242)",
+            "quantity": "18.000",
+            "unit_price": "127.50",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "LOCTITE 262-(SPN/BRAND Ref: LOC262)",
+            "quantity": "15.000",
+            "unit_price": "127.50",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.76,
+      "result": {
+        "document_type": "PO",
+        "has_po_section": true,
+        "has_dn_section": false,
+        "has_si_section": false,
+        "page_count": 1,
+        "components": [
+          {
+            "doc_type": "PO",
+            "document_type": "PO",
+            "page_start": 1,
+            "page_end": 1
+          }
+        ],
+        "document_number": "4800466856",
+        "po_no_raw": "4800466856",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "vendor_name": "IBRAHIM ALI AL SHAB TRADING EST",
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Thread Compound TUBELOK Thread-Locking Compound-(SPN/BRAND Ref: 199-50-BAKERLOK)",
+            "quantity": "100.000",
+            "unit_price": "240.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "DRY MOLY 400 ML SPRAY CAN MFR.AMBERSIL (1X12)-(SPN/BRAND Ref: KSS-MOLY)",
+            "quantity": "25",
+            "unit_price": "600.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "LOCTITE 242-(SPN/BRAND Ref: LOC242)",
+            "quantity": "18.000",
+            "unit_price": "127.50",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "LOCTITE 262-(SPN/BRAND Ref: LOC262)",
+            "quantity": "15.000",
+            "unit_price": "127.50",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.73,
+      "result": {
+        "document_type": "PO",
+        "has_po_section": true,
+        "has_dn_section": false,
+        "has_si_section": false,
+        "page_count": 1,
+        "components": [
+          {
+            "doc_type": "PO",
+            "document_type": "PO",
+            "page_start": 1,
+            "page_end": 1
+          }
+        ],
+        "document_number": "4800466856",
+        "po_no_raw": "4800466856",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "vendor_name": "IBRAHIM ALI AL SHAB TRADING EST",
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Thread Compound TUBELOK Thread-Locking Compound-(SPN/BRAND Ref: 199-50-BAKERLOK)",
+            "quantity": "100.000",
+            "unit_price": "240.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "DRY MOLY 400 ML SPRAY CAN MFR.AMBERSIL (1X12)-(SPN/BRAND Ref: KSS-MOLY)",
+            "quantity": "25",
+            "unit_price": "600.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "LOCTITE 242-(SPN/BRAND Ref: LOC242)",
+            "quantity": "18.000",
+            "unit_price": "127.50",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "LOCTITE 262-(SPN/BRAND Ref: LOC262)",
+            "quantity": "15.000",
+            "unit_price": "127.50",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 2
+    }
+  ]
+}

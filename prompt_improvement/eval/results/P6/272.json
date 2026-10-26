@@ -1,0 +1,72 @@
+{
+  "doc_id": 272,
+  "label": "P6",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P6.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 6.22,
+      "result": {
+        "document_type": "PO",
+        "document_number": "C13717",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [],
+        "_usage": {
+          "prompt_tokens": 6199,
+          "completion_tokens": 251,
+          "reasoning_tokens": 145,
+          "cost": 0.000897,
+          "latency_s": 6.13
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.82,
+      "result": {
+        "document_type": "PO",
+        "document_number": "C13717",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [],
+        "_usage": {
+          "prompt_tokens": 6199,
+          "completion_tokens": 384,
+          "reasoning_tokens": 278,
+          "cost": 0.00026614,
+          "latency_s": 7.74
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.38,
+      "result": {
+        "document_type": "PO",
+        "document_number": "C13717",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [],
+        "_usage": {
+          "prompt_tokens": 6199,
+          "completion_tokens": 492,
+          "reasoning_tokens": 386,
+          "cost": 0.00032014,
+          "latency_s": 10.29
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

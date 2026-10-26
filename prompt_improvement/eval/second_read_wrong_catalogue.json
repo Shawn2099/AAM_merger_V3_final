@@ -1,0 +1,1500 @@
+[
+ {
+  "label": "P5",
+  "doc": 22,
+  "gold_type": "SI",
+  "item": "po_reference",
+  "gold": "50117194",
+  "values": [
+   "0117194",
+   "50117194",
+   "50117194"
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P5",
+  "doc": 258,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260988",
+   null,
+   "260988"
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "P0",
+  "doc": 21,
+  "gold_type": "PO",
+  "item": "extra:4/1",
+  "gold": null,
+  "values": [
+   15000,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P0",
+  "doc": 21,
+  "gold_type": "PO",
+  "item": "extra:5/1",
+  "gold": null,
+  "values": [
+   15000,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P0",
+  "doc": 21,
+  "gold_type": "PO",
+  "item": "extra:6/1",
+  "gold": null,
+  "values": [
+   50000,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P0",
+  "doc": 113,
+  "gold_type": "SI",
+  "item": "po_reference",
+  "gold": "22613",
+  "values": [
+   "226130",
+   "226130",
+   "226130"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "P0",
+  "doc": 268,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260030",
+   "260030",
+   "4500362256"
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "P1",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:11",
+  "gold": null,
+  "values": [
+   null,
+   null,
+   5000
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P1",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:21",
+  "gold": null,
+  "values": [
+   null,
+   null,
+   5000
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P1",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:31",
+  "gold": null,
+  "values": [
+   null,
+   null,
+   5000
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P1",
+  "doc": 21,
+  "gold_type": "PO",
+  "item": "extra:4:1",
+  "gold": null,
+  "values": [
+   null,
+   null,
+   15000
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P1",
+  "doc": 21,
+  "gold_type": "PO",
+  "item": "extra:5:1",
+  "gold": null,
+  "values": [
+   null,
+   null,
+   15000
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P1",
+  "doc": 21,
+  "gold_type": "PO",
+  "item": "extra:6:1",
+  "gold": null,
+  "values": [
+   null,
+   null,
+   50000
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P1",
+  "doc": 258,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   null,
+   "260988",
+   "260988"
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "P2",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:1\\1",
+  "gold": null,
+  "values": [
+   null,
+   null,
+   5000
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P2",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:2\\1",
+  "gold": null,
+  "values": [
+   null,
+   null,
+   5000
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P2",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:3\\1",
+  "gold": null,
+  "values": [
+   null,
+   null,
+   5000
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P2",
+  "doc": 21,
+  "gold_type": "PO",
+  "item": "extra:4/1",
+  "gold": null,
+  "values": [
+   15000,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P2",
+  "doc": 21,
+  "gold_type": "PO",
+  "item": "extra:5/1",
+  "gold": null,
+  "values": [
+   15000,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P2",
+  "doc": 21,
+  "gold_type": "PO",
+  "item": "extra:6/1",
+  "gold": null,
+  "values": [
+   50000,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P2",
+  "doc": 258,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260988",
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P3",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:11",
+  "gold": null,
+  "values": [
+   null,
+   5000,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P3",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:21",
+  "gold": null,
+  "values": [
+   null,
+   5000,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P3",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:31",
+  "gold": null,
+  "values": [
+   null,
+   5000,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P3",
+  "doc": 21,
+  "gold_type": "PO",
+  "item": "extra:4/1",
+  "gold": null,
+  "values": [
+   15000,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P3",
+  "doc": 21,
+  "gold_type": "PO",
+  "item": "extra:5/1",
+  "gold": null,
+  "values": [
+   15000,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P3",
+  "doc": 21,
+  "gold_type": "PO",
+  "item": "extra:6/1",
+  "gold": null,
+  "values": [
+   50000,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "P6",
+  "doc": 84,
+  "gold_type": "PO",
+  "item": "extra:",
+  "gold": null,
+  "values": [
+   0,
+   null,
+   "FAILED"
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_high",
+  "doc": 113,
+  "gold_type": "SI",
+  "item": "po_reference",
+  "gold": "22613",
+  "values": [
+   "226130",
+   "226130",
+   "226130"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "R_high",
+  "doc": 268,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "4500362256",
+   "260030",
+   "4500362256"
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_med",
+  "doc": 1,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": "LPO26/2360",
+  "values": [
+   "262360",
+   "26360",
+   "262360"
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_med",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:1-1",
+  "gold": null,
+  "values": [
+   null,
+   5000,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_med",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:11",
+  "gold": null,
+  "values": [
+   5000,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_med",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:2-1",
+  "gold": null,
+  "values": [
+   null,
+   5000,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_med",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:21",
+  "gold": null,
+  "values": [
+   5000,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_med",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:3-1",
+  "gold": null,
+  "values": [
+   null,
+   5000,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_med",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:31",
+  "gold": null,
+  "values": [
+   5000,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_med",
+  "doc": 113,
+  "gold_type": "SI",
+  "item": "po_reference",
+  "gold": "22613",
+  "values": [
+   "226130",
+   "226130",
+   "226130"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "R_med",
+  "doc": 258,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260988",
+   "260988",
+   "260988"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "R_med",
+  "doc": 268,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260030",
+   "260030",
+   "260030"
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_low",
+  "doc": 1,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": "LPO26/2360",
+  "values": [
+   "262360",
+   "262360",
+   "26360"
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_low",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:11",
+  "gold": null,
+  "values": [
+   null,
+   5000,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_low",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:21",
+  "gold": null,
+  "values": [
+   null,
+   5000,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_low",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:31",
+  "gold": null,
+  "values": [
+   null,
+   5000,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_low",
+  "doc": 113,
+  "gold_type": "SI",
+  "item": "po_reference",
+  "gold": "22613",
+  "values": [
+   "226130",
+   "226130",
+   "226130"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "R_low",
+  "doc": 258,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260988",
+   "260988",
+   "260988"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "R_low",
+  "doc": 268,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260030",
+   "260030",
+   "260030"
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_seed",
+  "doc": 1,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": "LPO26/2360",
+  "values": [
+   "262360",
+   "26360",
+   "262360"
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_seed",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:11",
+  "gold": null,
+  "values": [
+   null,
+   null,
+   5000
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_seed",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:21",
+  "gold": null,
+  "values": [
+   null,
+   null,
+   5000
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_seed",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:31",
+  "gold": null,
+  "values": [
+   null,
+   null,
+   5000
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "R_seed",
+  "doc": 113,
+  "gold_type": "SI",
+  "item": "po_reference",
+  "gold": "22613",
+  "values": [
+   "226130",
+   "226130",
+   "226130"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "R_seed",
+  "doc": 258,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260988",
+   "260988",
+   "260988"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "R_seed",
+  "doc": 268,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260030",
+   "4500362256",
+   "260030"
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "V3",
+  "doc": 1,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": "LPO26/2360",
+  "values": [
+   "262360",
+   "262360",
+   "2632360"
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "V3",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:11",
+  "gold": null,
+  "values": [
+   5000,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "V3",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:21",
+  "gold": null,
+  "values": [
+   5000,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "V3",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:31",
+  "gold": null,
+  "values": [
+   5000,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "V3",
+  "doc": 113,
+  "gold_type": "SI",
+  "item": "po_reference",
+  "gold": "22613",
+  "values": [
+   "226130",
+   "226130",
+   "226130"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "V3",
+  "doc": 258,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260988",
+   "260988",
+   "260988"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "V3",
+  "doc": 268,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260030",
+   "260030",
+   "260030"
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "V4",
+  "doc": 1,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": "LPO26/2360",
+  "values": [
+   "0262360",
+   "0262360",
+   "262360"
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "V4",
+  "doc": 82,
+  "gold_type": "DN",
+  "item": "document_number",
+  "gold": "GDN-ARS-25-9606",
+  "values": [
+   "GDN-ARS-25-9606",
+   "GDN-ARS-25-9666",
+   "GDN-ARS-25-9666"
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "V4",
+  "doc": 113,
+  "gold_type": "SI",
+  "item": "po_reference",
+  "gold": "22613",
+  "values": [
+   "226130",
+   "226130",
+   "226130"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "V4",
+  "doc": 258,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260988",
+   "8300052050",
+   "260988"
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "V4",
+  "doc": 268,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "4500362256",
+   "260030",
+   "4500362256"
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "V0",
+  "doc": 1,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": "LPO26/2360",
+  "values": [
+   "262360",
+   "2612360",
+   "2612360"
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "V0",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:1-1",
+  "gold": null,
+  "values": [
+   5000,
+   5000,
+   null
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "V0",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:2\\1",
+  "gold": null,
+  "values": [
+   5000,
+   5000,
+   null
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "V0",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:3\\1",
+  "gold": null,
+  "values": [
+   5000,
+   5000,
+   null
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "V0",
+  "doc": 84,
+  "gold_type": "PO",
+  "item": "extra:",
+  "gold": null,
+  "values": [
+   null,
+   0,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "V0",
+  "doc": 113,
+  "gold_type": "SI",
+  "item": "po_reference",
+  "gold": "22613",
+  "values": [
+   "226130",
+   "226130",
+   "226130"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "V0",
+  "doc": 258,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260988",
+   "260988",
+   "260988"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "V0",
+  "doc": 268,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260030",
+   "260030",
+   "260030"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "V1",
+  "doc": 1,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": "LPO26/2360",
+  "values": [
+   "262360",
+   "2612360",
+   "262360"
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "V1",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:1-1",
+  "gold": null,
+  "values": [
+   null,
+   5000,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "V1",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:2\\1",
+  "gold": null,
+  "values": [
+   null,
+   5000,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "V1",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:3\\1",
+  "gold": null,
+  "values": [
+   null,
+   5000,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "V1",
+  "doc": 113,
+  "gold_type": "SI",
+  "item": "po_reference",
+  "gold": "22613",
+  "values": [
+   "226130",
+   "226130",
+   "226130"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "V1",
+  "doc": 244,
+  "gold_type": "PO",
+  "item": "document_number",
+  "gold": "10006-0000079573",
+  "values": [
+   "100060000079573",
+   "100060000079573",
+   "10006000079573"
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "V1",
+  "doc": 258,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260988",
+   "260988",
+   "260988"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "V1",
+  "doc": 268,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260030",
+   "260030",
+   "260030"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "baseline",
+  "doc": 1,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": "LPO26/2360",
+  "values": [
+   "2612360",
+   "2612360",
+   "2612360"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "baseline",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:1-1",
+  "gold": null,
+  "values": [
+   null,
+   5000,
+   5000
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "baseline",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:2-1",
+  "gold": null,
+  "values": [
+   null,
+   5000,
+   5000
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "baseline",
+  "doc": 20,
+  "gold_type": "PO",
+  "item": "extra:3-1",
+  "gold": null,
+  "values": [
+   null,
+   5000,
+   5000
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "baseline",
+  "doc": 113,
+  "gold_type": "SI",
+  "item": "po_reference",
+  "gold": "22613",
+  "values": [
+   "226130",
+   "226130",
+   "22613"
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "baseline",
+  "doc": 258,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260988",
+   "260988",
+   "260988"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "baseline",
+  "doc": 268,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "260030",
+   "260030",
+   "260030"
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "V2ok",
+  "doc": 18,
+  "gold_type": "SI",
+  "item": "document_number",
+  "gold": "SIV-ARS-25-7969",
+  "values": [
+   "SIV-ARS-2S-7969",
+   "SIV-ARS-2S-7969",
+   "SIV-ARS-2S-7969"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "V2ok",
+  "doc": 21,
+  "gold_type": "PO",
+  "item": "document_number",
+  "gold": "50119501",
+  "values": [
+   "50110501",
+   "50110501",
+   "50110501"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "V2ok",
+  "doc": 83,
+  "gold_type": "PO",
+  "item": "line:1",
+  "gold": 100000,
+  "values": [
+   100000000,
+   100000000,
+   100000000
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "V2ok",
+  "doc": 83,
+  "gold_type": "PO",
+  "item": "line:3",
+  "gold": 18000,
+  "values": [
+   18000000,
+   18000000,
+   18000000
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "V2ok",
+  "doc": 83,
+  "gold_type": "PO",
+  "item": "line:4",
+  "gold": 15000,
+  "values": [
+   15000000,
+   15000000,
+   15000
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "V2ok",
+  "doc": 84,
+  "gold_type": "PO",
+  "item": "extra:",
+  "gold": null,
+  "values": [
+   0,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "V2ok",
+  "doc": 84,
+  "gold_type": "PO",
+  "item": "line:5",
+  "gold": 5000,
+  "values": [
+   5000000,
+   5000,
+   5000000
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "V2ok",
+  "doc": 113,
+  "gold_type": "SI",
+  "item": "po_reference",
+  "gold": "22613",
+  "values": [
+   "226130",
+   "22613",
+   "226130"
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "v2",
+  "doc": 18,
+  "gold_type": "SI",
+  "item": "document_number",
+  "gold": "SIV-ARS-25-7969",
+  "values": [
+   "SIV-ARS-2S-7969",
+   "SIV-ARS-2S-7969",
+   "SIV-ARS-2S-7969"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "v2",
+  "doc": 21,
+  "gold_type": "PO",
+  "item": "document_number",
+  "gold": "50119501",
+  "values": [
+   "50110501",
+   "50110501",
+   "50110501"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "v2",
+  "doc": 83,
+  "gold_type": "PO",
+  "item": "line:1",
+  "gold": 100000,
+  "values": [
+   100000000,
+   100000000,
+   100000000
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "v2",
+  "doc": 83,
+  "gold_type": "PO",
+  "item": "line:3",
+  "gold": 18000,
+  "values": [
+   18000000,
+   18000000,
+   18000000
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "v2",
+  "doc": 83,
+  "gold_type": "PO",
+  "item": "line:4",
+  "gold": 15000,
+  "values": [
+   15000000,
+   15000000,
+   15000
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "v2",
+  "doc": 84,
+  "gold_type": "PO",
+  "item": "extra:",
+  "gold": null,
+  "values": [
+   0,
+   null,
+   null
+  ],
+  "n_wrong": 1,
+  "kind": "noisy"
+ },
+ {
+  "label": "v2",
+  "doc": 84,
+  "gold_type": "PO",
+  "item": "line:5",
+  "gold": 5000,
+  "values": [
+   5000000,
+   5000,
+   5000000
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "v2",
+  "doc": 113,
+  "gold_type": "SI",
+  "item": "po_reference",
+  "gold": "22613",
+  "values": [
+   "226130",
+   "22613",
+   "226130"
+  ],
+  "n_wrong": 2,
+  "kind": "noisy"
+ },
+ {
+  "label": "H_P0",
+  "doc": 114,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": "22613",
+  "values": [
+   "226130",
+   "226130",
+   "226130"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ },
+ {
+  "label": "H_V0",
+  "doc": 261,
+  "gold_type": "DN",
+  "item": "po_reference",
+  "gold": null,
+  "values": [
+   "13085",
+   "13085",
+   "13085"
+  ],
+  "n_wrong": 3,
+  "kind": "CONSISTENT"
+ }
+]

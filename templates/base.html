@@ -31,18 +31,18 @@
     
     <div class="nav-links">
       <a href="/dashboard" data-testid="nav-dashboard" class="nav-link {% if request.url.path.startswith('/dashboard') or request.url.path == '/' or request.url.path.startswith('/po_sets') %}active{% endif %}">
-        <span>📊 Dashboard</span>
+        <span>📊 Reconciliation Dashboard</span>
       </a>
       
       <a href="/unclassified" data-testid="nav-unclassified" class="nav-link {% if request.url.path.startswith('/unclassified') %}active{% endif %}">
-        <span>❓ Unclassified</span>
+        <span>❓ Unmatched Files</span>
         {% if unclassified_count and unclassified_count > 0 %}
           <span class="nav-counter-badge">{{ unclassified_count }}</span>
         {% endif %}
       </a>
       
       <a href="/quarantine" data-testid="nav-quarantine" class="nav-link {% if request.url.path.startswith('/quarantine') %}active{% endif %}">
-        <span>🚨 Quarantine</span>
+        <span>🚨 Flagged</span>
       </a>
       
       <a href="/audit" data-testid="nav-audit" class="nav-link {% if request.url.path.startswith('/audit') %}active{% endif %}">
@@ -50,7 +50,7 @@
       </a>
       
       <a href="/manual/merger" data-testid="nav-merger" class="nav-link {% if request.url.path.startswith('/manual') %}active{% endif %}" title="Standalone PDF merger — no AI, no database">
-        <span>🧩 Merge PDFs</span>
+        <span>🧩 Quick PDF Merger</span>
       </a>
 
       <a href="/settings" data-testid="nav-settings" class="nav-link {% if request.url.path.startswith('/settings') %}active{% endif %}" title="Review and change how the service runs">
@@ -59,9 +59,14 @@
     </div>
 
     <div class="nav-right">
-      <a href="/health" class="nav-link" title="System Health Status" style="font-size:0.82rem;">
-        <span class="health-dot"></span>
-        <span style="color:#94a3b8;">Service Online</span>
+      <a href="/dashboard" id="nav-sync-pill" class="sync-navbar-pill" style="display:none; text-decoration:none;" title="Ingestion sync in progress — click to view on dashboard">
+        <span class="spinner" style="width:10px; height:10px; border-width:2px; border-color:#4f46e5; border-top-color:transparent;"></span>
+        <span id="nav-sync-text">Sync: 0%</span>
+      </a>
+
+      <a href="/health" id="nav-health-link" class="nav-link" title="System Health Status (Click to inspect)" style="font-size:0.82rem; display:inline-flex; align-items:center; gap:6px;">
+        <span id="health-dot" class="health-dot"></span>
+        <span id="health-text" style="color:#94a3b8;">Service Online</span>
       </a>
     </div>
   </nav>

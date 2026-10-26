@@ -1,0 +1,117 @@
+{
+  "doc_id": 215,
+  "label": "P5",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P5.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.62,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-RAK-25-2968",
+        "po_reference": "300101295",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "19",
+            "description": "Square D Power pact JJ250 3-Pole Circuit Breaker - New-Open Box Line Item - 19",
+            "quantity": "1.00",
+            "unit_price": "6,325.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "21",
+            "description": "RELAY BOARD, MOVINCOOL, P/N : 484500-5320 Line Item - 21",
+            "quantity": "1.00",
+            "unit_price": "1,705.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5540,
+          "completion_tokens": 351,
+          "reasoning_tokens": 133,
+          "cost": 0.000864625,
+          "latency_s": 10.55
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 12.4,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-RAK-25-2968",
+        "po_reference": "300101295",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "19",
+            "description": "Square D Power pact JJ250 3-Pole Circuit Breaker - New-Open Box Line Item - 19",
+            "quantity": "1.00",
+            "unit_price": "6,325.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "21",
+            "description": "RELAY BOARD, MOVINCOOL, P/N : 484500-5320 Line Item - 21",
+            "quantity": "1.00",
+            "unit_price": "1,705.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5540,
+          "completion_tokens": 344,
+          "reasoning_tokens": 126,
+          "cost": 0.00023955,
+          "latency_s": 12.33
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 13.52,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-RAK-25-2968",
+        "po_reference": "300101295",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "19",
+            "description": "Square D Power pact JJ250 3-Pole Circuit Breaker - New-Open Box Line Item - 19",
+            "quantity": "1.00",
+            "unit_price": "6,325.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "21",
+            "description": "RELAY BOARD, MOVINCOOL, P/N : 484500-5320 Line Item - 21",
+            "quantity": "1.00",
+            "unit_price": "1,705.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5540,
+          "completion_tokens": 474,
+          "reasoning_tokens": 256,
+          "cost": 0.00030455,
+          "latency_s": 13.44
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

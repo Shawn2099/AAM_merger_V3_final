@@ -1,0 +1,95 @@
+{
+  "doc_id": 226,
+  "label": "V0",
+  "model": "openai/gpt-6-luna",
+  "variant": "default",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.89,
+      "result": {
+        "document_type": "PO",
+        "document_number": "100060000079633",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "SIDESHIELD-EYEWEAR,TITMUS,CS98 ,T-LOC",
+            "quantity": "50.00",
+            "unit_price": "25.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 9705,
+          "completion_tokens": 150,
+          "reasoning_tokens": 0,
+          "cost": 0.0001842,
+          "latency_s": 3.87
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.69,
+      "result": {
+        "document_type": "PO",
+        "document_number": "100060000079633",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "SIDESHIELD-EYEWEAR,TITMUS,CS98 ,T-LOC",
+            "quantity": "50.00",
+            "unit_price": "25.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 9705,
+          "completion_tokens": 150,
+          "reasoning_tokens": 0,
+          "cost": 0.0001842,
+          "latency_s": 3.67
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.14,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079633",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "SIDESHIELD-EYEWEAR,TITMUS,CS98 ,T-LOC",
+            "quantity": "50.00",
+            "unit_price": "25.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 9705,
+          "completion_tokens": 152,
+          "reasoning_tokens": 0,
+          "cost": 0.0001852,
+          "latency_s": 4.13
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

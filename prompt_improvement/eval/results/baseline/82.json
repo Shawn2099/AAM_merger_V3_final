@@ -1,0 +1,135 @@
+{
+  "doc_id": 82,
+  "label": "baseline",
+  "model": "openai/gpt-6-luna",
+  "prompt_source": "live",
+  "prompt_hash": "c826512ea909",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.82,
+      "result": {
+        "document_type": "DN",
+        "has_po_section": false,
+        "has_dn_section": true,
+        "has_si_section": false,
+        "page_count": 1,
+        "components": [
+          {
+            "doc_type": "DN",
+            "document_type": "DN",
+            "page_start": 1,
+            "page_end": 1
+          }
+        ],
+        "document_number": "GDN-ARS-25-9606",
+        "po_no_raw": "4800466856",
+        "po_reference": "4800466856",
+        "po_reference_ambiguous": false,
+        "vendor_name": "IBRAHIM ALI AL-SHAB TRADING EST.",
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Thread Compound TUBELOK Thread-Locking Compound-(SPN/BRAND Ref: 199-50-BAKERLOK)",
+            "quantity": "100",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "DRY MOLY 400 ML SPRAY CAN MFR.AMBERSIL (1X12)",
+            "quantity": "25",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.59,
+      "result": {
+        "document_type": "DN",
+        "has_po_section": false,
+        "has_dn_section": true,
+        "has_si_section": false,
+        "page_count": 1,
+        "components": [
+          {
+            "doc_type": "DN",
+            "document_type": "DN",
+            "page_start": 1,
+            "page_end": 1
+          }
+        ],
+        "document_number": "GDN-ARS-25-9606",
+        "po_no_raw": "4800466856",
+        "po_reference": "4800466856",
+        "po_reference_ambiguous": false,
+        "vendor_name": "IBRAHIM ALI AL SHAB TRADING EST.",
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Thread Compound TUBELOK Thread-Locking Compound-(SPN/BRAND Ref: 199-50-BAKERLOK)",
+            "quantity": "100",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "DRY MOLY 400 ML SPRAY CAN MFR.AMBERSIL (1X12)",
+            "quantity": "25",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.53,
+      "result": {
+        "document_type": "DN",
+        "has_po_section": false,
+        "has_dn_section": true,
+        "has_si_section": false,
+        "page_count": 1,
+        "components": [
+          {
+            "doc_type": "DN",
+            "document_type": "DN",
+            "page_start": 1,
+            "page_end": 1
+          }
+        ],
+        "document_number": "GDN-ARS-25-9606",
+        "po_no_raw": "4800466856",
+        "po_reference": "4800466856",
+        "po_reference_ambiguous": false,
+        "vendor_name": "IBRAHIM ALI AL-SHAB TRADING EST.",
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Thread Compound TUBELOK Thread-Locking Compound-(SPN/BRAND Ref: 199-50-BAKERLOK)",
+            "quantity": "100",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "DRY MOLY 400 ML SPRAY CAN MFR.AMBERSIL (1X12)",
+            "quantity": "25",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 2
+    }
+  ]
+}

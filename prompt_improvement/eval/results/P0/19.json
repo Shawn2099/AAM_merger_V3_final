@@ -1,0 +1,96 @@
+{
+  "doc_id": 19,
+  "label": "P0",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.91,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-?955",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "4",
+            "description": "C.I. ...",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 658,
+          "reasoning_tokens": 516,
+          "cost": 0.00039083,
+          "latency_s": 10.82
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.11,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-15-?955",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "4",
+            "description": "C.I. CLAMP, 3405?",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 490,
+          "reasoning_tokens": 342,
+          "cost": 0.00030683,
+          "latency_s": 9.03
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 13.02,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9855",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "4",
+            "description": "CL 2.0 OFF [illegible]",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 588,
+          "reasoning_tokens": 439,
+          "cost": 0.00035583,
+          "latency_s": 12.94
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

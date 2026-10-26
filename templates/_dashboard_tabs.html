@@ -6,27 +6,27 @@
       </a>
 
       <a href="/dashboard?status=pending" data-testid="tab-pending" class="tab-btn {% if current_status == 'pending' %}active{% endif %}">
-        <span>Pending</span>
+        <span>Awaiting Documents</span>
         {% if stats %}<span class="tab-count">{{ stats.pending }}</span>{% endif %}
       </a>
 
       <a href="/dashboard?status=mismatched" data-testid="tab-mismatched" class="tab-btn {% if current_status == 'mismatched' %}active{% endif %}">
-        <span>Needs Review</span>
+        <span>Quantity Mismatch</span>
         {% if stats %}<span class="tab-count">{{ stats.mismatched }}</span>{% endif %}
       </a>
 
       <a href="/dashboard?status=blocked_customs" data-testid="tab-blocked-customs" class="tab-btn {% if current_status == 'blocked_customs' %}active{% endif %}">
-        <span>Awaiting Customs</span>
+        <span>Awaiting Customs/Shipping Docs</span>
         {% if stats %}<span class="tab-count">{{ stats.blocked_customs }}</span>{% endif %}
       </a>
 
       <a href="/dashboard?status=merged" data-testid="tab-merged" class="tab-btn {% if current_status == 'merged' %}active{% endif %}">
-        <span>Merged</span>
+        <span>Merged &amp; Ready</span>
         {% if stats %}<span class="tab-count">{{ stats.merged }}</span>{% endif %}
       </a>
 
       <a href="/dashboard?status=quarantined" data-testid="tab-quarantined" class="tab-btn {% if current_status == 'quarantined' %}active{% endif %}">
-        <span>Quarantined</span>
+        <span>Flagged</span>
         {% if stats %}<span class="tab-count">{{ stats.quarantined }}</span>{% endif %}
       </a>
     </div>

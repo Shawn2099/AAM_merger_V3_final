@@ -1,0 +1,179 @@
+{
+  "doc_id": 121,
+  "label": "V1",
+  "model": "openai/gpt-6-luna",
+  "variant": "native",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.34,
+      "result": {
+        "document_type": "DN",
+        "document_number": null,
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "Insight Fitness DR010B Back Extension",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "Axox Fitness Aerobic Stepper",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "Body Solid GFID100B FID Bench | Black",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "Axox Fitness Solid'Tricep Press Down Bar with TPR Grips",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "Insight Fitness Leg Curl/Extension",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4632,
+          "completion_tokens": 266,
+          "reasoning_tokens": 0,
+          "cost": 0.00019147,
+          "latency_s": 4.33
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.03,
+      "result": {
+        "document_type": "DN",
+        "document_number": null,
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "Insight Fitness DR010B Back Extension",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "Axxox Fitness Aerobic Stepper",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "Body Solid GFID100B FID Bench | Black",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "Axxox Fitness Solid Tricep Press Down Bar with TPR Grips",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "Insight Fitness Leg Curl/Extension",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4632,
+          "completion_tokens": 543,
+          "reasoning_tokens": 273,
+          "cost": 0.00032997,
+          "latency_s": 7.01
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.79,
+      "result": {
+        "document_type": "DN",
+        "document_number": null,
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "Insight Fitness DR010B Back Extension",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "Axox Fitness Aerobic Stepper",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "Body Solid GFID100B FID Bench | Black",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "Axox Fitness Solid'Tricep Press Down Bar with TPR Grips",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "Insight Fitness Leg Curl/Extension",
+            "quantity": "1.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4632,
+          "completion_tokens": 672,
+          "reasoning_tokens": 404,
+          "cost": 0.00039447,
+          "latency_s": 8.78
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

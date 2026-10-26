@@ -1,0 +1,96 @@
+{
+  "doc_id": 194,
+  "label": "P6",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P6.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.61,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-RAK-25-2937",
+        "po_reference": "90139625",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "OPTIMA Red Top (RT S 4.2), Model No: 8002-250, Part No: 802 250 000 888 2 Line Item - 1",
+            "quantity": "1.00",
+            "unit_price": "850.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6121,
+          "completion_tokens": 344,
+          "reasoning_tokens": 164,
+          "cost": 0.00024536,
+          "latency_s": 7.54
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.55,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-RAK-25-2937",
+        "po_reference": "90139625",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "OPTIMA Red Top (RT S 4.2), Model No: 8002-250, Part No: 802 250 000 888 2 Line Item - 1",
+            "quantity": "1.00",
+            "unit_price": "850.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6121,
+          "completion_tokens": 305,
+          "reasoning_tokens": 125,
+          "cost": 0.00022586,
+          "latency_s": 7.47
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.58,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-RAK-25-2937",
+        "po_reference": "90139625",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "OPTIMA Red Top (RT S 4.2), Model No: 8002-250, Part No: 802 250 000 888 2 Line Item - 1",
+            "quantity": "1.00",
+            "unit_price": "850.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6121,
+          "completion_tokens": 295,
+          "reasoning_tokens": 115,
+          "cost": 0.00022086,
+          "latency_s": 8.51
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

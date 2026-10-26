@@ -1,0 +1,95 @@
+{
+  "doc_id": 2,
+  "label": "V0",
+  "model": "openai/gpt-6-luna",
+  "variant": "default",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.1,
+      "result": {
+        "document_type": "PO",
+        "document_number": "LPO26/2360",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Degreaser & Stain Remover Vehicle Washing Liquid",
+            "quantity": "4200.00",
+            "unit_price": "0.550",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5489,
+          "completion_tokens": 144,
+          "reasoning_tokens": 0,
+          "cost": 0.00013904,
+          "latency_s": 4.17
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.48,
+      "result": {
+        "document_type": "PO",
+        "document_number": "LPO26/2360",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Degreaser & Stain Remover Vehicle Washing Liquid",
+            "quantity": "4200.00",
+            "unit_price": "0.550",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5489,
+          "completion_tokens": 144,
+          "reasoning_tokens": 0,
+          "cost": 0.00013904,
+          "latency_s": 4.55
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.52,
+      "result": {
+        "document_type": "PO",
+        "document_number": "LPO26/2360",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Degreaser & Stain Remover Vehicle Washing Liquid",
+            "quantity": "4200.00",
+            "unit_price": "0.550",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5489,
+          "completion_tokens": 144,
+          "reasoning_tokens": 0,
+          "cost": 0.00013904,
+          "latency_s": 3.51
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

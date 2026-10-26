@@ -1,0 +1,96 @@
+{
+  "doc_id": 85,
+  "label": "P6",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P6.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.83,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-DTS-25-452",
+        "po_reference": "4500026808",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "HAMMER, ANTI-SPARK HEAD, 7LB (4KG), 16\" (305MM) HANDLE - WITH PERMANENT STOPDROP TOOLING ATTACHMENT POINT - مستهلكات الحفر",
+            "quantity": "1.00",
+            "unit_price": "2,700.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6121,
+          "completion_tokens": 275,
+          "reasoning_tokens": 91,
+          "cost": 0.00021086,
+          "latency_s": 6.17
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.5,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-DTS-25-452",
+        "po_reference": "4500026808",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "HAMMER, ANTI-SPARK HEAD, 7LB (4KG), 16\" (305MM) HANDLE - WITH PERMANENT STOPDROP TOOLING ATTACHMENT POINT - مستهلكات الحفر",
+            "quantity": "1.00",
+            "unit_price": "2,700.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6121,
+          "completion_tokens": 287,
+          "reasoning_tokens": 103,
+          "cost": 0.00021686,
+          "latency_s": 6.66
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.19,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-DTS-25-452",
+        "po_reference": "4500026808",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "HAMMER, ANTI-SPARK HEAD, 7LB (4KG), 16\" (305MM) HANDLE - WITH PERMANENT STOPDROP TOOLING ATTACHMENT POINT - مستهلكات الحفر",
+            "quantity": "1.00",
+            "unit_price": "2,700.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6121,
+          "completion_tokens": 297,
+          "reasoning_tokens": 113,
+          "cost": 0.00022186,
+          "latency_s": 6.68
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

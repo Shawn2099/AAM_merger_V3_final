@@ -3,7 +3,7 @@
 
 {% block content %}
 <div class="card" style="max-width:720px; margin:48px auto;" data-testid="remove-set-result">
-  <h2 class="card-title">Removed PO Set #{{ set_id }}</h2>
+  <h2 class="card-title">Removed PO Set #{{ set_id }}{% if po_no and po_no != ('#' ~ set_id) %} ({{ po_no }}){% endif %}</h2>
   <p class="card-subtitle" style="margin:8px 0 16px;">
     {{ document_count }} document(s) were copied to <code>{{ folder }}</code>.
   </p>

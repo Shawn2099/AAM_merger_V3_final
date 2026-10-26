@@ -1,0 +1,117 @@
+{
+  "doc_id": 82,
+  "label": "P3",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P3.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 13.59,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9606",
+        "po_reference": "4800466856",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Thread Compound TUBELOK Thread-Locking Compound-(SPN/BRAND Ref: 199-50-BAKERLOK)",
+            "quantity": "100",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "DRY MOLY 400 ML SPRAY CAN MFR.AMBERSIL (1X12)",
+            "quantity": "25",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5999,
+          "completion_tokens": 415,
+          "reasoning_tokens": 204,
+          "cost": 0.000954,
+          "latency_s": 13.41
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 14.85,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9606",
+        "po_reference": "4800466856",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Thread Compound TUBELOK Thread-Locking Compound-(SPN/BRAND Ref: 199-50-BAKERLOK)",
+            "quantity": "100",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "DRY MOLY 400 ML SPRAY CAN MFR.AMBERSIL (1X12)",
+            "quantity": "25",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5999,
+          "completion_tokens": 382,
+          "reasoning_tokens": 171,
+          "cost": 0.00026314,
+          "latency_s": 14.67
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 13.43,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9606",
+        "po_reference": "4800466856",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Thread Compound TUBELOK Thread-Locking Compound-(SPN/BRAND Ref: 199-50-BAKERLOK)",
+            "quantity": "100",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "DRY MOLY 400 ML SPRAY CAN MFR.AMBERSIL (1X12)",
+            "quantity": "25",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5999,
+          "completion_tokens": 386,
+          "reasoning_tokens": 175,
+          "cost": 0.00026514,
+          "latency_s": 13.25
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

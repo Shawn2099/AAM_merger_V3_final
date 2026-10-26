@@ -1,0 +1,117 @@
+{
+  "doc_id": 4,
+  "label": "H_V0",
+  "model": "openai/gpt-6-luna",
+  "variant": "native",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.64,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-8330",
+        "po_reference": "4500043712",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "10",
+            "description": "Crc Lectra Cleaner:400Ml Aerosol Can",
+            "quantity": "3",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "20",
+            "description": "Cleaner: Aerosal WD-40",
+            "quantity": "12",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5442,
+          "completion_tokens": 178,
+          "reasoning_tokens": 0,
+          "cost": 0.00015557,
+          "latency_s": 4.72
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.86,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-8330",
+        "po_reference": "4500043712",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "10",
+            "description": "Crc Lectra Cleaner:400Ml Aerosol Can",
+            "quantity": "3",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "20",
+            "description": "Cleaner: Aerosal WD-40",
+            "quantity": "12",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5442,
+          "completion_tokens": 178,
+          "reasoning_tokens": 0,
+          "cost": 0.000765875,
+          "latency_s": 3.94
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.03,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-8330",
+        "po_reference": "4500043712",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "10",
+            "description": "Crc Lectra Cleaner:400Ml Aerosol Can",
+            "quantity": "3",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "20",
+            "description": "Cleaner: Aerosal WD-40",
+            "quantity": "12",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5442,
+          "completion_tokens": 178,
+          "reasoning_tokens": 0,
+          "cost": 0.00015557,
+          "latency_s": 4.11
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

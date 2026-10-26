@@ -1,0 +1,95 @@
+{
+  "doc_id": 229,
+  "label": "V3",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.7,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079657",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "BOLT-HEX,1-1/4-7 X 4-3/4 IN L,2-1/2 IN THREAD,SAE J429,GR 8,ZINC COATED,PRICED PER EA",
+            "quantity": "20.00",
+            "unit_price": "40.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7387,
+          "completion_tokens": 310,
+          "reasoning_tokens": 126,
+          "cost": 0.001075,
+          "latency_s": 9.55
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 6.71,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079657",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "BOLT-HEX,1-1/4-7 X 4-3/4 IN L,2-1/2 IN THREAD,SAE J429,GR 8,ZINC COATED,PRICED PER EA",
+            "quantity": "20.00",
+            "unit_price": "40.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7387,
+          "completion_tokens": 182,
+          "reasoning_tokens": 0,
+          "cost": 0.00017702,
+          "latency_s": 6.56
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.7,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079657",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "BOLT-HEX,1-1/4-7 X 4-3/4 IN,L,2-1/2 IN THREAD,SAE J429,GR 8,ZINC COATED,PRICED PER EA",
+            "quantity": "20.00",
+            "unit_price": "40.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7387,
+          "completion_tokens": 182,
+          "reasoning_tokens": 0,
+          "cost": 0.00017702,
+          "latency_s": 8.55
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

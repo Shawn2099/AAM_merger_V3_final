@@ -1,0 +1,114 @@
+{
+  "doc_id": 19,
+  "label": "baseline",
+  "model": "openai/gpt-6-luna",
+  "prompt_source": "live",
+  "prompt_hash": "c826512ea909",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.13,
+      "result": {
+        "document_type": "DN",
+        "has_po_section": false,
+        "has_dn_section": true,
+        "has_si_section": false,
+        "page_count": 1,
+        "components": [
+          {
+            "doc_type": "DN",
+            "document_type": "DN",
+            "page_start": 1,
+            "page_end": 1
+          }
+        ],
+        "document_number": "GDN-ARS-25-9755",
+        "po_no_raw": "50119501",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "vendor_name": "IBRAHIM ALI AL SHAB TRADING EST.",
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "FLG 2\" CL150 RF WN WELD 1.5 IN-LINE",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.99,
+      "result": {
+        "document_type": "DN",
+        "has_po_section": false,
+        "has_dn_section": true,
+        "has_si_section": false,
+        "page_count": 1,
+        "components": [
+          {
+            "doc_type": "DN",
+            "document_type": "DN",
+            "page_start": 1,
+            "page_end": 1
+          }
+        ],
+        "document_number": "GDN-ARS-25-9555",
+        "po_no_raw": "50119501",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "vendor_name": "IBRAHIM ALI AL SHAB TRADING EST.",
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "FLEX JOINT, RUBBER WITH FLANGE",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 6.65,
+      "result": {
+        "document_type": "DN",
+        "has_po_section": false,
+        "has_dn_section": true,
+        "has_si_section": false,
+        "page_count": 1,
+        "components": [
+          {
+            "doc_type": "DN",
+            "document_type": "DN",
+            "page_start": 1,
+            "page_end": 1
+          }
+        ],
+        "document_number": "GDN-ARS-25-?955",
+        "po_no_raw": "50119501",
+        "po_reference": "50119501",
+        "po_reference_ambiguous": false,
+        "vendor_name": "IBRAHIM ALI AL SHAB TRADING EST.",
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "FL...",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 2
+    }
+  ]
+}

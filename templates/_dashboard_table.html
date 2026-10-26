@@ -12,7 +12,7 @@
         <th scope="col">Why</th>
         <th scope="col">Documents</th>
         <th scope="col">Age</th>
-        <th scope="col" style="text-align:right;">Actions</th>
+        <th scope="col" class="actions-col" style="text-align:right;">Actions</th>
       </tr>
     </thead>
     <tbody id="po-table-body">
@@ -36,9 +36,10 @@
             {% if not ps.has_merged_file %}
               <span class="badge badge-quarantined" title="The database says merged, but the packet file is missing from the output folder.">Merged - packet missing</span>
             {% elif (ps.description_match_count or 0) > 0 or ps.line_mapping_rule %}
-              <span class="badge badge-desc"
+              <span class="badge badge-merged">Merged &amp; Ready</span>
+              <span class="badge badge-desc" style="font-size:0.72rem; margin-left:4px;"
                     title="The packet merged, but at least one vendor line was attached by DESCRIPTION or paired by a line-numbering rule rather than a printed line number. Check the item descriptions and the line mapping.">
-                Merged • review
+                Review
               </span>
               {% if (ps.description_match_count or 0) > 0 %}
               <span class="badge badge-desc" style="font-size:0.72rem; margin-left:4px;"
@@ -56,18 +57,18 @@
             {% endif %}
           {% elif status_str == 'mismatched' %}
             {% if ps.shortfall == 'under' %}
-            <span class="badge badge-pending" title="Every disagreeing quantity is below the PO: the delivery or the invoice is short. The set stays counted under Needs Review until the rest arrives.">Waiting (part delivered)</span>
+            <span class="badge badge-pending" title="Waiting (part delivered): Every disagreeing quantity is below the PO: the delivery or the invoice is short. The set stays counted under Needs Review until the rest arrives.">Partial Delivery</span>
             {% else %}
-            <span class="badge badge-mismatched">Needs Review</span>
+            <span class="badge badge-mismatched" title="Needs Review: Quantity mismatch">Quantity Mismatch</span>
             {% endif %}
           {% elif status_str == 'blocked_customs' %}
-            <span class="badge badge-blocked">🔒 Awaiting Customs</span>
+            <span class="badge badge-blocked">🔒 Awaiting Customs/Shipping Docs</span>
           {% elif status_str == 'quarantined' %}
-            <span class="badge badge-quarantined">🚨 Quarantined</span>
+            <span class="badge badge-quarantined">🚨 Flagged</span>
           {% elif status_str == 'pending' %}
-            <span class="badge badge-pending">Pending / Waiting</span>
+            <span class="badge badge-pending" title="Pending / Waiting: Awaiting vendor documents">Awaiting Documents</span>
             {% if ps.multi_po_decision %}
-            <span class="badge badge-mismatched" style="font-size:0.72rem; margin-left:4px;" title="The PO arrived as several files. Reconciliation will not choose between them.">Needs a decision: {{ ps.po_doc_count }} PO files - choose the right one (Force Merge if both are needed)</span>
+            <span class="badge badge-mismatched" style="font-size:0.72rem; margin-left:4px;" title="The PO arrived as several files. Reconciliation will not choose between them.">Needs a decision: {{ ps.po_doc_count }} PO files (Force Merge if both apply, or Remove Set to replace)</span>
             {% endif %}
             {% if ps.dn_number_only %}
             <span class="badge badge-mismatched" style="font-size:0.72rem; margin-left:4px;" title="A document was placed by its DN number only. Confirm it belongs to this PO.">Needs a decision: matched by DN number only</span>
@@ -120,16 +121,14 @@
           {% endif %}
         </td>
 
-        <td style="text-align:right;">
-          <div style="display:inline-flex; gap:6px; align-items:center;">
+        <td class="actions-cell" style="text-align:right; white-space:nowrap;">
+          <div style="display:inline-flex; gap:6px; align-items:center; justify-content:flex-end; white-space:nowrap; flex-wrap:nowrap;">
             <a 
               href="/po_sets/{{ ps.id }}/view" 
               class="btn btn-secondary btn-sm"
               title="Inspect 3-Way Match &amp; Documents"
-            >
-              <span>View Set</span>
-              <span style="font-size:0.8rem;">→</span>
-            </a>
+              style="text-decoration:none; white-space:nowrap;"
+            >View Set &rarr;</a>
 
             {% if status_str == 'merged' and ps.has_merged_file %}
               <a 
@@ -137,9 +136,8 @@
                 class="btn btn-success btn-sm"
                 title="Download final merged PDF"
                 download
-              >
-                <span>📥 PDF</span>
-              </a>
+                style="text-decoration:none; white-space:nowrap; display:inline-flex; align-items:center; gap:4px;"
+              >📥 PDF</a>
             {% endif %}
           </div>
         </td>
@@ -147,10 +145,44 @@
       {% else %}
       <tr>
         <td colspan="6" style="text-align:center; padding:36px; color:var(--text-muted);">
-          <div style="font-size:2rem; margin-bottom:8px;">📭</div>
-          <div style="font-weight:600; font-size:1rem; color:var(--text-main);">No PO Sets found</div>
+          <div style="font-size:2rem; margin-bottom:8px;">
+            {% if current_status == 'mismatched' or current_status == 'quarantined' %}
+              🛡️
+            {% elif current_status == 'merged' %}
+              📂
+            {% elif current_status == 'pending' or current_status == 'blocked_customs' %}
+              🎉
+            {% else %}
+              📭
+            {% endif %}
+          </div>
+          <div style="font-weight:600; font-size:1rem; color:var(--text-main);">
+            {% if current_status == 'mismatched' %}
+              All Clear: No Quantity Mismatches
+            {% elif current_status == 'quarantined' %}
+              Clean Pipeline: No Flagged Sets
+            {% elif current_status == 'blocked_customs' %}
+              Clearance Complete: No Customs Holds
+            {% elif current_status == 'pending' %}
+              All Caught Up: No Orders Awaiting Documents
+            {% elif current_status == 'merged' %}
+              No Merged &amp; Ready Orders Yet
+            {% else %}
+              No PO Sets found
+            {% endif %}
+          </div>
           <div style="font-size:0.85rem; margin-top:4px;">
-            {% if current_status %}
+            {% if current_status == 'mismatched' %}
+              No quantity discrepancies found across active purchase orders.
+            {% elif current_status == 'quarantined' %}
+              No purchase orders are currently flagged for critical exceptions or conflicts.
+            {% elif current_status == 'blocked_customs' %}
+              No purchase orders are currently blocked by missing customs clearance or shipping documents.
+            {% elif current_status == 'pending' %}
+              No purchase orders are currently waiting for vendor delivery notes or invoices.
+            {% elif current_status == 'merged' %}
+              Packets will appear here once all line item quantities match and customs documents are attached.
+            {% elif current_status %}
               There are no PO Sets currently with status <strong>{{ current_status }}</strong>.
             {% else %}
               Drop PDF invoices and delivery notes into your input folder and click <strong>Scan Input Folder</strong>.

@@ -1,0 +1,137 @@
+{
+  "doc_id": 20,
+  "label": "V4",
+  "model": "openai/gpt-6-luna",
+  "variant": "img200",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.25,
+      "result": {
+        "document_type": "PO",
+        "document_number": "50119501",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "IRONCLAD EXO HI-VIZ UTILITY YELLOW SIZE XXXL; Line/Rel No: 1\\1; Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "50.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "GLOVES,KONG RIGGER,SIZE S; Line/Rel No: 2\\1; Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "GLOVES,KONG RIGGER,SIZE M; Line/Rel No: 3\\1; Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7011,
+          "completion_tokens": 583,
+          "reasoning_tokens": 319,
+          "cost": 0.00037376,
+          "latency_s": 9.14
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.11,
+      "result": {
+        "document_type": "PO",
+        "document_number": "50119501",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "IRONCLAD EXO HI-VIZ UTILITY YELLOW SIZE XXXL Line/Rel No: 1\\1 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "50.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "GLOVES, KONG RIGGER, SIZE S Line/Rel No: 2\\1 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "GLOVES, KONG RIGGER, SIZE M Line/Rel No: 3\\1 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7011,
+          "completion_tokens": 701,
+          "reasoning_tokens": 441,
+          "cost": 0.0012235,
+          "latency_s": 10.01
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.71,
+      "result": {
+        "document_type": "PO",
+        "document_number": "50119501",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "IRONCLAD EXO HI-VIZ UTILITY YELLOW SIZE XXXL Line\\Rel No: 11 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "50.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "GLOVES,KONG RIGGER,SIZE S Line\\Rel No: 21 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "GLOVES,KONG RIGGER,SIZE M Line\\Rel No: 31 Part Main Group: CONS",
+            "quantity": "5",
+            "unit_price": "110.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7011,
+          "completion_tokens": 587,
+          "reasoning_tokens": 335,
+          "cost": 0.00037576,
+          "latency_s": 9.59
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

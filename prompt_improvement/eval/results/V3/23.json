@@ -1,0 +1,95 @@
+{
+  "doc_id": 23,
+  "label": "V3",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.71,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9175",
+        "po_reference": "50117194",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "GATE VALVE, 1 1/2 IN, 150# RF, A105 BODY, TRIM 8, HANDWHEEL",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 166,
+          "reasoning_tokens": 0,
+          "cost": 0.000700625,
+          "latency_s": 5.62
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.54,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9175",
+        "po_reference": "5017194",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "GASKET, 1.5\" EXPANDED PTFE 3/4\" C.I. TANK? SEALANT",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 164,
+          "reasoning_tokens": 0,
+          "cost": 0.00014383,
+          "latency_s": 5.46
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 12.11,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9175",
+        "po_reference": "5017194",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "GASKET, 1 1/8 IN ... 21 cm ... NEOPRENE",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 508,
+          "reasoning_tokens": 350,
+          "cost": 0.00031583,
+          "latency_s": 12.02
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

@@ -2,6 +2,7 @@
 {% block title %}PO Set {{ po_set.po_no_normalized }} — 3-Way Reconciliation{% endblock %}
 
 {% block content %}
+
 {% set status_str = po_set.status.value if po_set.status.value is defined else (po_set.status|string) %}
 
 {# Outcome of the last action on this page. An upload that changed nothing
@@ -42,9 +43,10 @@
             Merged - packet missing
           </span>
         {% elif (po_set.description_match_count or 0) > 0 or po_set.line_mapping_rule %}
-          <span class="badge badge-desc" style="font-size:0.9rem; padding:6px 14px;"
+          <span class="badge badge-merged" style="font-size:0.9rem; padding:6px 14px;">Merged &amp; Ready</span>
+          <span class="badge badge-desc" style="font-size:0.8rem;"
                 title="The quantities reconcile, but at least one line was attached by description or paired by a line-numbering rule rather than a printed line number. Review the item descriptions and the line mapping below.">
-            Merged • review
+            Review
           </span>
           {% if (po_set.description_match_count or 0) > 0 %}
           <span class="badge badge-desc" style="font-size:0.8rem;"
@@ -68,13 +70,17 @@
           </span>
         {% endif %}
       {% elif status_str == 'mismatched' %}
-        <span class="badge badge-mismatched" style="font-size:0.9rem; padding:6px 14px;">Needs Review (Discrepancy)</span>
+        {% if set_shortfall == 'under' %}
+          <span class="badge badge-pending" style="font-size:0.9rem; padding:6px 14px;" title="Waiting (part delivered)">Partial Delivery</span>
+        {% else %}
+          <span class="badge badge-mismatched" style="font-size:0.9rem; padding:6px 14px;">Quantity Mismatch</span>
+        {% endif %}
       {% elif status_str == 'blocked_customs' %}
-        <span class="badge badge-blocked" style="font-size:0.9rem; padding:6px 14px;">🔒 Awaiting Customs (2 docs needed)</span>
+        <span class="badge badge-blocked" style="font-size:0.9rem; padding:6px 14px;">🔒 Awaiting Customs/Shipping Docs (2 docs needed)</span>
       {% elif status_str == 'quarantined' %}
-        <span class="badge badge-quarantined" style="font-size:0.9rem; padding:6px 14px;">🚨 Quarantined</span>
+        <span class="badge badge-quarantined" style="font-size:0.9rem; padding:6px 14px;">🚨 Flagged</span>
       {% elif status_str == 'pending' %}
-        <span class="badge badge-pending" style="font-size:0.9rem; padding:6px 14px;">Pending / Waiting</span>
+        <span class="badge badge-pending" style="font-size:0.9rem; padding:6px 14px;">Awaiting Documents</span>
       {% endif %}
 
       {% if is_locked %}
@@ -132,18 +138,22 @@
       A sync is running (a scan of the input folder). Actions on this set are paused while it runs and resume when it finishes. A large batch can take an hour or more; reload this page after the scan ends.
     </div>
     {% endif %}
-    <!-- Customs Toggle -->
+    <!-- Customs Toggle Switch -->
     <button
+      type="button"
       data-testid="btn-toggle-customs"
-      class="btn {% if po_set.has_customs_toggle %}btn-primary{% else %}btn-secondary{% endif %}"
+      class="customs-toggle-btn {% if po_set.has_customs_toggle %}is-active{% endif %}"
       hx-post="/po_sets/{{ po_set.id }}/toggle_customs"
       hx-swap="none"
       hx-on::after-request="if (event.detail.successful) { let b = {}; try { b = JSON.parse(event.detail.xhr.responseText) } catch (e) {} if (!b.append_pending) location.reload() }"
       title="Toggle whether Customs and Shipping documents are required for this PO Set"
       {% if is_locked or sync_running %}disabled{% endif %}
     >
-      <span>🛡️ Customs Check:</span>
-      <strong>{{ 'ON' if po_set.has_customs_toggle else 'OFF' }}</strong>
+      <span class="customs-toggle-text">🛡️ Customs Requirement:</span>
+      <span class="toggle-track" aria-hidden="true">
+        <span class="toggle-thumb"></span>
+      </span>
+      <span class="toggle-status-text">{{ 'ON' if po_set.has_customs_toggle else 'OFF' }}</span>
     </button>
 
     <!-- Merge now (gated) — use after finishing a manual step, e.g. uploading
@@ -225,7 +235,7 @@
     {# A merged set can still carry a note — how the packet was named, or that
        an operator force-merged it. Hiding it behind "not merged" left a green
        "Merged & Ready" header over a ❌ matrix with no explanation. #}
-    {% if status_str == 'quarantined' %}Why this set is quarantined
+    {% if status_str == 'quarantined' %}Why this set is flagged
     {% elif status_str == 'mismatched' and set_shortfall == 'under' %}Why this set is waiting
     {% elif status_str == 'mismatched' %}Why this set needs review
     {% elif status_str == 'blocked_customs' %}Why this set is blocked
@@ -235,14 +245,14 @@
   <div style="font-size:0.92rem;">{{ po_set.reconcile_reason }}</div>
   {% if status_str == 'quarantined' %}
   <div class="muted" style="font-size:0.8rem; margin-top:6px;">
-    The matrix below compares line quantities only. A quarantined set does not
+    The matrix below compares line quantities only. A flagged set does not
     merge even when every line matches — the check above stopped it first.
   </div>
   {% endif %}
 </div>
 {% endif %}
 
-<!-- 3-Way Reconciliation Comparison Matrix Card -->
+<!-- 3-Way Reconciliation Comparison Schedule Card -->
 <div class="card">
   <div class="card-header" style="margin-bottom:8px;">
     <div>
@@ -277,12 +287,12 @@
     <table class="reconcile-matrix">
       <thead>
         <tr>
-          <th style="width:80px;">Line #</th>
+          <th style="width:75px;">Line #</th>
           <th>Item Description</th>
           <th style="text-align:right;">PO Ordered</th>
           <th style="text-align:right;">DN Delivered</th>
           <th style="text-align:right;">SI Invoiced</th>
-          <th style="text-align:center;">Verdict</th>
+          <th style="text-align:center;">Match Status</th>
         </tr>
       </thead>
       <tbody>
@@ -290,7 +300,15 @@
         <tr class="{{ r.row_class }}" data-testid="matrix-row" data-line="{{ r.line_item_no }}">
           <td style="font-family:ui-monospace, monospace; font-weight:700;">#{{ r.line_item_no }}
             {% if r.mapped_from %}<span class="badge badge-desc" style="display:block; margin-top:4px; font-size:0.7rem;" title="Paired by a line-number rule, not as printed.">&larr; {{ r.mapped_from }}</span>{% endif %}</td>
-          <td style="font-weight:500;">{{ r.description }}</td>
+          <td style="font-weight:500;">
+            {{ r.description }}
+            {% if r.desc_matched %}
+              <span class="badge badge-desc" style="display:inline-flex; margin-left:6px; font-size:0.7rem;"
+                    title="Matched by description fallback — verify item text">
+                🔍 Description Match
+              </span>
+            {% endif %}
+          </td>
           
           <td style="text-align:right;">
             <span class="qty-val" data-testid="cell-po-qty" style="color:#0f172a;">{{ '{:g}'.format(r.po_qty) }}</span>
@@ -307,14 +325,9 @@
               {{ '{:g}'.format(r.si_agg_qty) }}
             </span>
           </td>
+
           <td style="text-align:center;">
             <span class="badge {{ r.badge }}">{{ r.verdict }}</span>
-            {% if r.desc_matched %}
-              <span class="badge badge-desc" style="display:block; margin-top:4px; font-size:0.7rem;"
-                    title="This line was attached by description, not by a printed line number. Check the item description.">
-                desc match
-              </span>
-            {% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -487,11 +500,13 @@
         name="file" 
         accept=".pdf" 
         required 
+        aria-label="Supporting PDF file"
         style="padding:6px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:#fff;"
       >
       <select 
         name="doc_type" 
         required 
+        aria-label="Supporting document type"
         style="padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:#fff; font-weight:600;"
       >
         <option value="CUSTOMS">CUSTOMS (Clearance / Bill of Entry)</option>
@@ -508,51 +523,6 @@
   </div>
   {% endif %}
 </div>
-
-<!-- Quarantined Archive Card (Only if quarantined and active) -->
-{% if status_str == 'quarantined' and not is_archived %}
-<div class="card" style="border-color:var(--clr-quarantined-border); background:#fff5f5;">
-  <h3 style="color:#991b1b; font-size:1.1rem; margin-bottom:4px;">📦 Archive Quarantined PO Set</h3>
-  <p class="muted" style="margin-bottom:14px; font-size:0.85rem;">
-    Moves this PO Set to the archive folder and hides it from the active
-    worklists. The database rows, every stored PDF and the audit trail are kept. Nothing is destroyed.
-  </p>
-  <button 
-    class="btn btn-danger" 
-    data-testid="btn-archive"
-    onclick="document.getElementById('quarantine-delete-modal').classList.add('open')"
-    {% if is_locked %}disabled{% endif %}
-  >
-    Archive from Pipeline
-  </button>
-</div>
-
-<!-- Quarantine Delete Confirmation Modal -->
-<div id="quarantine-delete-modal" class="modal-backdrop">
-  <div class="modal-dialog" role="dialog" aria-modal="true">
-    <h3 style="margin-bottom:8px; color:#991b1b;">Archive this quarantined PO Set?</h3>
-    <p class="muted" style="margin-bottom:16px;">
-      This moves the set to the archive folder and hides it from the
-      worklists. Its database rows, documents, line items, stored PDFs and audit trail are kept.
-      An audit log entry records the archive.
-    </p>
-    <div style="display:flex; gap:10px; justify-content:flex-end;">
-      <button class="btn btn-secondary" onclick="document.getElementById('quarantine-delete-modal').classList.remove('open')">
-        Cancel
-      </button>
-      <button 
-        class="btn btn-danger" 
-        data-testid="btn-confirm-archive"
-        hx-delete="/po_sets/{{ po_set.id }}/quarantine" 
-        hx-swap="none" 
-        onclick="document.getElementById('quarantine-delete-modal').classList.remove('open')"
-      >
-        Archive
-      </button>
-    </div>
-  </div>
-</div>
-{% endif %}
 
 {% if not is_archived %}
 <!-- Force Merge Modal -->
@@ -590,26 +560,25 @@
     </div>
   </div>
 </div>
-{% endif %}
 
-{% if not is_archived and status_str in ['pending', 'mismatched', 'quarantined', 'blocked_customs'] %}
 <div class="card" style="margin-top:20px; border-color:var(--clr-quarantined-border);" data-testid="remove-set-card">
-  <h3 style="font-size:1rem; margin-bottom:6px;">Move to quarantine and remove set</h3>
+  <h3 style="font-size:1rem; margin-bottom:6px;">Remove Set to Quarantine Folder</h3>
   <p class="muted" style="font-size:0.85rem; margin-bottom:12px;">
-    Copies every PDF of this set to the quarantine folder (with a JSON export and a
-    REMOVED.txt), then deletes this set's rows, so corrected documents can form a new set.
+    Copies every PDF of this set to the quarantine folder (<code>data/quarantine/_removed_sets/{{ po_set.po_no_normalized }}/</code> with a JSON export and a
+    REMOVED.txt), then deletes this set's database rows so corrected documents can form a fresh set.
     Stored copies and the audit trail are kept. Use this only when the set cannot be
     completed as it is.
   </p>
   <form method="post" action="/po_sets/{{ po_set.id }}/remove_to_quarantine"
-        onsubmit="return confirm('Remove this PO Set? Its rows are deleted. Its files are copied to the quarantine folder first.');">
+        onsubmit="return confirm('Remove this PO Set to Quarantine Folder? Its rows are deleted and files are copied to the quarantine folder first.');">
     <label class="muted" style="font-size:0.85rem; display:block; margin-bottom:8px;">
       Note (optional)
       <input name="note" maxlength="200" style="width:100%; max-width:420px; padding:6px 8px;">
     </label>
-    <button type="submit" class="btn btn-danger" data-testid="btn-confirm-remove-set">Move to quarantine and remove set</button>
+    <button type="submit" class="btn btn-danger" data-testid="btn-confirm-remove-set">Remove Set to Quarantine Folder</button>
   </form>
 </div>
+
 {% endif %}
 
 {% endblock %}

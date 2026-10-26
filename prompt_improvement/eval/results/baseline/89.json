@@ -1,0 +1,324 @@
+{
+  "doc_id": 89,
+  "label": "baseline",
+  "model": "openai/gpt-6-luna",
+  "prompt_source": "live",
+  "prompt_hash": "c826512ea909",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.83,
+      "result": {
+        "document_type": "SI",
+        "has_po_section": false,
+        "has_dn_section": false,
+        "has_si_section": true,
+        "page_count": 2,
+        "components": [
+          {
+            "doc_type": "SI",
+            "document_type": "SI",
+            "page_start": 1,
+            "page_end": 2
+          }
+        ],
+        "document_number": "SIV-DTS-25-456",
+        "po_no_raw": "4500039614",
+        "po_reference": "4500039614",
+        "po_reference_ambiguous": false,
+        "vendor_name": "DRILLING TOOLS TRADING EST",
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "[PROTO - J710B] PROTO® WR ADJUSTABLE 10 - أدوات دو ة كه ائ ة",
+            "quantity": "1.00",
+            "unit_price": "104.50",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "[Gazelle - G80177] Gazelle - 12 IN. ADJUSTABLE WRENCH BLACK (300MM)",
+            "quantity": "2.00",
+            "unit_price": "34.43",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "[PROTO - J715B] PROTO® WR ADJUSTABLE 15 - أدوات دو ة كه ائ ة",
+            "quantity": "2.00",
+            "unit_price": "244.20",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "[PROTO - J724B] PROTO® WR ADJUSTABLE 24 - أدوات دو ة كه ائ ة",
+            "quantity": "1.00",
+            "unit_price": "674.30",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "[PROTO - J812HD] Proto® Heavy Duty Cast Iron Pipe Wrench 12\"",
+            "quantity": "1.00",
+            "unit_price": "143.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "[PROTO - J814HD] Proto® Heavy Duty Cast Iron Pipe Wrench 14\"",
+            "quantity": "1.00",
+            "unit_price": "163.90",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "7",
+            "description": "[Gazelle - G80356] Gazelle - 18 IN. HEAVY DUTY PIPE WRENCH",
+            "quantity": "2.00",
+            "unit_price": "112.22",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "8",
+            "description": "[PROTO - J824HD] Proto® Heavy Duty Cast Iron Pipe Wrench 24\"",
+            "quantity": "1.00",
+            "unit_price": "360.80",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "9",
+            "description": "[PROTO - J1200FASD] Proto® 15 Piece Satin Combination ASD Wrench Set - 12 Point",
+            "quantity": "1.00",
+            "unit_price": "1526.80",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "10",
+            "description": "[PROTO - J1206SCPF] PROTO® 6PC COMB SCREWDRIVER SET",
+            "quantity": "1.00",
+            "unit_price": "355.30",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "12",
+            "description": "[PROTO - J260SG] Proto® Tongue and Groove Power-Track II Pliers w/Grip - 10-3/16\"",
+            "quantity": "1.00",
+            "unit_price": "78.10",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.48,
+      "result": {
+        "document_type": "SI",
+        "has_po_section": false,
+        "has_dn_section": false,
+        "has_si_section": true,
+        "page_count": 2,
+        "components": [
+          {
+            "doc_type": "SI",
+            "document_type": "SI",
+            "page_start": 1,
+            "page_end": 2
+          }
+        ],
+        "document_number": "SIV-DTS-25-456",
+        "po_no_raw": "4500039614",
+        "po_reference": "4500039614",
+        "po_reference_ambiguous": false,
+        "vendor_name": "DRILLING TOOLS TRADING EST",
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "[PROTO - J710B] PROTO® WR ADJUSTABLE 10",
+            "quantity": "1.00",
+            "unit_price": "104.50",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "[Gazelle - G80177] Gazelle - 12 IN. ADJUSTABLE WRENCH BLACK (300MM)",
+            "quantity": "2.00",
+            "unit_price": "34.43",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "[PROTO - J715B] PROTO® WR ADJUSTABLE 15",
+            "quantity": "2.00",
+            "unit_price": "244.20",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "[PROTO - J724B] PROTO® WR ADJUSTABLE 24",
+            "quantity": "1.00",
+            "unit_price": "674.30",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "[PROTO - J812HD] Proto® Heavy Duty Cast Iron Pipe Wrench 12\"",
+            "quantity": "1.00",
+            "unit_price": "143.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "[PROTO - J814HD] Proto® Heavy Duty Cast Iron Pipe Wrench 14\"",
+            "quantity": "1.00",
+            "unit_price": "163.90",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "7",
+            "description": "[Gazelle - G80356] Gazelle - 18 IN. HEAVY DUTY PIPE WRENCH",
+            "quantity": "2.00",
+            "unit_price": "112.22",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "8",
+            "description": "[PROTO - J824HD] Proto® Heavy Duty Cast Iron Pipe Wrench 24\"",
+            "quantity": "1.00",
+            "unit_price": "360.80",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "9",
+            "description": "[PROTO - J1200FASD] Proto® 15 Piece Satin Combination ASD Wrench Set - 12 Point",
+            "quantity": "1.00",
+            "unit_price": "1526.80",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "10",
+            "description": "[PROTO - J1206SCPF] PROTO® 6PC COMB SCREWDRIVER SET",
+            "quantity": "1.00",
+            "unit_price": "355.30",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "12",
+            "description": "[PROTO - J260SG] Proto® Tongue and Groove Power-Track II Pliers w/Grip - 10-3/16\"",
+            "quantity": "1.00",
+            "unit_price": "78.10",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.68,
+      "result": {
+        "document_type": "SI",
+        "has_po_section": false,
+        "has_dn_section": false,
+        "has_si_section": true,
+        "page_count": 2,
+        "components": [
+          {
+            "doc_type": "SI",
+            "document_type": "SI",
+            "page_start": 1,
+            "page_end": 2
+          }
+        ],
+        "document_number": "SIV-DTS-25-456",
+        "po_no_raw": "4500039614",
+        "po_reference": "4500039614",
+        "po_reference_ambiguous": false,
+        "vendor_name": "DRILLING TOOLS TRADING EST",
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "[PROTO - J710B] PROTO® WR ADJUSTABLE 10",
+            "quantity": "1.00",
+            "unit_price": "104.50",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "[Gazelle - G80177] Gazelle - 12 IN. ADJUSTABLE WRENCH BLACK (300MM)",
+            "quantity": "2.00",
+            "unit_price": "34.43",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "[PROTO - J715B] PROTO® WR ADJUSTABLE 15",
+            "quantity": "2.00",
+            "unit_price": "244.20",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "[PROTO - J724B] PROTO® WR ADJUSTABLE 24",
+            "quantity": "1.00",
+            "unit_price": "674.30",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "[PROTO - J812HD] Proto® Heavy Duty Cast Iron Pipe Wrench 12\"",
+            "quantity": "1.00",
+            "unit_price": "143.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "[PROTO - J814HD] Proto® Heavy Duty Cast Iron Pipe Wrench 14\"",
+            "quantity": "1.00",
+            "unit_price": "163.90",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "7",
+            "description": "[Gazelle - G80356] Gazelle - 18 IN. HEAVY DUTY PIPE WRENCH",
+            "quantity": "2.00",
+            "unit_price": "112.22",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "8",
+            "description": "[PROTO - J824HD] Proto® Heavy Duty Cast Iron Pipe Wrench 24\"",
+            "quantity": "1.00",
+            "unit_price": "360.80",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "9",
+            "description": "[PROTO - J1200FASD] Proto® 15 Piece Satin Combination ASD Wrench Set - 12 Point",
+            "quantity": "1.00",
+            "unit_price": "1,526.80",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "10",
+            "description": "[PROTO - J1206SCPF] PROTO® 6PC COMB SCREWDRIVER SET",
+            "quantity": "1.00",
+            "unit_price": "355.30",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "12",
+            "description": "[PROTO - J260SG] Proto® Tongue and Groove Power-Track II Pliers w/Grip - 10-3/16\"",
+            "quantity": "1.00",
+            "unit_price": "78.10",
+            "dn_no": null
+          }
+        ]
+      },
+      "repeat": 2
+    }
+  ]
+}

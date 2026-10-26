@@ -1,0 +1,96 @@
+{
+  "doc_id": 239,
+  "label": "P0",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.15,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-RAK-25-3126",
+        "po_reference": "13952",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "PP Woven Jumbo bags, Size 100 x 100 x 120 CM, Colour : White, Top : Skirt Bottom : closed, Loop : Full Loop, SWL : 1000kg/5:1,Liner : Yes(75 Mic) Bag Wt : 3.346 Kg Line Item - 1",
+            "quantity": "40.00",
+            "unit_price": "61.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4890,
+          "completion_tokens": 350,
+          "reasoning_tokens": 143,
+          "cost": 0.00023605,
+          "latency_s": 7.08
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.38,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-RAK-25-3126",
+        "po_reference": "13952",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "PP Woven Jumbo bags, Size 100 x 100 x 120 CM, Colour : White, Top : Skirt Bottom : closed, Loop : Full Loop, SWL : 1000kg/5:1,Liner : Yes(75 Mic) Bag Wt : 3.346 Kg Line Item - 1",
+            "quantity": "40.00",
+            "unit_price": "61.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4890,
+          "completion_tokens": 361,
+          "reasoning_tokens": 154,
+          "cost": 0.00024155,
+          "latency_s": 7.31
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 6.86,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-RAK-25-3126",
+        "po_reference": "13952",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "PP Woven Jumbo bags, Size 100 x 100 x 120 CM, Colour : White, Top : Skirt Bottom : closed, Loop : Full Loop, SWL : 1000kg/5:1,Liner : Yes(75 Mic) Bag Wt : 3.346 Kg Line Item - 1",
+            "quantity": "40.00",
+            "unit_price": "61.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4890,
+          "completion_tokens": 363,
+          "reasoning_tokens": 156,
+          "cost": 0.00024255,
+          "latency_s": 6.79
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

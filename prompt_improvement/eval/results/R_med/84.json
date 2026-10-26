@@ -1,0 +1,116 @@
+{
+  "doc_id": 84,
+  "label": "R_med",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=medium",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.49,
+      "result": {
+        "document_type": "PO",
+        "document_number": "4800466856",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "5",
+            "description": "KOPR KOTE HIGH TEMPERATURE ANTI SEIZE COMPOUND PAIL-(SPN/BRAND Ref: Kopr KOTE-jet lube 1 Lbs/can)",
+            "quantity": "5.000",
+            "unit_price": "156.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "GULF 1200 SILICONE WHITECLEAR 1X24-(SPN/BRAND Ref: GULF 1200 SILICONE)",
+            "quantity": "1",
+            "unit_price": "105.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 225,
+          "reasoning_tokens": 0,
+          "cost": 0.00017433,
+          "latency_s": 5.39
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.23,
+      "result": {
+        "document_type": "PO",
+        "document_number": "4800466856",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "5",
+            "description": "KOPR KOTE HIGH TEMPERATURE ANTI SEIZE COMPOUND PAIL-(SPN/BRAND Ref: Kopr KOTE-Jet lube 1 Lbs/can)",
+            "quantity": "5.000",
+            "unit_price": "156.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "GULF 1200 SILICONE WHITECLEAR 1X24-(SPN/BRAND Ref: GULF 1200 SILICONE)",
+            "quantity": "1",
+            "unit_price": "105.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 226,
+          "reasoning_tokens": 0,
+          "cost": 0.00017483,
+          "latency_s": 5.14
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.08,
+      "result": {
+        "document_type": "PO",
+        "document_number": "4800466856",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "5",
+            "description": "KOPR KOTE HIGH TEMPERATURE ANTI SEIZE COMPOUND PAIL-(SPN/BRAND Ref: Kopr KOTE-jet lube 1 Lbs/can)",
+            "quantity": "5.000",
+            "unit_price": "156.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "GULF 1200 SILICONE WHITECLEAR 1X24-(SPN/BRAND Ref: GULF 1200 SILICONE)",
+            "quantity": "1",
+            "unit_price": "105.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 222,
+          "reasoning_tokens": 0,
+          "cost": 0.00017283,
+          "latency_s": 5.0
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

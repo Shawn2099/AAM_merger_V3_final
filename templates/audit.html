@@ -53,6 +53,8 @@
           <td style="font-weight:600;">
             {% if e.po_set_id %}
               <a href="/po_sets/{{ e.po_set_id }}/view" class="po-link">PO Set #{{ e.po_set_id }}</a>
+            {% elif e.removed_po_set_id %}
+              <span class="muted">#{{ e.removed_po_set_id }} (removed)</span>
             {% else %}
               <span class="muted">—</span>
             {% endif %}

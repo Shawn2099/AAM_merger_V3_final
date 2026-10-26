@@ -1,0 +1,95 @@
+{
+  "doc_id": 23,
+  "label": "V1",
+  "model": "openai/gpt-6-luna",
+  "variant": "native",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.81,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9175",
+        "po_reference": "50317194",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "REFRIGERANT R-22",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5443,
+          "completion_tokens": 624,
+          "reasoning_tokens": 478,
+          "cost": 0.00037858,
+          "latency_s": 10.79
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.57,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9175",
+        "po_reference": "50137194",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "REFR... REM... 21 cm ... PLASTIC",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5443,
+          "completion_tokens": 457,
+          "reasoning_tokens": 308,
+          "cost": 0.00029508,
+          "latency_s": 7.55
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.52,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9175",
+        "po_reference": "50137194",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "REFR... REMOTE? 21 cm 1 socket ...",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5443,
+          "completion_tokens": 538,
+          "reasoning_tokens": 387,
+          "cost": 0.00033558,
+          "latency_s": 8.51
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

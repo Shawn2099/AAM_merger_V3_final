@@ -6,7 +6,7 @@
     <span class="kpi-desc">Managed across pipeline</span>
   </a>
 
-  <a href="/dashboard?status=merged" class="kpi-card kpi-merged" data-testid="kpi-merged" title="Filter by Merged (Ready)">
+  <a href="/dashboard?status=merged" class="kpi-card kpi-merged" data-testid="kpi-merged" title="Filter by Merged &amp; Ready">
     <span class="kpi-title">✅ Merged &amp; Ready</span>
     <span class="kpi-value" style="color:var(--clr-merged-text);">
       {{ stats.merged if stats else 0 }}
@@ -15,20 +15,20 @@
     <span class="kpi-desc">Fully reconciled packets</span>
   </a>
 
-  <a href="/dashboard?status=mismatched" class="kpi-card kpi-mismatched" data-testid="kpi-mismatched" title="Filter by Mismatched (Needs Review)">
-    <span class="kpi-title">⚠️ Needs Review</span>
+  <a href="/dashboard?status=mismatched" class="kpi-card kpi-mismatched" data-testid="kpi-mismatched" title="Filter by Quantity Mismatch">
+    <span class="kpi-title">⚠️ Quantity Mismatch</span>
     <span class="kpi-value" style="color:var(--clr-mismatch-text);">{{ stats.mismatched if stats else 0 }}</span>
     <span class="kpi-desc">Quantity discrepancies</span>
   </a>
 
-  <a href="/dashboard?status=blocked_customs" class="kpi-card kpi-blocked" data-testid="kpi-blocked-customs" title="Filter by Awaiting Customs">
-    <span class="kpi-title">🔒 Awaiting Customs</span>
+  <a href="/dashboard?status=blocked_customs" class="kpi-card kpi-blocked" data-testid="kpi-blocked-customs" title="Filter by Awaiting Customs/Shipping Docs">
+    <span class="kpi-title">🔒 Awaiting Customs/Shipping Docs</span>
     <span class="kpi-value" style="color:var(--clr-blocked-text);">{{ stats.blocked_customs if stats else 0 }}</span>
     <span class="kpi-desc">Needs customs/shipping docs</span>
   </a>
 
-  <a href="/dashboard?status=quarantined" class="kpi-card kpi-quarantined" data-testid="kpi-quarantined" title="Filter by Quarantined">
-    <span class="kpi-title">🚨 Quarantined</span>
+  <a href="/dashboard?status=quarantined" class="kpi-card kpi-quarantined" data-testid="kpi-quarantined" title="Filter by Flagged">
+    <span class="kpi-title">🚨 Flagged</span>
     <span class="kpi-value" style="color:var(--clr-quarantined-text);">{{ stats.quarantined if stats else 0 }}</span>
     <span class="kpi-desc">Zero qty or critical conflict</span>
   </a>

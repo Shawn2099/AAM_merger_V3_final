@@ -1,0 +1,201 @@
+{
+  "doc_id": 238,
+  "label": "H_V0",
+  "model": "openai/gpt-6-luna",
+  "variant": "native",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.05,
+      "result": {
+        "document_type": "PO",
+        "document_number": "P212528",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 3,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "CLAMP, REPAIR 1 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "165.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "CLAMP, REPAIR 2 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "210.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "CLAMP, REPAIR 3 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "295.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "CLAMP, REPAIR 4 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "310.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "CLAMP, REPAIR 5 IN PIPE X 9 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "426.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "CLAMP, REPAIR 6 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "395.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 10989,
+          "completion_tokens": 431,
+          "reasoning_tokens": 0,
+          "cost": 0.00158575,
+          "latency_s": 5.04
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.92,
+      "result": {
+        "document_type": "PO",
+        "document_number": "P212528",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 3,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "CLAMP, REPAIR 1 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "165.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "CLAMP, REPAIR 2 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "210.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "CLAMP, REPAIR 3 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "295.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "CLAMP, REPAIR 4 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "310.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "CLAMP, REPAIR 5 IN PIPE X 9 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "426.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "CLAMP, REPAIR 6 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "395.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 10989,
+          "completion_tokens": 431,
+          "reasoning_tokens": 0,
+          "cost": 0.00033754,
+          "latency_s": 4.91
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.86,
+      "result": {
+        "document_type": "PO",
+        "document_number": "P212528",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 3,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "CLAMP, REPAIR 1 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "165.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "CLAMP, REPAIR 2 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "210.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "CLAMP, REPAIR 3 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "295.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "CLAMP, REPAIR 4 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "310.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "CLAMP, REPAIR 5 IN PIPE X 9 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "426.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "CLAMP, REPAIR 6 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET",
+            "quantity": "2",
+            "unit_price": "395.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 10989,
+          "completion_tokens": 431,
+          "reasoning_tokens": 0,
+          "cost": 0.00033754,
+          "latency_s": 4.85
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

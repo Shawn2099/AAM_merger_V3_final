@@ -1,0 +1,116 @@
+{
+  "doc_id": 258,
+  "label": "V1",
+  "model": "openai/gpt-6-luna",
+  "variant": "native",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.83,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RHO-26-1799",
+        "po_reference": "260988",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "STORAGE BIN 350L X 200W X 200H mm (LF322) Line Item - 1",
+            "quantity": "50.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "STORAGE BIN 500L X 300W X 200H mm(LF532) Line Item - 2",
+            "quantity": "50.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5305,
+          "completion_tokens": 207,
+          "reasoning_tokens": 0,
+          "cost": 0.0001687,
+          "latency_s": 4.8
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.75,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RHO-26-1799",
+        "po_reference": "260988",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "STORAGE BIN 350L X 200W X 200H mm (LF322) Line Item - 1",
+            "quantity": "50.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "STORAGE BIN 500L X 300W X 200H mm(LF532) Line Item - 2",
+            "quantity": "50.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5305,
+          "completion_tokens": 200,
+          "reasoning_tokens": 0,
+          "cost": 0.0001652,
+          "latency_s": 3.73
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.25,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RHO-26-1799",
+        "po_reference": "260988",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "STORAGE BIN 350L X 200W X 200H mm (LF322) Line Item - 1",
+            "quantity": "50.00",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "STORAGE BIN 500L X 300W X 200H mm(LF532) Line Item - 2",
+            "quantity": "50.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5305,
+          "completion_tokens": 200,
+          "reasoning_tokens": 0,
+          "cost": 0.0001652,
+          "latency_s": 3.23
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

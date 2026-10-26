@@ -1,0 +1,95 @@
+{
+  "doc_id": 196,
+  "label": "R_high",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.81,
+      "result": {
+        "document_type": "PO",
+        "document_number": "90139625",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "10",
+            "description": "BATTERY, SEALED LEAD ACID, SPIRAL WOUND, MODEL RT S 4.2, 12 VOLTS, HIGH POWER, E; BATTERY, SEALED LEAD ACID, SPIRAL WOUND, MODEL RT S 4.2, 12 VOLTS, HIGH POWER, ENGINE STARTING BATTERY, 254 MM x 175 MM x 200 MM, OPTIMA",
+            "quantity": "1",
+            "unit_price": "850.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7387,
+          "completion_tokens": 902,
+          "reasoning_tokens": 672,
+          "cost": 0.001371,
+          "latency_s": 11.66
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.75,
+      "result": {
+        "document_type": "PO",
+        "document_number": "90139625",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "10",
+            "description": "BATTERY, SEALED LEAD ACID, SPIRAL WOUND, MODEL RT S 4.2, 12 VOLTS, HIGH POWER, E BATTERY, SEALED LEAD ACID, SPIRAL WOUND, MODEL RT S 4.2, 12 VOLTS, HIGH POWER, ENGINE STARTING BATTERY, 254 MM x 175 MM x 200 MM, OPTIMA",
+            "quantity": "1",
+            "unit_price": "850.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7387,
+          "completion_tokens": 628,
+          "reasoning_tokens": 399,
+          "cost": 0.00040002,
+          "latency_s": 9.6
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.95,
+      "result": {
+        "document_type": "PO",
+        "document_number": "90139625",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 2,
+        "line_items": [
+          {
+            "line_item_no": "10",
+            "description": "BATTERY, SEALED LEAD ACID, SPIRAL WOUND, MODEL RT S 4.2, 12 VOLTS, HIGH POWER, ENGINE STARTING BATTERY, 254 MM x 175 MM x 200 MM, OPTIMA",
+            "quantity": "1",
+            "unit_price": "850.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7387,
+          "completion_tokens": 525,
+          "reasoning_tokens": 329,
+          "cost": 0.00034852,
+          "latency_s": 9.8
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

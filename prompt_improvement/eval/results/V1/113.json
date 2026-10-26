@@ -1,0 +1,95 @@
+{
+  "doc_id": 113,
+  "label": "V1",
+  "model": "openai/gpt-6-luna",
+  "variant": "native",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.81,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-DTS-25-517",
+        "po_reference": "226130",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Drill Pipe Connection Guide 4-1/2\" - ‫أدوات يدوية / كهربائية‬",
+            "quantity": "1.00",
+            "unit_price": "2173.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6076,
+          "completion_tokens": 158,
+          "reasoning_tokens": 0,
+          "cost": 0.00015191,
+          "latency_s": 3.79
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.47,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-DTS-25-517",
+        "po_reference": "226130",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Drill Pipe Connection Guide 4-1/2\"",
+            "quantity": "1.00",
+            "unit_price": "2173.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6076,
+          "completion_tokens": 147,
+          "reasoning_tokens": 0,
+          "cost": 0.00014641,
+          "latency_s": 3.45
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.41,
+      "result": {
+        "document_type": "SI",
+        "document_number": "SIV-DTS-25-517",
+        "po_reference": "226130",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Drill Pipe Connection Guide 4-1/2\" - ‫أدوات دو ة كه ائ ة‬",
+            "quantity": "1.00",
+            "unit_price": "2173.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6076,
+          "completion_tokens": 161,
+          "reasoning_tokens": 0,
+          "cost": 0.00015341,
+          "latency_s": 3.4
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

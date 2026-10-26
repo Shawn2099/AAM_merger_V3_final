@@ -1,0 +1,96 @@
+{
+  "doc_id": 259,
+  "label": "P4",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P4.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 23.96,
+      "result": {
+        "document_type": "PO",
+        "document_number": "8300052050",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "1400026995 STORAGE BINS",
+            "quantity": "100.00",
+            "unit_price": "5.250",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5899,
+          "completion_tokens": 1026,
+          "reasoning_tokens": 885,
+          "cost": 0.001247,
+          "latency_s": 23.88
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 19.57,
+      "result": {
+        "document_type": "PO",
+        "document_number": "8300052050",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "1400026995 STORAGE BINS",
+            "quantity": "100.00",
+            "unit_price": "5.250",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5899,
+          "completion_tokens": 784,
+          "reasoning_tokens": 643,
+          "cost": 0.00046314,
+          "latency_s": 19.48
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 23.26,
+      "result": {
+        "document_type": "PO",
+        "document_number": "8300052050",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 9,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "1400026995 STORAGE BINS",
+            "quantity": "100.00",
+            "unit_price": "5.250",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5899,
+          "completion_tokens": 657,
+          "reasoning_tokens": 516,
+          "cost": 0.00039964,
+          "latency_s": 23.18
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

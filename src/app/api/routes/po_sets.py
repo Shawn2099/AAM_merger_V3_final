@@ -619,7 +619,7 @@ def confirm_placement(po_set_id: int, doc_id: int):
 def remove_to_quarantine(po_set_id: int, request: Request, note: str = Form("")):
     """Copy the set's files to the quarantine folder, then delete its rows (step 13).
 
-    Refused while a sync reads documents, and for merged or archived sets. The
+    Refused while a sync reads documents, and for archived read-only sets. The
     set's own lock is held for the whole removal. A browser form gets a page for
     both the result and a refusal; API clients get the JSON detail.
     """
@@ -658,22 +658,27 @@ def remove_to_quarantine(po_set_id: int, request: Request, note: str = Form(""))
     finally:
         _release_lock(po_set_id, cfg, "remove_set")
 
+    folder_rel = result.get("folder_name") or Path(result["folder"]).name
+    po_no = result.get("po_no_normalized") or f"#{po_set_id}"
+    rel_display = f"quarantine/{folder_rel}" if not folder_rel.startswith("quarantine/") else folder_rel
+
     if browser:
         return templates.TemplateResponse(
             request,
             "remove_set_result.html",
             {
                 "set_id": po_set_id,
+                "po_no": po_no,
                 "document_count": result["document_count"],
-                "folder": result["folder"],
+                "folder": rel_display,
                 "missing_count": len(result["missing_files"]),
             },
         )
     return HTMLResponse(
         content=(
             '<div class="card" data-testid="remove-set-result">'
-            f"<p>Removed PO Set #{po_set_id}. {result['document_count']} document(s) were copied to "
-            f"<code>{_html.escape(result['folder'])}</code>."
+            f"<p>Removed PO Set {po_no} (#{po_set_id}). {result['document_count']} document(s) were copied to "
+            f"<code>{_html.escape(rel_display)}</code>."
             + (
                 f" {len(result['missing_files'])} stored file(s) were missing (see REMOVED.txt)."
                 if result["missing_files"]

@@ -43,9 +43,24 @@
             {% if set_aside_in_folder.get(doc.id) %}yes ({{ set_aside_in_folder[doc.id] }}){% else %}no{% endif %}
           </td>
           <td style="text-align:right;">
-            <form method="post" action="/unclassified/{{ doc.id }}/set_aside" style="display:inline;">
-              <button type="submit" class="btn btn-secondary btn-sm" data-testid="btn-set-aside-quarantine">Move to quarantine</button>
-            </form>
+            <div style="display:inline-flex; gap:6px; align-items:center;">
+              <button 
+                type="button" 
+                class="btn btn-secondary btn-sm" 
+                data-preview-url="/documents/{{ doc.id }}/preview" 
+                data-preview-name="{{ doc.original_filename }}" 
+                @click="$store.pdfDrawer.open($el.dataset.previewUrl, $el.dataset.previewName)"
+                data-testid="btn-preview-set-aside"
+                title="Preview PDF in slide-over drawer"
+              >
+                <span>👁️ Preview</span>
+              </button>
+              <form method="post" action="/unclassified/{{ doc.id }}/set_aside" style="display:inline;">
+                <button type="submit" class="btn btn-secondary btn-sm" data-testid="btn-set-aside-quarantine">
+                  Move to Quarantine Folder
+                </button>
+              </form>
+            </div>
           </td>
         </tr>
         {% endfor %}

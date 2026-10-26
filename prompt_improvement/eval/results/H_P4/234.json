@@ -1,0 +1,96 @@
+{
+  "doc_id": 234,
+  "label": "H_P4",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P4.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.99,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RAK-25-3173",
+        "po_reference": "P213899",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "GASKET, CLEAN-OUT PLATE (1283191), Southwest Oilfield Products Inc, P/N : 52032700 Line Item - 1",
+            "quantity": "4.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5977,
+          "completion_tokens": 296,
+          "reasoning_tokens": 125,
+          "cost": 0.00089175,
+          "latency_s": 7.79
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.72,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RAK-25-3173",
+        "po_reference": "P213899",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "GASKET, CLEAN-OUT PLATE (1283191), Southwest Oilfield Products Inc, P/N : 52032700 Line Item - 1",
+            "quantity": "4.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5977,
+          "completion_tokens": 169,
+          "reasoning_tokens": 0,
+          "cost": 0.00015642,
+          "latency_s": 7.5
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 6.92,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-RAK-25-3173",
+        "po_reference": "P213899",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "GASKET, CLEAN-OUT PLATE (1283191), Southwest Oilfield Products Inc, P/N : 52032700 Line Item - 1",
+            "quantity": "4.00",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5977,
+          "completion_tokens": 169,
+          "reasoning_tokens": 0,
+          "cost": 0.00015642,
+          "latency_s": 6.68
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

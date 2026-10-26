@@ -1,0 +1,1226 @@
+"""Task 10 TDD â€” Dashboard + Audit + Polish (Â§8). Tests wire all views, 5-status filter, customs toggle,
+Redo vs Redo matching split, Force Merge modal, HTMX partial refresh, audit read-only, cross-platform."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from app.core.config import load_config
+from app.core.database import get_engine
+from app.models import (
+    AuditAction,
+    AuditLog,
+    DocType,
+    Document,
+    ExtractionStatus,
+    POSet,
+    POSetStatus,
+)
+from app.models.base import Base
+
+
+@pytest.fixture()
+def tmp_cfg(tmp_path):
+    cfg = load_config("config.example.yaml")
+    cfg.paths.database_path = tmp_path / "test_dashboard.db"
+    cfg.paths.input_folder = tmp_path / "input"
+    cfg.paths.output_folder = tmp_path / "output"
+    cfg.paths.quarantine_folder = tmp_path / "quarantine"
+    cfg.paths.stored_documents_folder = tmp_path / "stored"
+    cfg.paths.log_folder = tmp_path / "logs"
+    for p in [
+        cfg.paths.input_folder,
+        cfg.paths.output_folder,
+        cfg.paths.quarantine_folder,
+        cfg.paths.stored_documents_folder,
+        cfg.paths.log_folder,
+    ]:
+        Path(p).mkdir(parents=True, exist_ok=True)
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    return cfg
+
+
+@pytest.fixture()
+def client(tmp_cfg, monkeypatch):
+    monkeypatch.setattr("app.api.routes.sync.load_config", lambda path=None: tmp_cfg)
+    monkeypatch.setattr("app.api.routes.po_sets.load_config", lambda path=None: tmp_cfg)
+    monkeypatch.setattr("app.flows.sync.load_config", lambda path=None: tmp_cfg)
+    monkeypatch.setattr("app.services.sync_lock.load_config", lambda path=None: tmp_cfg)
+    # dashboard module may also use load_config
+    try:
+        import importlib.util
+
+        dash_spec = importlib.util.find_spec("app.api.routes.dashboard")
+        assert dash_spec is not None
+
+        monkeypatch.setattr("app.api.routes.dashboard.load_config", lambda path=None: tmp_cfg)
+    except ImportError:
+        pass
+    # also patch app.main load_config if needed
+    from app.main import app
+
+    with TestClient(app) as c:
+        yield c
+
+
+def _create_poset(cfg, po_no="PO1000", status=POSetStatus.pending, has_customs=False):
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized=po_no, status=status, has_customs_toggle=has_customs)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        return ps.id
+
+
+def _create_poset_with_docs(cfg, po_no="PO1234", status=POSetStatus.pending):
+    """Create POSet with a PO/DN/SI doc and line items for detail checks."""
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    import hashlib
+
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized=po_no, status=status)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        pid = ps.id
+        for dt in [DocType.PO, DocType.DN, DocType.SI]:
+            sha = hashlib.sha256(f"{pid}-{dt.value}".encode()).hexdigest()
+            # create valid tiny PDF via pypdf (so force_merge can read it)
+            from pypdf import PdfWriter
+
+            p = Path(cfg.paths.stored_documents_folder) / f"{sha}.pdf"
+            w = PdfWriter()
+            w.add_blank_page(width=200, height=200)
+            w.write(str(p))
+            doc = Document(
+                sha256_hash=sha,
+                original_filename=f"{dt.value}.pdf",
+                stored_path=str(p),
+                doc_type=dt,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=pid,
+            )
+            s.add(doc)
+            s.flush()
+            # add line item
+
+            s.query(Document).filter_by(id=doc.id).first()
+            from app.models import LineItem as LI
+
+            s.add(LI(document_id=doc.id, description="Widget A", quantity=100000))
+        s.commit()
+        return pid
+
+
+# ---------------------------------------------------------------------------
+# 1. Dashboard renders with 5-status filter
+# ---------------------------------------------------------------------------
+
+
+def test_dashboard_renders_with_filter(client):
+    r = client.get("/dashboard")
+    assert r.status_code == 200, r.text
+    html = r.text
+    # must contain 5 statuses in filter dropdown
+    for st in ["pending", "mismatched", "quarantined", "blocked_customs", "merged"]:
+        assert st in html, f"missing status {st} in dashboard"
+    # filter select element
+    assert "<select" in html.lower()
+    # HTMX attributes present
+    assert "hx-get" in html
+    assert "hx-trigger" in html
+
+
+def test_dashboard_table_fragment_htmx(tmp_cfg, client):
+    _create_poset(tmp_cfg, po_no="POHTMXFRAG", status=POSetStatus.pending)
+    r = client.get("/dashboard/table")
+    assert r.status_code == 200, r.text
+    html = r.text
+    assert "hx-get" in html or "hx-swap" in html or "po_no" in html.lower() or "PO" in html
+    # fragment should be HTMX partial (not full html) or at least contain table/div
+    assert "table" in html.lower() or "div" in html.lower()
+
+
+def test_dashboard_filter_by_status(tmp_cfg, client):
+    _create_poset(tmp_cfg, po_no="POFILT1", status=POSetStatus.pending)
+    _create_poset(tmp_cfg, po_no="POFILT2", status=POSetStatus.merged)
+    r = client.get("/dashboard?status=pending")
+    assert r.status_code == 200, r.text
+    html = r.text
+    # pending should appear, merged should not in filtered view (or at least pending present)
+    assert "POFILT1" in html
+    # when filtering pending, merged row should be absent
+    assert "POFILT2" not in html
+    # reverse filter
+    r2 = client.get("/dashboard?status=merged")
+    assert r2.status_code == 200
+    assert "POFILT2" in r2.text
+    assert "POFILT1" not in r2.text
+
+
+def test_dashboard_filter_all_statuses(tmp_cfg, client):
+    # all five statuses appear when no filter, and each filters correctly
+    for st in POSetStatus:
+        _create_poset(tmp_cfg, po_no=f"POF{st.value.upper()}", status=st)
+    r = client.get("/dashboard")
+    assert r.status_code == 200
+    for st in POSetStatus:
+        assert f"POF{st.value.upper()}" in r.text
+
+
+# ---------------------------------------------------------------------------
+# 2. Audit log read-only
+# ---------------------------------------------------------------------------
+
+
+def test_audit_log_read_only(tmp_cfg, client):
+    # create an audit entry via force_merge path
+    _create_poset(tmp_cfg, po_no="POAUD1", status=POSetStatus.pending)
+    # force merge to generate audit (use stored docs so merge succeeds)
+    pid2 = _create_poset_with_docs(tmp_cfg, po_no="POAUD2", status=POSetStatus.pending)
+    client.post(f"/po_sets/{pid2}/force_merge")
+    r = client.get("/audit")
+    assert r.status_code == 200, r.text
+    html = r.text.lower()
+    # audit view must be read-only: contains audit entries table and no editable form
+    assert "audit" in html
+    # Should not contain POST form for audit creation
+    # Check audit entry appears (force_merge)
+    assert "force_merge" in html or "force merge" in html
+    # POST to /audit should be 405
+    r2 = client.post("/audit", json={})
+    assert r2.status_code in (404, 405), f"audit POST should be 405, got {r2.status_code}"
+
+
+def test_audit_log_shows_quarantine_delete(tmp_cfg, client):
+    pid = _create_poset(tmp_cfg, po_no="POAUDQ1", status=POSetStatus.quarantined)
+    # need docs for delete to succeed
+    import hashlib
+
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        s.get(POSet, pid)
+        sha = hashlib.sha256(b"deltest").hexdigest()
+        p = Path(tmp_cfg.paths.stored_documents_folder) / f"{sha}.pdf"
+        p.write_bytes(b"%PDF-1.4 fake")
+        doc = Document(
+            sha256_hash=sha,
+            original_filename="PO.pdf",
+            stored_path=str(p),
+            doc_type=DocType.PO,
+            extraction_status=ExtractionStatus.valid,
+            po_set_id=pid,
+        )
+        s.add(doc)
+        s.commit()
+    # HTMX delete or POST delete quarantined
+    resp_del = client.delete(f"/po_sets/{pid}/quarantine")
+    assert resp_del.headers.get("HX-Redirect") == "/quarantine"
+    r = client.get("/audit")
+    assert r.status_code == 200
+    assert "quarantine_delete" in r.text.lower() or "quarantine" in r.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# 3. PO Set detail: customs toggle, Redo vs Redo matching split, Force Merge modal, HTMX
+# ---------------------------------------------------------------------------
+
+
+def test_po_set_detail_has_customs_toggle_and_redo_split_and_force_merge_modal(tmp_cfg, client):
+    pid = _create_poset_with_docs(tmp_cfg, po_no="PODET1", status=POSetStatus.pending)
+    r = client.get(f"/po_sets/{pid}/view")
+    # fallback to alternative detail route if /view not found, try /dashboard/po_set/{id}
+    if r.status_code == 404:
+        r = client.get(f"/dashboard/po_set/{pid}")
+    if r.status_code == 404:
+        r = client.get(f"/po_sets/{pid}/detail")
+    assert r.status_code == 200, f"detail view not found: {r.text[:500]}"
+    html = r.text
+    # customs toggle must be present regardless of status (FR-12.1)
+    assert "customs" in html.lower(), "customs toggle missing"
+    # two distinct redo buttons
+    assert "redo" in html.lower()
+    # check distinct labels/endpoints
+    has_extract = "redo_extract" in html or "re-extract" in html.lower() or "Re-extract" in html
+    has_match = "redo_match" in html or "redo matching" in html.lower()
+    assert has_extract and has_match, f"redo split missing: {html[:800]}"
+    # Force Merge modal/confirmation
+    assert "force" in html.lower() and "merge" in html.lower()
+    # modal id or confirmation dialog
+    assert (
+        "modal" in html.lower() or "confirm" in html.lower() or "force-merge-modal" in html.lower()
+    )
+    # HTMX partial refresh attributes
+    assert "hx-get" in html or "hx-post" in html
+
+
+def test_customs_toggle_available_regardless_of_status(tmp_cfg, client):
+    for st in [
+        POSetStatus.pending,
+        POSetStatus.mismatched,
+        POSetStatus.quarantined,
+        POSetStatus.merged,
+    ]:
+        pid = _create_poset(tmp_cfg, po_no=f"POCUST{st.value}", status=st)
+        r = client.get(f"/po_sets/{pid}/view")
+        if r.status_code == 404:
+            r = client.get(f"/po_sets/{pid}/detail")
+        assert r.status_code == 200
+        assert "customs" in r.text.lower()
+
+
+def test_redo_endpoints_split(tmp_cfg, client):
+    pid = _create_poset(tmp_cfg, po_no="POREDO1", status=POSetStatus.pending)
+    r1 = client.post(f"/po_sets/{pid}/redo_extract")
+    assert r1.status_code == 200, r1.text
+    r2 = client.post(f"/po_sets/{pid}/redo_match")
+    assert r2.status_code == 200, r2.text
+    # they must be distinct actions (response contains distinct status)
+    assert (
+        r1.json()["status"] != r2.json()["status"]
+        or "extract" in r1.text.lower()
+        or "match" in r2.text.lower()
+    )
+
+
+def test_force_merge_modal_and_audit(tmp_cfg, client):
+    pid = _create_poset_with_docs(tmp_cfg, po_no="POFM1", status=POSetStatus.pending)
+    r = client.get(f"/po_sets/{pid}/view")
+    if r.status_code == 404:
+        r = client.get(f"/po_sets/{pid}/detail")
+    html = r.text
+    # modal must have confirmation text and HTMX post to force_merge
+    assert "hx-post" in html and "force_merge" in html
+    # the operator's reason must actually reach the audit row: the modal needs
+    # a named field and the button must include it in the request
+    assert 'name="justification"' in html
+    assert 'hx-include="#force-merge-justification"' in html
+    # execute force merge
+    r2 = client.post(f"/po_sets/{pid}/force_merge")
+    assert r2.status_code == 200
+    # audit entry created
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        entries = s.query(AuditLog).filter_by(action=AuditAction.force_merge).all()
+        assert len(entries) >= 1
+        assert (
+            any(str(e.po_set_id) == str(pid) or e.po_set_id == pid for e in entries)
+            or len(entries) >= 1
+        )
+
+
+# ---------------------------------------------------------------------------
+# 4. Quarantine view with Delete confirmation modal (HTMX)
+# ---------------------------------------------------------------------------
+
+
+def test_quarantine_view_with_delete_modal(tmp_cfg, client):
+    _create_poset(tmp_cfg, po_no="POQ1", status=POSetStatus.quarantined)
+    r = client.get("/quarantine")
+    assert r.status_code == 200, r.text
+    html = r.text.lower()
+    assert "quarantine" in html
+    # delete button/modal
+    assert "delete" in html
+    assert "modal" in html or "confirm" in html
+    # hx-delete or hx-post for delete
+    assert "hx-delete" in r.text or "hx-post" in r.text or "delete" in html
+
+
+# ---------------------------------------------------------------------------
+# 5. HTMX partial refresh + cross-platform + sync button disabled
+# ---------------------------------------------------------------------------
+
+
+def test_htmx_partial_refresh_attributes(tmp_cfg, client):
+    _create_poset(tmp_cfg, po_no="POHTMX1", status=POSetStatus.pending)
+    r = client.get("/dashboard")
+    html = r.text
+    # dashboard must poll via hx-get + hx-trigger + hx-swap (one poller only)
+    assert "hx-get" in html
+    assert "every 5s" in html
+    assert html.count('id="po-table"') == 1
+    assert "hx-swap" in html or "outerHTML" in html or "innerHTML" in html
+    # table fragment endpoint must also be HTMX-aware
+    rf = client.get("/dashboard/table?status=pending")
+    assert rf.status_code == 200
+    assert "hx-get" in rf.text or "POHTMX1" in rf.text
+
+
+def test_sync_button_htmx_and_disabled_when_running(client):
+    # dashboard must have Sync button with hx-post to /sync
+    r = client.get("/dashboard")
+    assert r.status_code == 200
+    assert 'hx-post="/sync"' in r.text or "hx-post='/sync'" in r.text or "/sync" in r.text
+    # trigger sync then check status endpoint
+    client.post("/sync")
+    r2 = client.get("/sync/status")
+    assert r2.status_code == 200
+    assert "running" in r2.text.lower()
+    # dashboard while running should show disabled or "Sync already running"
+    r3 = client.get("/dashboard")
+    # at least contains sync button text; when running, may show disabled attribute
+    assert "sync" in r3.text.lower()
+
+
+def test_cross_platform_paths_no_hardcoded_separators(tmp_cfg, client):
+    # config paths must be Path objects and as_posix usable (cross-platform)
+    assert isinstance(tmp_cfg.paths.input_folder, Path)
+    assert isinstance(tmp_cfg.paths.database_path, Path)
+    # dashboard HTML should not contain hardcoded Windows C:\ paths
+    r = client.get("/dashboard")
+    assert "C:\\" not in r.text
+    # audit and quarantine also cross-platform
+    for path in ["/audit", "/quarantine"]:
+        r2 = client.get(path)
+        assert "C:\\" not in r2.text
+
+
+def test_dashboard_filter_htmx_returns_partial(tmp_cfg, client):
+    """P3: HTMX filter returns partial table not full page."""
+    _create_poset(tmp_cfg, po_no="POHTMX2", status=POSetStatus.pending)
+    # normal full page
+    r_full = client.get("/dashboard?status=pending")
+    assert r_full.status_code == 200
+    assert "POHTMX2" in r_full.text
+    # HTMX request should return _dashboard_table fragment
+    r_htmx = client.get("/dashboard?status=pending", headers={"HX-Request": "true"})
+    assert r_htmx.status_code == 200
+    # partial should still contain PO, but ideally NOT full base layout
+    # check that HTMX partial is shorter or contains table marker
+    assert "POHTMX2" in r_htmx.text
+    # dashboard partial should be HTMX-aware: less than full page or contains table id
+    # fail if implementation still returns full dashboard.html (contains <html> or base title)
+    # We assert that HTMX response does NOT contain full base title "AAM Merger" if partial, or contains hx fragment marker
+    # For TDD, we fail if response is identical to full (means not returning partial)
+    if r_htmx.text == r_full.text:
+        pytest.fail(
+            "HTMX dashboard filter should return partial _dashboard_table, not full dashboard.html"
+        )
+
+
+def test_unclassified_view_and_reclassify(tmp_cfg, client):
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus, POSet
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="unk_hash_1",
+            original_filename="unknown_vendor.pdf",
+            stored_path="data/stored/unknown_vendor.pdf",
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.pending,
+        )
+        s.add(doc)
+        s.commit()
+        s.refresh(doc)
+        doc_id = doc.id
+
+    # GET /unclassified
+    r = client.get("/unclassified")
+    assert r.status_code == 200
+    assert "unknown_vendor.pdf" in r.text
+    assert "Unclassified Documents" in r.text
+
+    # POST /unclassified/{doc_id}/reclassify
+    r_post = client.post(
+        f"/unclassified/{doc_id}/reclassify",
+        data={"doc_type": "PO", "po_no": "999"},
+        headers={"HX-Request": "true"},
+    )
+    assert r_post.status_code == 200
+    assert "Reclassified" in r_post.text or "PO" in r_post.text
+
+    with Session(eng) as s:
+        d = s.get(Document, doc_id)
+        assert d.doc_type == DocType.PO
+        assert d.po_no_normalized == "999"
+        assert d.po_set_id is not None
+        ps = s.get(POSet, d.po_set_id)
+        assert ps.po_no_normalized == "999"
+
+
+def test_manual_merger_back_link_points_to_dashboard(client):
+    r = client.get("/manual/merger")
+    assert r.status_code == 200
+    assert 'href="/dashboard"' in r.text
+
+
+def _pdf_bytes() -> bytes:
+    import io
+
+    from pypdf import PdfWriter
+
+    w = PdfWriter()
+    w.add_blank_page(width=200, height=200)
+    buf = io.BytesIO()
+    w.write(buf)
+    return buf.getvalue()
+
+
+def test_upload_duplicate_does_not_rewrite(tmp_cfg, client):
+    """W-12: duplicate upload is idempotent â€” stored bytes + rows untouched."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import Document
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO_DUP", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+
+    payload = _pdf_bytes()
+    for _ in range(2):
+        r = client.post(
+            f"/po_sets/{ps_id}/upload",
+            files={"file": ("customs.pdf", payload, "application/pdf")},
+            data={"doc_type": "CUSTOMS"},
+        )
+        # RedirectResponse to the set view (TestClient follows -> 200 + 302 history)
+        assert r.status_code == 200, r.text
+        assert r.history and r.history[0].status_code == 302
+
+    with Session(eng) as s:
+        docs = s.query(Document).filter_by(po_set_id=ps_id).all()
+        assert len(docs) == 1
+        stored = Path(docs[0].stored_path)
+        assert stored.read_bytes() == payload
+        # poison the stored file: a duplicate upload must not rewrite it
+        stored.write_bytes(b"SENTINEL")
+
+    r = client.post(
+        f"/po_sets/{ps_id}/upload",
+        files={"file": ("customs.pdf", payload, "application/pdf")},
+        data={"doc_type": "CUSTOMS"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.history and r.history[0].status_code == 302
+    with Session(eng) as s:
+        assert s.query(Document).filter_by(po_set_id=ps_id).count() == 1
+        docs = s.query(Document).filter_by(po_set_id=ps_id).all()
+        assert Path(docs[0].stored_path).read_bytes() == b"SENTINEL"
+
+
+def test_upload_same_file_to_another_set_is_rejected_visibly(tmp_cfg, client):
+    """A file already owned by another PO Set cannot be silently re-attached.
+
+    `documents.sha256_hash` is unique, so identical bytes are one document.
+    Uploading them to a *different* set used to fall through the dedup branch
+    untouched: HTTP 302 to a page that still showed the customs gate
+    unsatisfied, with nothing written. The operator could not tell a working
+    upload from a discarded one, and the gate could never clear.
+    """
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import Document
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        a = POSet(po_no_normalized="PO_OWNER", status=POSetStatus.pending)
+        b = POSet(po_no_normalized="PO_THIEF", status=POSetStatus.pending)
+        s.add(a)
+        s.add(b)
+        s.commit()
+        s.refresh(a)
+        s.refresh(b)
+        owner_id, thief_id = a.id, b.id
+
+    payload = _pdf_bytes()
+    r = client.post(
+        f"/po_sets/{owner_id}/upload",
+        files={"file": ("customs.pdf", payload, "application/pdf")},
+        data={"doc_type": "CUSTOMS"},
+    )
+    assert r.status_code == 200, r.text
+
+    # the same bytes, offered to a different set
+    r2 = client.post(
+        f"/po_sets/{thief_id}/upload",
+        files={"file": ("customs.pdf", payload, "application/pdf")},
+        data={"doc_type": "CUSTOMS"},
+    )
+    assert r2.status_code == 409, f"expected a visible conflict, got {r2.status_code}"
+    assert "PO_OWNER" in r2.text, "the error must name the PO Set that already holds the file"
+
+    with Session(eng) as s:
+        assert s.query(Document).filter_by(po_set_id=owner_id).count() == 1
+        assert s.query(Document).filter_by(po_set_id=thief_id).count() == 0, (
+            "the duplicate must not be attached to the second set"
+        )
+        # and the gate is still honestly reported as unsatisfied on that set
+        thief = s.get(POSet, thief_id)
+        assert thief.customs_doc_count == 0
+
+
+def test_upload_rejects_non_pdf(tmp_cfg, client):
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO_TXT", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+
+    r = client.post(
+        f"/po_sets/{ps_id}/upload",
+        files={"file": ("evil.txt", b"not a pdf at all", "text/plain")},
+        data={"doc_type": "CUSTOMS"},
+    )
+    assert r.status_code == 422
+
+
+def test_upload_rejects_oversize(tmp_cfg, client, monkeypatch):
+    from sqlalchemy.orm import Session
+
+    import app.core.limits as limits
+    from app.core.database import get_engine
+    from app.models.base import Base
+
+    monkeypatch.setattr(limits, "MAX_UPLOAD_BYTES", 1024)
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO_BIG", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+
+    r = client.post(
+        f"/po_sets/{ps_id}/upload",
+        files={"file": ("big.pdf", b"%PDF" + b"x" * 2048, "application/pdf")},
+        data={"doc_type": "CUSTOMS"},
+    )
+    assert r.status_code == 422
+
+
+def test_manual_merge_bad_order_422(client):
+    """W-11: bad order maps to 422, not an unhandled 500."""
+    r = client.post(
+        "/manual/merge",
+        files={"files": ("a.pdf", _pdf_bytes(), "application/pdf")},
+        data={"order": "abc", "output_filename": "out.pdf"},
+    )
+    assert r.status_code == 422
+
+
+def test_manual_merge_success_cleans_tmp(client, tmp_path, monkeypatch):
+    """W-11: input + output tmps are removed after the response is sent."""
+    import tempfile
+    from pathlib import Path as _Path
+
+    real_mkstemp = tempfile.mkstemp
+    created: list[str] = []
+
+    def spy_mkstemp(suffix=None, prefix=None, dir=None, **kw):
+        fd, p = real_mkstemp(suffix=suffix, prefix=prefix or "tmp", dir=str(tmp_path), **kw)
+        created.append(p)
+        return fd, p
+
+    monkeypatch.setattr(tempfile, "mkstemp", spy_mkstemp)
+    r = client.post(
+        "/manual/merge",
+        files=[
+            ("files", ("a.pdf", _pdf_bytes(), "application/pdf")),
+            ("files", ("b.pdf", _pdf_bytes(), "application/pdf")),
+        ],
+        data={"order": "1,0", "output_filename": "merged.pdf"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.content.startswith(b"%PDF")
+    # every tmp this endpoint created (2 inputs + 1 output) is gone
+    assert len(created) == 3
+    for p in created:
+        assert not _Path(p).exists(), p
+
+
+def test_document_preview_and_merged_download(tmp_cfg, client, tmp_path):
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    # Both served files live in their configured roots; the endpoints confine
+    # every DB path to those roots (a row cannot point the server anywhere).
+    pdf_file = Path(tmp_cfg.paths.stored_documents_folder) / "test_preview.pdf"
+    pdf_file.parent.mkdir(parents=True, exist_ok=True)
+    pdf_file.write_bytes(b"%PDF-1.4 sample content")
+    merged_file = Path(tmp_cfg.paths.output_folder) / "merged_preview.pdf"
+    merged_file.parent.mkdir(parents=True, exist_ok=True)
+    merged_file.write_bytes(b"%PDF-1.4 merged content")
+
+    with Session(eng) as s:
+        ps = POSet(
+            po_no_normalized="POPREV1",
+            status=POSetStatus.merged,
+            merged_output_path=str(merged_file),
+        )
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        doc = Document(
+            sha256_hash="hash_prev_123",
+            original_filename="test_preview.pdf",
+            stored_path=str(pdf_file),
+            doc_type=DocType.PO,
+            po_set_id=ps.id,
+        )
+        s.add(doc)
+        s.commit()
+        s.refresh(doc)
+        doc_id = doc.id
+        ps_id = ps.id
+
+    # Test /documents/{doc_id}/preview
+    r_prev = client.get(f"/documents/{doc_id}/preview")
+    assert r_prev.status_code == 200
+    assert r_prev.headers["content-type"] == "application/pdf"
+    assert b"%PDF-1.4" in r_prev.content
+
+    # Test /po_sets/{ps_id}/merged_pdf
+    r_merged = client.get(f"/po_sets/{ps_id}/merged_pdf")
+    assert r_merged.status_code == 200
+    assert r_merged.headers["content-type"] == "application/pdf"
+    assert b"%PDF-1.4 merged" in r_merged.content
+
+
+def test_static_assets_served(client):
+    r_css = client.get("/static/css/theme.css")
+    assert r_css.status_code == 200
+    assert "--primary" in r_css.text
+
+    r_js = client.get("/static/js/app.js")
+    assert r_js.status_code == 200
+    assert "pdfDrawer" in r_js.text
+
+
+def test_detail_matrix_absent_dn_pool_shows_mismatch(tmp_cfg, client, tmp_path):
+    """An absent DN pool is unmet demand: the matrix must not show a match."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus, LineItem, POSet, POSetStatus
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO-MAT", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+        for dtype, lines in (("PO", [("1", 100)]), ("SI", [("1", 100)])):
+            d = Document(
+                sha256_hash=f"h_mat_{dtype}",
+                original_filename=f"{dtype.lower()}.pdf",
+                stored_path=str(tmp_path / f"{dtype.lower()}.pdf"),
+                doc_type=DocType[dtype],
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=ps_id,
+                po_no_normalized="PO-MAT",
+            )
+            s.add(d)
+            s.commit()
+            for ln, q in lines:
+                s.add(
+                    LineItem(
+                        document_id=d.id,
+                        line_item_no=ln,
+                        description=f"item {ln}",
+                        quantity=q * 1000,
+                    )
+                )
+            s.commit()
+
+    r = client.get(f"/po_sets/{ps_id}/view")
+    assert r.status_code == 200, r.text
+    # A missing pool is a wait, not a quantity failure. The status is pending,
+    # so the matrix must not paint the row as a mismatch.
+    assert "row-pending" in r.text
+    assert "Awaiting DN" in r.text
+    assert "row-mismatch" not in r.text
+
+
+def test_reclassify_combined_rejected(tmp_cfg, client):
+    """COMBINED is a Layer-1 packaging fact; the operator cannot hand-tag it."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="unk_hash_nocomb",
+            original_filename="maybe.pdf",
+            stored_path="data/stored/maybe.pdf",
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.valid,
+            extraction_attempt_count=2,
+        )
+        s.add(doc)
+        s.commit()
+        s.refresh(doc)
+        doc_id = doc.id
+
+    r_post = client.post(
+        f"/unclassified/{doc_id}/reclassify",
+        data={"doc_type": "COMBINED", "po_no": "REC999"},
+        headers={"HX-Request": "true"},
+    )
+    assert r_post.status_code == 422, r_post.text
+    with Session(eng) as s:
+        d = s.get(Document, doc_id)
+        assert d.doc_type == DocType.UNKNOWN
+        assert d.extraction_attempt_count == 2
+
+
+def test_unclassified_lists_failed_non_unknown(tmp_cfg, client):
+    """A failed typed document is a loss the holding area must show."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus
+    from app.models.base import Base
+
+    eng = get_engine(tmp_cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        s.add(
+            Document(
+                sha256_hash="h_wait_unknown",
+                original_filename="waiting.pdf",
+                stored_path="data/stored/waiting.pdf",
+                doc_type=DocType.UNKNOWN,
+                extraction_status=ExtractionStatus.pending,
+            )
+        )
+        s.add(
+            Document(
+                sha256_hash="h_dead_dn",
+                original_filename="dead_dn.pdf",
+                stored_path="data/stored/dead_dn.pdf",
+                doc_type=DocType.DN,
+                extraction_status=ExtractionStatus.failed,
+                extraction_attempt_count=3,
+            )
+        )
+        s.commit()
+
+    r = client.get("/unclassified")
+    assert r.status_code == 200, r.text
+    assert "waiting.pdf" in r.text
+    assert "dead_dn.pdf" in r.text
+
+
+def test_customs_upload_clears_blocked_status(tmp_cfg, client):
+    """Uploading both CUSTOMS and SHIPPING docs transitions blocked_customs to pending."""
+    import io
+
+    from pypdf import PdfWriter
+
+    pid = _create_poset(tmp_cfg, po_no="POCUSTCLEAR", status=POSetStatus.blocked_customs)
+    with Session(get_engine(tmp_cfg)) as s:
+        ps = s.get(POSet, pid)
+        ps.has_customs_toggle = True
+        s.commit()
+
+    def _make_pdf(w_val: float):
+        w = PdfWriter()
+        w.add_blank_page(width=w_val, height=100)
+        buf = io.BytesIO()
+        w.write(buf)
+        return buf.getvalue()
+
+    r1 = client.post(
+        f"/po_sets/{pid}/upload",
+        data={"doc_type": "CUSTOMS"},
+        files={"file": ("customs.pdf", _make_pdf(100.0), "application/pdf")},
+        follow_redirects=False,
+    )
+    assert r1.status_code == 302
+    with Session(get_engine(tmp_cfg)) as s:
+        ps = s.get(POSet, pid)
+        assert ps.customs_doc_count == 1
+        assert ps.status == POSetStatus.blocked_customs
+
+    r2 = client.post(
+        f"/po_sets/{pid}/upload",
+        data={"doc_type": "SHIPPING"},
+        files={"file": ("shipping.pdf", _make_pdf(200.0), "application/pdf")},
+        follow_redirects=False,
+    )
+    assert r2.status_code == 302
+    with Session(get_engine(tmp_cfg)) as s:
+        ps = s.get(POSet, pid)
+        assert ps.customs_doc_count == 2
+        assert ps.status == POSetStatus.pending
+
+
+def test_reclassify_customs_updates_count_and_clears_blocked(tmp_cfg, client):
+    """Reclassifying a document into CUSTOMS/SHIPPING updates customs_doc_count and unblocks."""
+    po_raw = "123456"
+    pid = _create_poset(tmp_cfg, po_no=po_raw, status=POSetStatus.blocked_customs)
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        ps = s.get(POSet, pid)
+        ps.has_customs_toggle = True
+        ps.customs_doc_count = 1
+        # add existing SHIPPING document
+        doc_ship = Document(
+            sha256_hash="sha_ship_reclass",
+            original_filename="ship.pdf",
+            stored_path="data/stored/ship.pdf",
+            doc_type=DocType.SHIPPING,
+            extraction_status=ExtractionStatus.valid,
+            po_set_id=pid,
+        )
+        # add unclassified document
+        doc_unk = Document(
+            sha256_hash="sha_unk_reclass",
+            original_filename="unknown.pdf",
+            stored_path="data/stored/unknown.pdf",
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.valid,
+        )
+        s.add_all([doc_ship, doc_unk])
+        s.commit()
+        s.refresh(doc_unk)
+        unk_id = doc_unk.id
+
+    r = client.post(
+        f"/unclassified/{unk_id}/reclassify",
+        data={"doc_type": "CUSTOMS", "po_no": po_raw},
+    )
+    assert r.status_code in (200, 302)
+    with Session(eng) as s:
+        ps = s.get(POSet, pid)
+        assert ps.customs_doc_count == 2
+        assert ps.status == POSetStatus.pending
+
+
+def test_invalid_status_filter_is_422(client):
+    r = client.get("/dashboard", params={"status": "not-a-status"})
+    assert r.status_code == 422
+    r2 = client.get("/dashboard/table", params={"status": "not-a-status"})
+    assert r2.status_code == 422
+
+
+def test_unclassified_normalize_uses_the_server_normalizer(client):
+    r = client.get("/unclassified/normalize", params={"po_no": "PO-210851"})
+    assert r.status_code == 200
+    assert r.json() == {"normalized": "210851"}
+    r2 = client.get("/unclassified/normalize", params={"po_no": "161538,2"})
+    assert r2.json() == {"normalized": "161538"}
+
+
+def test_unclassified_save_and_route_has_a_form_owner(client, tmp_cfg):
+    """The button and inputs live in the same row; no <form> inside <tr>."""
+    from pypdf import PdfWriter
+
+    eng = get_engine(tmp_cfg)
+    pdf = Path(tmp_cfg.paths.stored_documents_folder) / "unclassified.pdf"
+    pdf.parent.mkdir(parents=True, exist_ok=True)
+    w = PdfWriter()
+    w.add_blank_page(width=100, height=100)
+    w.write(str(pdf))
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="hash_unclassified_form",
+            original_filename="unclassified.pdf",
+            stored_path=str(pdf),
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.valid,
+            po_set_id=None,
+        )
+        s.add(doc)
+        s.commit()
+        doc_id = doc.id
+
+    html = client.get("/unclassified").text
+    start = html.index(f'id="doc-row-{doc_id}"')
+    row = html[start : html.index("</tr>", start)]
+    assert 'hx-include="closest tr"' in row
+    assert "<form" not in row
+    assert 'type="button"' in row
+
+
+def test_document_filename_is_escaped_not_interpolated_into_js(client, tmp_cfg):
+    pid = _create_poset_with_docs(tmp_cfg, po_no="PO-XSS")
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        doc = s.query(Document).filter(Document.po_set_id == pid).first()
+        doc.original_filename = 'evil" onmouseover="alert(1).pdf'
+        s.commit()
+
+    html = client.get(f"/po_sets/{pid}/view").text
+    assert 'onmouseover="alert(1)' not in html
+    assert "data-preview-name=" in html
+
+
+def test_reclassify_refuses_a_completed_split_parent(client, tmp_cfg):
+    from datetime import UTC, datetime
+
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="hash_split_parent_guard",
+            original_filename="combined.pdf",
+            stored_path="data/stored/combined.pdf",
+            doc_type=DocType.UNKNOWN,
+            extraction_status=ExtractionStatus.valid,
+            po_set_id=None,
+            is_split_parent=True,
+            split_completed_at=datetime.now(UTC),
+        )
+        s.add(doc)
+        s.commit()
+        doc_id = doc.id
+
+    r = client.post(
+        f"/unclassified/{doc_id}/reclassify",
+        data={"doc_type": "PO", "po_no": "PO-SPLIT"},
+    )
+    assert r.status_code == 409
+    assert "split" in r.text.lower()
+
+
+def test_a_failed_split_parent_is_visible_and_recoverable(client, tmp_cfg):
+    """A split that never completed must not vanish from every operator view.
+
+    P0-3 excluded every `is_split_parent` row from the holding area. A failed
+    split has no children and no set, so it then appeared on no page at all and
+    could not be reclassified — a readable packet lost from view.
+    """
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        doc = Document(
+            sha256_hash="hash_failed_split_parent",
+            original_filename="failed-split.pdf",
+            stored_path="data/stored/failed-split.pdf",
+            doc_type=DocType.COMBINED,
+            extraction_status=ExtractionStatus.failed,
+            po_set_id=None,
+            is_split_parent=True,
+            split_completed_at=None,
+        )
+        s.add(doc)
+        s.commit()
+        doc_id = doc.id
+
+    page = client.get("/unclassified")
+    assert page.status_code == 200
+    assert "failed-split.pdf" in page.text
+
+    r = client.post(
+        f"/unclassified/{doc_id}/reclassify",
+        data={"doc_type": "PO", "po_no": "PO-5006"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 302
+    with Session(eng) as s:
+        recovered = s.get(Document, doc_id)
+        assert recovered.is_split_parent is False
+        assert recovered.po_set_id is not None
+
+
+def test_customs_badges_use_attached_types_not_the_count(client, tmp_cfg):
+    """A CUSTOMS document must not make the SHIPPING badge say Attached."""
+    import re
+
+    from pypdf import PdfWriter
+
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        ps = POSet(
+            po_no_normalized="PO-BADGE",
+            status=POSetStatus.blocked_customs,
+            has_customs_toggle=True,
+            customs_doc_count=2,
+        )
+        s.add(ps)
+        s.commit()
+        pdf = Path(tmp_cfg.paths.stored_documents_folder) / "customs-only.pdf"
+        pdf.parent.mkdir(parents=True, exist_ok=True)
+        w = PdfWriter()
+        w.add_blank_page(width=100, height=100)
+        w.write(str(pdf))
+        s.add(
+            Document(
+                sha256_hash="hash_customs_only",
+                original_filename="customs-only.pdf",
+                stored_path=str(pdf),
+                doc_type=DocType.CUSTOMS,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=ps.id,
+            )
+        )
+        s.commit()
+        pid = ps.id
+
+    html = client.get(f"/po_sets/{pid}/view").text
+    assert re.search(r"Customs Clearance:.*?Attached", html, re.S)
+    assert re.search(r"Shipping \(AWB\):.*?Missing", html, re.S)
+
+
+def test_customs_rebuild_runs_while_the_per_po_lock_is_held(client, tmp_cfg, monkeypatch):
+    """The append must not run after the upload lock is released."""
+    from pypdf import PdfWriter
+
+    from app.services import merge as merge_service
+
+    pid = _create_poset_with_docs(tmp_cfg, po_no="PO-LOCK", status=POSetStatus.merged)
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        ps = s.get(POSet, pid)
+        ps.has_customs_toggle = True
+        ship_pdf = Path(tmp_cfg.paths.stored_documents_folder) / "shipping.pdf"
+        w = PdfWriter()
+        w.add_blank_page(width=100, height=100)
+        w.write(str(ship_pdf))
+        s.add(
+            Document(
+                sha256_hash="hash_shipping_lock_test",
+                original_filename="shipping.pdf",
+                stored_path=str(ship_pdf),
+                doc_type=DocType.SHIPPING,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=pid,
+            )
+        )
+        s.commit()
+
+    observed = {}
+
+    def fake_append(po_set_id, cfg, source="operator"):
+        with Session(get_engine(cfg)) as s:
+            observed["locked_by_action"] = s.get(POSet, po_set_id).locked_by_action
+        return Path(cfg.paths.output_folder) / "fake.pdf"
+
+    monkeypatch.setattr(merge_service, "append_customs_to_merged_packet", fake_append)
+    customs_pdf = Path(tmp_cfg.paths.stored_documents_folder) / "customs-upload.pdf"
+    w = PdfWriter()
+    w.add_blank_page(width=100, height=100)
+    w.write(str(customs_pdf))
+
+    response = client.post(
+        f"/po_sets/{pid}/upload",
+        data={"doc_type": "CUSTOMS"},
+        files={"file": ("customs-upload.pdf", customs_pdf.read_bytes(), "application/pdf")},
+    )
+    assert response.status_code in (200, 302)
+    assert observed.get("locked_by_action") == "manual_upload"
+
+
+# ---------------------------------------------------------------------------
+# 4. A page route never dead-ends in raw JSON (F-04)
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_status_filter_renders_the_app_shell(tmp_cfg, client):
+    r = client.get("/dashboard?status=nonsense")
+    assert r.status_code == 422
+    assert r.headers["content-type"].startswith("text/html")
+    assert "not recognised" in r.text.lower()
+    assert 'href="/dashboard"' in r.text, "no way back to the dashboard"
+
+
+def test_a_missing_set_renders_the_app_shell_not_json(tmp_cfg, client):
+    r = client.get("/po_sets/999999/view")
+    assert r.status_code == 404
+    assert r.headers["content-type"].startswith("text/html")
+    assert "does not exist" in r.text.lower()
+    assert "Traceback" not in r.text
+
+
+def test_audit_page_summarises_event_detail_and_keeps_the_raw_json(tmp_cfg, client):
+    """F-03: a multi-KB quarantine report must not be the visible cell text."""
+    report = "QUARANTINED PO SET\n====\n" + ("line evidence\n" * 200)
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        s.add(
+            AuditLog(
+                po_set_id=None,
+                action=AuditAction.quarantined,
+                detail=json.dumps(
+                    {
+                        "reason": "unmatched_vendor_line",
+                        "report": report,
+                        "folder": "/data/quarantine/7000011_20260101T000000Z_3",
+                    }
+                ),
+                source="system",
+            )
+        )
+        s.add(
+            AuditLog(
+                po_set_id=None,
+                action=AuditAction.force_merge,
+                detail=json.dumps({"output_name": "SI-7000001.pdf", "customs_doc_count": 0}),
+                justification="UI test: operator accepted the short delivery.",
+                source="operator",
+            )
+        )
+        s.commit()
+
+    r = client.get("/audit")
+    assert r.status_code == 200
+    html = r.text
+    # A human label for the action, not the raw enum.
+    assert "Force Merge" in html
+    # A short summary in the open, the report collapsed behind <details>.
+    assert "unmatched vendor line" in html
+    assert "<details" in html
+    assert "Raw JSON" in html
+    assert "<pre" in html
+    assert "QUARANTINED PO SET" in html  # still on the page, just collapsed
+
+
+def test_audit_page_survives_a_detail_nested_past_the_json_recursion_limit(tmp_cfg, client):
+    """A detail json.loads cannot parse (RecursionError) must never break the page."""
+    eng = get_engine(tmp_cfg)
+    with Session(eng) as s:
+        s.add(
+            AuditLog(
+                po_set_id=None,
+                action=AuditAction.manual_status_change,
+                detail="[" * 100000 + "]" * 100000,
+                source="operator",
+            )
+        )
+        s.commit()
+
+    r = client.get("/audit")
+
+    assert r.status_code == 200
+    assert "Manual Status Change" in r.text

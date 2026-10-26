@@ -1,0 +1,95 @@
+{
+  "doc_id": 259,
+  "label": "V0",
+  "model": "openai/gpt-6-luna",
+  "variant": "default",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.22,
+      "result": {
+        "document_type": "PO",
+        "document_number": "8300052050",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "1400026995 STORAGE BINS",
+            "quantity": "100.00",
+            "unit_price": "5.250",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6166,
+          "completion_tokens": 139,
+          "reasoning_tokens": 0,
+          "cost": 0.00014331,
+          "latency_s": 4.2
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 2.79,
+      "result": {
+        "document_type": "PO",
+        "document_number": "8300052050",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "1400026995 STORAGE BINS",
+            "quantity": "100.00",
+            "unit_price": "5.250",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6166,
+          "completion_tokens": 139,
+          "reasoning_tokens": 0,
+          "cost": 0.00014331,
+          "latency_s": 2.77
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 6.34,
+      "result": {
+        "document_type": "PO",
+        "document_number": "8300052050",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "1400026995 STORAGE BINS",
+            "quantity": "100.00",
+            "unit_price": "5.250",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 6166,
+          "completion_tokens": 343,
+          "reasoning_tokens": 202,
+          "cost": 0.00024531,
+          "latency_s": 6.32
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

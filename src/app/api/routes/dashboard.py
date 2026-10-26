@@ -21,6 +21,7 @@ from app.api.routes.po_sets import _scrub_paths
 from app.api.templating import templates
 from app.core.config import load_config
 from app.core.database import get_engine
+from app.core.http_errors import wants_html
 from app.models import (
     AuditAction,
     AuditLog,
@@ -474,6 +475,15 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
     with Session(eng) as s:
         ps = s.get(POSet, po_set_id)
         if ps is None:
+            accept = request.headers.get("accept", "").lower()
+            if "application/json" in accept and "text/html" not in accept:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"That PO Set does not exist (#{po_set_id}). "
+                        "It may have been archived or removed — the dashboard lists every active set."
+                    ),
+                )
             return _templates.TemplateResponse(
                 request,
                 "error.html",
@@ -483,7 +493,7 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
                     "heading": "PO Set not found",
                     "message": (
                         f"That PO Set does not exist (#{po_set_id}). "
-                        "It may have been archived — the dashboard lists every active set."
+                        "It may have been archived or removed — the dashboard lists every active set."
                     ),
                 },
                 status_code=404,
@@ -648,16 +658,14 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
                     )
 
             # Per-line 3-way matrix, built from the same totals the comparison
-            # just used. One row per comparison key: a PO that prints the same
-            # line number twice is summed by the engine, so comparing each raw
-            # row to the summed vendor total (the old code) showed a false
-            # mismatch on a set that had already merged.
+            # just used.
+            set_shortfall = _shortfall_shape(s, ps, cfg) if ps.status == POSetStatus.mismatched else ""
             matrix_rows = build_matrix_rows(
                 po_lines,
                 dn_lines,
                 si_lines,
                 comparison,
-                set_status=set_status_value,
+                set_status="pending" if set_shortfall == "under" else set_status_value,
             )
 
             flags.sort(key=lambda f: f["priority"])
@@ -668,7 +676,7 @@ def po_set_detail_view(po_set_id: int, request: Request, notice: str | None = No
         )
         unclassified_count = _holding_area_query(s).count()
         packet_has_customs = _packet_has_customs(s, ps, docs)
-        set_shortfall = _shortfall_shape(s, ps, cfg) if ps.status == POSetStatus.mismatched else ""
+        set_shortfall = set_shortfall if "set_shortfall" in locals() else (_shortfall_shape(s, ps, cfg) if ps.status == POSetStatus.mismatched else "")
 
         return _templates.TemplateResponse(
             request,
@@ -1216,7 +1224,10 @@ def _upload_manual_doc_impl(
                 ps_rel = s_rel.get(POSet, po_set_id)
                 if ps_rel is not None:
                     release_lock(ps_rel, s_rel, "manual_upload")
-    return RedirectResponse(url=f"/po_sets/{po_set_id}/view", status_code=302)
+    return RedirectResponse(
+        url=f"/po_sets/{po_set_id}/view?notice=" + quote(f"Attached {safe_name} to PO Set."),
+        status_code=302,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1321,9 +1332,10 @@ def _audit_entries(rows: list[AuditLog]) -> list[dict]:
             summary = ""
         # A removed set (step 13): its rows are gone, so the row names the old set id
         # and the folder that holds the files.
+        removed_id = None
         if action == "quarantine_delete" and detail.get("deleted") is True:
             label = "Set Removed"
-            removed_id = detail.get("removed_po_set_id")
+            removed_id = detail.get("removed_po_set_id") or detail.get("po_set_id") or detail.get("set_id")
             folder = detail.get("folder") or "_removed_sets"
             summary = (
                 f"Removed PO Set #{removed_id} (removed); files in quarantine folder: {folder}"
@@ -1336,6 +1348,7 @@ def _audit_entries(rows: list[AuditLog]) -> list[dict]:
                 "detail": entry.detail or "",
                 "timestamp": entry.timestamp,
                 "po_set_id": entry.po_set_id,
+                "removed_po_set_id": removed_id,
                 "justification": entry.justification,
                 "source": entry.source,
             }
@@ -1446,6 +1459,7 @@ def quarantine_view(request: Request):
                 "unclassified_count": unclassified_count,
                 "now_ts": _now_ts(),
                 "archive_folder": str(cfg.paths.archive_folder),
+                "archive_folder_name": Path(cfg.paths.archive_folder).name,
             },
         )
 
@@ -1500,6 +1514,7 @@ def quarantine_table(request: Request):
                 "po_sets": enriched,
                 "now_ts": _now_ts(),
                 "archive_folder": str(cfg.paths.archive_folder),
+                "archive_folder_name": Path(cfg.paths.archive_folder).name,
             },
         )
 
@@ -1606,14 +1621,44 @@ def set_aside_route(doc_id: int, request: Request):
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
     if request.headers.get("HX-Request") != "true":
-        return RedirectResponse(url="/unclassified", status_code=303)
-    where = html.escape(str(folder)) if folder is not None else "the quarantine folder"
+        referer = request.headers.get("Referer", "")
+        dest = "/quarantine" if "/quarantine" in referer else "/unclassified"
+        return RedirectResponse(url=dest, status_code=303)
+    if folder is None:
+        return HTMLResponse(
+            content=(
+                f'<tr id="doc-row-{doc_id}" data-testid="set-aside-result">'
+                '<td colspan="6" style="padding:12px 14px; background:#fef3c7;">'
+                "This document was already moved to the quarantine folder."
+                "</td></tr>"
+            )
+        )
+    try:
+        where = folder.relative_to(Path(cfg.paths.quarantine_folder).parent).as_posix()
+    except ValueError:  # pragma: no cover - only if the config is unusual
+        where = folder.name
+    where = html.escape(where)
+    eng = get_engine(cfg)
+    with Session(eng) as s_counts:
+        total_c = _holding_area_query(s_counts).count()
+        failed_c = _holding_area_query(s_counts).filter(
+            (Document.extraction_status == ExtractionStatus.failed)
+            | (Document.raw_extraction_json.like('%"ingest_rejected"%'))
+        ).count()
+        needs_po_c = total_c - failed_c
+    oob_html = (
+        f'<span class="badge badge-gray" id="unclassified-header-count" data-testid="unclassified-count" style="font-size:0.8rem;" hx-swap-oob="true">{total_c} awaiting classification</span>'
+        f'<span class="tab-count" id="count-subview-all" hx-swap-oob="true">{total_c}</span>'
+        f'<span class="tab-count" id="count-subview-needs-po" hx-swap-oob="true">{needs_po_c}</span>'
+        f'<span class="tab-count" id="count-subview-failed" hx-swap-oob="true">{failed_c}</span>'
+    )
     return HTMLResponse(
         content=(
             f'<tr id="doc-row-{doc_id}" data-testid="set-aside-result">'
             '<td colspan="6" style="padding:12px 14px; background:#f0fdf4;">'
             f"Moved to the quarantine folder: <code>{where}</code>. "
             "Fix or split it, then put it back in the input folder."
+            f'<span style="display:none;">{oob_html}</span>'
             "</td></tr>"
         )
     )
@@ -2079,10 +2124,26 @@ def reclassify_document(
 
     if request.headers.get("HX-Request") == "true":
         msg = f"Reclassified document #{doc_id} as {new_doc_type.value}"
+        eng = get_engine(cfg)
+        with Session(eng) as s_counts:
+            total_c = _holding_area_query(s_counts).count()
+            failed_c = _holding_area_query(s_counts).filter(
+                (Document.extraction_status == ExtractionStatus.failed)
+                | (Document.raw_extraction_json.like('%"ingest_rejected"%'))
+            ).count()
+            needs_po_c = total_c - failed_c
+        oob_html = (
+            f'<span class="badge badge-gray" id="unclassified-header-count" data-testid="unclassified-count" style="font-size:0.8rem;" hx-swap-oob="true">{total_c} awaiting classification</span>'
+            f'<span class="tab-count" id="count-subview-all" hx-swap-oob="true">{total_c}</span>'
+            f'<span class="tab-count" id="count-subview-needs-po" hx-swap-oob="true">{needs_po_c}</span>'
+            f'<span class="tab-count" id="count-subview-failed" hx-swap-oob="true">{failed_c}</span>'
+        )
         html = (
             f'<tr id="doc-row-{doc_id}">'
             f'<td colspan="6" style="color: #166534; background: #dcfce7; padding: 8px;">'
-            f"{msg}</td></tr>"
+            f"{msg}"
+            f'<span style="display:none;">{oob_html}</span>'
+            "</td></tr>"
         )
         return HTMLResponse(content=html)
     return RedirectResponse(url="/unclassified", status_code=302)

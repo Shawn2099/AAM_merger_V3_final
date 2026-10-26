@@ -1,0 +1,138 @@
+{
+  "doc_id": 21,
+  "label": "P3",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P3.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 12.72,
+      "result": {
+        "document_type": "PO",
+        "document_number": "50119501",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "4/1",
+            "description": "GLOVES,KONG RIGGER,SIZE L Line/Rel No: 4/1 Part Main Group: CONS",
+            "quantity": "15",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5/1",
+            "description": "GLOVES,KONG RIGGER,SIZE XL Line/Rel No: 5/1 Part Main Group: CONS",
+            "quantity": "15",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6/1",
+            "description": "CLIP,GLOVE GRABBER,W/BELT CLIP,LIME Line/Rel No: 6/1 Part Main Group: CONS",
+            "quantity": "50",
+            "unit_price": "3.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5999,
+          "completion_tokens": 1241,
+          "reasoning_tokens": 977,
+          "cost": 0.001367,
+          "latency_s": 12.64
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.35,
+      "result": {
+        "document_type": "PO",
+        "document_number": "50119501",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "4",
+            "description": "GLOVES,KONG RIGGER,SIZE L\nLine/Rel No: 4/1\nPart Main Group: CONS",
+            "quantity": "15",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "GLOVES,KONG RIGGER,SIZE XL\nLine/Rel No: 5/1\nPart Main Group: CONS",
+            "quantity": "15",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "CLIP,GLOVE GRABBER,W/BELT\nCLIP,LIME\nLine/Rel No: 6/1\nPart Main Group: CONS",
+            "quantity": "50",
+            "unit_price": "3.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5999,
+          "completion_tokens": 1144,
+          "reasoning_tokens": 879,
+          "cost": 0.00064414,
+          "latency_s": 11.25
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 13.82,
+      "result": {
+        "document_type": "PO",
+        "document_number": "50119501",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "4",
+            "description": "GLOVES,KONG RIGGER,SIZE L; Line/Rel No: 4\\1; Part Main Group: CONS",
+            "quantity": "15",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "GLOVES,KONG RIGGER,SIZE XL; Line/Rel No: 5\\1; Part Main Group: CONS",
+            "quantity": "15",
+            "unit_price": "110.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "CLIP,GLOVE GRABBER,W/BELT CLIP,LIME; Line/Rel No: 6\\1; Part Main Group: CONS",
+            "quantity": "50",
+            "unit_price": "3.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5999,
+          "completion_tokens": 1297,
+          "reasoning_tokens": 1033,
+          "cost": 0.00072064,
+          "latency_s": 13.74
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "doc_id": 23,
+  "label": "V4",
+  "model": "openai/gpt-6-luna",
+  "variant": "img200",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.32,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-3175",
+        "po_reference": "50137194",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "2",
+            "description": "GREASE, LUBRICATING 21? -? LUBRICANT",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7011,
+          "completion_tokens": 453,
+          "reasoning_tokens": 299,
+          "cost": 0.0010995,
+          "latency_s": 10.21
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.16,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9175",
+        "po_reference": "50137194",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "GATE VALVE 1.5 IN 150# ...",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7011,
+          "completion_tokens": 530,
+          "reasoning_tokens": 379,
+          "cost": 0.00034726,
+          "latency_s": 10.05
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.46,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9175",
+        "po_reference": "50137194",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "GATE VALVE 1 1/2 IN 300# MANUAL CLASS 150",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 7011,
+          "completion_tokens": 379,
+          "reasoning_tokens": 222,
+          "cost": 0.00027176,
+          "latency_s": 7.35
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

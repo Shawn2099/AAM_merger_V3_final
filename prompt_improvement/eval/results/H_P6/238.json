@@ -1,0 +1,201 @@
+{
+  "doc_id": 238,
+  "label": "H_P6",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P6.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 13.16,
+      "result": {
+        "document_type": "PO",
+        "document_number": "P212528",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 3,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "CLAMP , REPAIR 1 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "165.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "CLAMP, REPAIR 2 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "210.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "CLAMP, REPAIR 3 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "295.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "CLAMP, REPAIR 4 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "310.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "CLAMP, REPAIR 5 IN PIPE X 9 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "426.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "CLAMP, REPAIR 6 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "395.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 10926,
+          "completion_tokens": 951,
+          "reasoning_tokens": 488,
+          "cost": 0.001837875,
+          "latency_s": 13.0
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 16.14,
+      "result": {
+        "document_type": "PO",
+        "document_number": "P212528",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 3,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "CLAMP, REPAIR 1 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "165.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "CLAMP, REPAIR 2 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "210.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "CLAMP, REPAIR 3 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "295.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "CLAMP, REPAIR 4 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "310.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "CLAMP, REPAIR 5 IN PIPE X 9 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "426.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "CLAMP, REPAIR 6 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "395.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 10926,
+          "completion_tokens": 1128,
+          "reasoning_tokens": 665,
+          "cost": 0.00068541,
+          "latency_s": 15.98
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 12.07,
+      "result": {
+        "document_type": "PO",
+        "document_number": "P212528",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 3,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "CLAMP , REPAIR 1 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "165.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "CLAMP, REPAIR 2 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "210.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "CLAMP, REPAIR 3 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "295.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "CLAMP, REPAIR 4 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "310.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "5",
+            "description": "CLAMP, REPAIR 5 IN PIPE X 9 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "426.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "CLAMP, REPAIR 6 IN PIPE X 6 IN OVERALL LENGTH, 304 SS, NITRILE RUBBER GASKET Required Certificates :",
+            "quantity": "2.00",
+            "unit_price": "395.00",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 10926,
+          "completion_tokens": 804,
+          "reasoning_tokens": 341,
+          "cost": 0.00052341,
+          "latency_s": 11.91
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

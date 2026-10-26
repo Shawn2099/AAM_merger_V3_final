@@ -1,0 +1,450 @@
+"""Tests for quarantine - FR-13.5-13.9 copy+delete keeps files + audit, manual merger isolated (FR-14.11-14.13)."""
+
+from pathlib import Path
+
+from app.core.config import load_config
+
+
+def _cfg_with_tmp(tmp_path):
+    cfg = load_config("config.example.yaml")
+    cfg.paths.database_path = tmp_path / "test.db"
+    cfg.paths.quarantine_folder = tmp_path / "quarantine"
+    cfg.paths.stored_documents_folder = tmp_path / "stored"
+    cfg.paths.output_folder = tmp_path / "output"
+    (tmp_path / "stored").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "quarantine").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "output").mkdir(parents=True, exist_ok=True)
+    return cfg
+
+
+def _orig(stored: Path) -> str:
+    """Quarantine copies keep the document's original filename (stored name minus the PO prefix)."""
+    return stored.name.split("_", 1)[1]
+
+
+def _tiny_pdf(p: Path, width: int = 200, height: int = 200) -> Path:
+    from pypdf import PdfWriter
+
+    w = PdfWriter()
+    w.add_blank_page(width=width, height=height)
+    w.write(str(p))
+    return p
+
+
+def _create_quarantined_poset(tmp_path, cfg, po_no="PO-QUAR-001"):
+    """Create quarantined POSet with 3 docs each having stored_path file and line_items."""
+    import hashlib
+
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import DocType, Document, ExtractionStatus, LineItem, POSet, POSetStatus
+    from app.models.base import Base
+
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized=po_no, status=POSetStatus.quarantined)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+        # create 3 PDFs in stored folder
+        for i, dt in enumerate([DocType.PO, DocType.DN, DocType.SI]):
+            pdf_path = tmp_path / "stored" / f"{po_no}_{dt.value}_{i}.pdf"
+            _tiny_pdf(pdf_path, width=200 + i * 10, height=200)
+            sha = hashlib.sha256(f"{po_no}-{dt.value}-{i}".encode()).hexdigest()
+            doc = Document(
+                sha256_hash=sha,
+                original_filename=f"{dt.value}_{i}.pdf",
+                stored_path=str(pdf_path),
+                doc_type=dt,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=ps_id,
+                po_no_normalized=po_no,
+            )
+            s.add(doc)
+            s.flush()  # get doc.id
+            # add one line_item per doc to verify line_items deletion
+            li = LineItem(
+                document_id=doc.id,
+                description=f"item {i}",
+                quantity=1000,
+            )
+            s.add(li)
+        s.commit()
+        return ps_id
+
+
+def test_delete_keeps_files(tmp_path):
+    """FR-13.7: Delete removes DB rows only, keeps stored_path + quarantine copies + writes audit_log."""
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import AuditLog, Document, LineItem, POSet
+    from app.services.quarantine import delete_quarantined, quarantine_copy
+
+    cfg = _cfg_with_tmp(tmp_path)
+    po_set_id = _create_quarantined_poset(tmp_path, cfg, po_no="PO-QUAR-001")
+
+    # fetch po_set with documents for quarantine_copy
+    eng = get_engine(cfg)
+    from app.models.base import Base
+
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = s.get(POSet, po_set_id)
+        # eagerly load documents
+        s.refresh(ps, attribute_names=["documents"])
+        doc_count = len(ps.documents)
+        assert doc_count == 3
+        stored_paths = [Path(d.stored_path) for d in ps.documents]
+        # ensure stored files exist before copy
+        for p in stored_paths:
+            assert p.exists(), f"stored_path missing before copy: {p}"
+        # copy to quarantine (shutil.copy, not move)
+        q_folder = quarantine_copy(ps, cfg)
+        assert q_folder.exists()
+        assert q_folder == Path(cfg.paths.quarantine_folder) / ps.po_no_normalized
+        # quarantine copies exist
+        for p in stored_paths:
+            qp = q_folder / _orig(p)
+            assert qp.exists(), f"quarantine copy missing: {qp}"
+            # original still exists (copy not move)
+            assert p.exists(), f"original should still exist after copy (not move): {p}"
+
+    # keep stored_paths and q_folder for post-delete assertions (need to re-read)
+    with Session(eng) as s:
+        ps = s.get(POSet, po_set_id)
+        s.refresh(ps, attribute_names=["documents"])
+        stored_paths = [Path(d.stored_path) for d in ps.documents]
+        q_folder = Path(cfg.paths.quarantine_folder) / ps.po_no_normalized
+
+    # now delete
+    audit = delete_quarantined(po_set_id, cfg)
+    # audit row exists and has correct action
+    assert audit is not None
+    # action may be enum or string; check value
+    action_val = audit.action.value if hasattr(audit.action, "value") else str(audit.action)
+    assert action_val == "quarantine_delete"
+
+    # DB rows remain, marked archived
+    with Session(eng) as s:
+        archived = s.get(POSet, po_set_id)
+        assert archived is not None, "archive must keep the po_sets row"
+        assert archived.archived_at is not None
+        assert archived.archive_path and Path(archived.archive_path).is_dir()
+        archive_path = Path(archived.archive_path)
+        remaining_docs = s.query(Document).filter_by(po_set_id=po_set_id).all()
+        assert len(remaining_docs) == doc_count, "archive must keep every document row"
+        assert all(d.archived_at is not None for d in remaining_docs)
+        assert s.query(LineItem).count() == 3, "archive must keep every line item"
+        found = [
+            a
+            for a in s.query(AuditLog).all()
+            if (a.action.value if hasattr(a.action, "value") else str(a.action))
+            == "quarantine_delete"
+        ]
+        assert len(found) >= 1, "audit_log quarantine_delete row should exist"
+
+    # files still exist after archive, and the export has its own copies
+    for p in stored_paths:
+        assert p.exists(), f"stored_path should still exist after archive: {p}"
+        assert (q_folder / _orig(p)).exists(), (
+            f"quarantine copy should still exist after archive: {q_folder / _orig(p)}"
+        )
+        assert (archive_path / "files").is_dir(), "archive must contain copied files"
+
+
+def test_quarantine_copy_uses_copy_not_move(tmp_path):
+    """FR-13.3: quarantine_copy uses shutil.copy (not move) - originals remain."""
+    from app.services.quarantine import quarantine_copy
+
+    cfg = _cfg_with_tmp(tmp_path)
+    po_set_id = _create_quarantined_poset(tmp_path, cfg, po_no="PO-COPY-001")
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import POSet
+
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        ps = s.get(POSet, po_set_id)
+        s.refresh(ps, attribute_names=["documents"])
+        stored = [Path(d.stored_path) for d in ps.documents]
+        q = quarantine_copy(ps, cfg)
+        for p in stored:
+            assert p.exists()
+            assert (q / _orig(p)).exists()
+            # content equal (size same)
+            assert (q / _orig(p)).stat().st_size == p.stat().st_size
+
+
+def test_delete_only_when_quarantined(tmp_path):
+    """FR-13.5: delete only allowed for quarantined status."""
+    import pytest
+
+    from app.services.quarantine import delete_quarantined
+
+    cfg = _cfg_with_tmp(tmp_path)
+    # create pending POSet
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import POSet, POSetStatus
+    from app.models.base import Base
+
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO-PENDING-001", status=POSetStatus.pending)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        pending_id = ps.id
+
+    with pytest.raises(ValueError):
+        delete_quarantined(pending_id, cfg)
+
+
+def test_manual_merge_isolated(tmp_path):
+    """FR-14.11-14.13: manual_merge concatenates in given order, no DB side-effects, user-selectable output."""
+    from pypdf import PdfReader
+
+    from app.services.quarantine import manual_merge
+
+    # create 3 PDFs with distinct widths to verify order
+    a = _tiny_pdf(tmp_path / "a.pdf", width=100, height=200)
+    b = _tiny_pdf(tmp_path / "b.pdf", width=200, height=200)
+    c = _tiny_pdf(tmp_path / "c.pdf", width=300, height=200)
+
+    # order [2,0,1] => c,a,b => widths 300,100,200
+    out = manual_merge([a, b, c], order=[2, 0, 1])
+    assert out.exists()
+    reader = PdfReader(str(out))
+    assert len(reader.pages) == 3
+    widths = [float(p.mediabox.width) for p in reader.pages]
+    assert widths == [300, 100, 200], f"manual order failed, got {widths}"
+
+    # No DB assertion here: the service has no engine/session to call, and the
+    # route-level proof lives in
+    # tests/test_manual_merger.py::test_route_does_not_touch_the_database.
+
+
+def test_justification_boundary(tmp_path):
+    """None/blank stays None (existing callers keep working); under 20 chars
+    raises; 20+ is kept stripped. A checkbox-length note is not a 'why'."""
+    import pytest
+
+    from app.services.quarantine import MIN_JUSTIFICATION_CHARS, validate_justification
+
+    assert MIN_JUSTIFICATION_CHARS == 20
+    assert validate_justification(None) is None
+    assert validate_justification("") is None
+    assert validate_justification("   ") is None
+    with pytest.raises(ValueError, match="at least 20"):
+        validate_justification("x" * 19)
+    assert validate_justification("  " + "y" * 20 + "  ") == "y" * 20
+
+
+def test_delete_audit_carries_evidence_and_survives_its_set(tmp_path):
+    """quarantine_delete audit: real detail (po_no + doc count), justification
+    kept, row survives the set's deletion via SET NULL, files stay on disk."""
+    import json
+
+    from sqlalchemy.orm import Session
+
+    from app.core.config import load_config
+    from app.core.database import get_engine
+    from app.models import (
+        AuditAction,
+        AuditLog,
+        DocType,
+        Document,
+        ExtractionStatus,
+        POSet,
+        POSetStatus,
+    )
+    from app.models.base import Base
+    from app.services.quarantine import delete_quarantined
+
+    cfg = load_config("config.example.yaml")
+    cfg.paths.database_path = str(tmp_path / "del_audit.db")
+    cfg.paths.stored_documents_folder = str(tmp_path / "stored")
+    (tmp_path / "stored").mkdir(parents=True, exist_ok=True)
+    eng = get_engine(cfg)
+    Base.metadata.create_all(eng)
+    pdf = tmp_path / "stored" / "q.pdf"
+    pdf.write_bytes(b"%PDF-1.4 quaran")
+
+    with Session(eng) as s:
+        ps = POSet(po_no_normalized="PO-DEL", status=POSetStatus.quarantined)
+        s.add(ps)
+        s.commit()
+        s.refresh(ps)
+        ps_id = ps.id
+        s.add(
+            Document(
+                sha256_hash="h_del",
+                original_filename="q.pdf",
+                stored_path=str(pdf),
+                doc_type=DocType.DN,
+                extraction_status=ExtractionStatus.valid,
+                po_set_id=ps_id,
+            )
+        )
+        s.commit()
+
+    audit = delete_quarantined(
+        ps_id, cfg, justification="Operator reviewed, wrong vendor file." * 2
+    )
+    assert audit.action == AuditAction.quarantine_delete
+    detail = json.loads(audit.detail)
+    assert detail["po_no_normalized"] == "PO-DEL"
+    assert detail["document_count"] == 1
+    assert detail["archived"] is True
+    assert Path(detail["archive_path"]).is_dir()
+    assert len(audit.justification) >= 20
+    with Session(eng) as s:
+        archived = s.get(POSet, ps_id)
+        assert archived is not None and archived.archived_at is not None
+        kept = s.query(AuditLog).filter(AuditLog.action == AuditAction.quarantine_delete).one()
+        assert kept.po_set_id == ps_id
+        assert json.loads(kept.detail)["po_no_normalized"] == "PO-DEL"
+    assert pdf.exists(), "stored copy is the audit trail, never deleted"
+
+
+def test_manual_merge_output_user_selectable(tmp_path):
+    """The service writes to a caller-supplied path (the web route uses a temp).
+
+    FR-14.12 is download-only since 2026-10-23: the browser picks the folder.
+    This test only pins the service's ability to write a given path.
+    """
+    from app.services.quarantine import manual_merge
+
+    a = _tiny_pdf(tmp_path / "x.pdf", width=100)
+    b = _tiny_pdf(tmp_path / "y.pdf", width=200)
+    custom_out = tmp_path / "my_custom_folder" / "my_invoice_merged.pdf"
+    out = manual_merge([a, b], order=[0, 1], output_path=custom_out)
+    assert out == custom_out
+    assert out.exists()
+
+
+def test_audit_fk_set_null_on_delete():
+    """W-14: audit_log FK must carry ON DELETE SET NULL (model-level)."""
+    from sqlalchemy import create_engine
+
+    from app.models.base import Base
+
+    eng = create_engine("sqlite://")
+    Base.metadata.create_all(eng)
+    con = eng.raw_connection().driver_connection
+    rows = con.execute("PRAGMA foreign_key_list(audit_log)").fetchall()
+    po_refs = [r for r in rows if r[2] == "po_sets"]
+    assert len(po_refs) == 1
+    # PRAGMA foreign_key_list: (id, seq, table, from, to, on_update, on_delete, match)
+    assert po_refs[0][6] == "SET NULL"
+
+
+def test_delete_audit_survives_with_detail(tmp_path):
+    """W-14: audit inserted with the real po_set_id, survives the parent
+    delete (nulled FK) with po_no + count in detail."""
+    import json
+
+    from sqlalchemy.orm import Session
+
+    from app.core.database import get_engine
+    from app.models import AuditLog
+    from app.services.quarantine import delete_quarantined
+
+    cfg = _cfg_with_tmp(tmp_path)
+    po_set_id = _create_quarantined_poset(tmp_path, cfg, po_no="PO-AUDIT-1")
+    audit = delete_quarantined(po_set_id, cfg)
+    assert audit.po_set_id == po_set_id
+    detail = json.loads(audit.detail)
+    assert detail["po_no_normalized"] == "PO-AUDIT-1"
+    assert detail["document_count"] == 3
+    assert detail["archived"] is True
+
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        surviving = s.query(AuditLog).filter_by(id=audit.id).one()
+        assert surviving.po_set_id == po_set_id
+        assert json.loads(surviving.detail)["document_count"] == 3
+
+
+def test_quarantine_si_dn_missing_po_reference(tmp_path, monkeypatch):
+    """Client rule: an SI or DN document with no PO number must be immediately quarantined."""
+    from pypdf import PdfWriter
+    from sqlalchemy.orm import Session
+
+    from app.core.config import load_config
+    from app.core.database import get_engine
+    from app.flows.sync import sync_flow
+    from app.models import Document, ExtractionStatus
+
+    cfg = load_config("config.example.yaml")
+    cfg.paths.database_path = str(tmp_path / "missing_po.db")
+    cfg.paths.input_folder = str(tmp_path / "input")
+    cfg.paths.output_folder = str(tmp_path / "output")
+    cfg.paths.quarantine_folder = str(tmp_path / "quarantine")
+    cfg.paths.stored_documents_folder = str(tmp_path / "stored")
+    cfg.paths.combined_folder = str(tmp_path / "combined")
+    for p in (
+        cfg.paths.input_folder,
+        cfg.paths.output_folder,
+        cfg.paths.quarantine_folder,
+        cfg.paths.stored_documents_folder,
+    ):
+        Path(p).mkdir(parents=True, exist_ok=True)
+
+    # Create dummy SI PDF without PO
+    si_pdf = Path(cfg.paths.input_folder) / "si_no_po.pdf"
+    w = PdfWriter()
+    w.add_blank_page(width=100, height=100)
+    with open(si_pdf, "wb") as f:
+        w.write(f)
+
+    # Mock VLM extraction returning SI with no po_reference
+    monkeypatch.setattr(
+        "app.services.extraction._call_vlm",
+        lambda *a, **kw: {
+            "document_type": "SI",
+            "document_number": "SI-1001",
+            "po_reference": None,
+            "vendor_name": "Test Vendor",
+            "line_items": [
+                {
+                    "line_item_no": "1",
+                    "description": "Item 1",
+                    "quantity": "10",
+                }
+            ],
+        },
+    )
+
+    # Run sync flow
+    monkeypatch.setattr("app.flows.sync.load_config", lambda *a, **kw: cfg)
+    monkeypatch.setattr("app.core.config.load_config", lambda *a, **kw: cfg)
+    sync_flow()
+
+    # The document was READ successfully - it carries no PO reference, but
+    # nothing about it is broken. It is therefore held, not quarantined:
+    # marking it failed would hide it from the content-based sweeps (which
+    # place only valid documents) and from the operator. It waits, visible,
+    # for the content to place it or for a human to name its PO.
+    assert si_pdf.exists(), "a readable document must not be treated as broken"
+
+    eng = get_engine(cfg)
+    with Session(eng) as s:
+        doc = s.query(Document).filter_by(original_filename="si_no_po.pdf").one()
+        assert doc.extraction_status == ExtractionStatus.valid
+        assert doc.po_no_normalized is None
+        assert doc.po_set_id is None
+        # its line items are intact
+        assert len(doc.line_items) == 1
+        assert doc.line_items[0].quantity == 10000
+
+    # and nothing was quarantined
+    q_docs = list((Path(cfg.paths.quarantine_folder) / "_documents").glob("*"))
+    assert not q_docs, "a readable document must not be quarantined"

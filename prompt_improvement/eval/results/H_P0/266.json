@@ -1,0 +1,96 @@
+{
+  "doc_id": 266,
+  "label": "H_P0",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.11,
+      "result": {
+        "document_type": "PO",
+        "document_number": "4270006645-SNN",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Mixer/Grinder Machine With Stainless Ste",
+            "quantity": "1",
+            "unit_price": "42.000",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 341,
+          "reasoning_tokens": 199,
+          "cost": 0.00023233,
+          "latency_s": 9.93
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.83,
+      "result": {
+        "document_type": "PO",
+        "document_number": "4270006645-SNN",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Mixer/Grinder Machine With Stainless Ste",
+            "quantity": "1",
+            "unit_price": "42.000",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 284,
+          "reasoning_tokens": 142,
+          "cost": 0.000759625,
+          "latency_s": 7.67
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 6.17,
+      "result": {
+        "document_type": "PO",
+        "document_number": "4270006645",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "Mixer/Grinder Machine With Stainless Ste",
+            "quantity": "1",
+            "unit_price": "42.000",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 4968,
+          "completion_tokens": 138,
+          "reasoning_tokens": 0,
+          "cost": 0.00013083,
+          "latency_s": 6.04
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

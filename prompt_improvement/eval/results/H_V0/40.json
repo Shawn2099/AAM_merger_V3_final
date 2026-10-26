@@ -1,0 +1,264 @@
+{
+  "doc_id": 40,
+  "label": "H_V0",
+  "model": "openai/gpt-6-luna",
+  "variant": "native",
+  "prompt_source": "live",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.49,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9329",
+        "po_reference": "193165",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "COTTON RAGS-BANJYAN12KG/BDLE",
+            "quantity": "20",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "WD 40 330ml",
+            "quantity": "48",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "PERMATEX COPPER ANTI-SEIZE LUBRICANT NET.454g",
+            "quantity": "6",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4",
+            "description": "DUCT TAPE GREY COLOUR CLASSIC KSA 2\"X23-25YARD",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "SQUEEZE, FLOOR, 24IN, RUBBER, C/W HANDLE",
+            "quantity": "36",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "7",
+            "description": "MOP, HEAD COTTON RAWHIDE 24 OZ 4 PLY WITH HAND",
+            "quantity": "36",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "8",
+            "description": "BROOM, ANGLE 10-1/2 IN X 56 IN VINYL COATED[1]",
+            "quantity": "36",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "9",
+            "description": "WATER FINDING PASTE KOLOR KUT 3OZ",
+            "quantity": "10",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "10",
+            "description": "KOLOR KUT GASOLINE GAUGINGPASTE NET 2.25 OZ",
+            "quantity": "10",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5443,
+          "completion_tokens": 468,
+          "reasoning_tokens": 0,
+          "cost": 0.00030058,
+          "latency_s": 8.47
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.75,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9329",
+        "po_reference": "193165",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "COTTON RAGS-BANIYAN 12KG/BDLE",
+            "quantity": "20",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "WD 40 330ml",
+            "quantity": "48",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "PERMATEX COPPER ANTI-SEIZE LUBRICANT NET.454g",
+            "quantity": "6",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": null,
+            "description": "DUCT TAPE GREY COLOUR CLASSIC KSA 2\"X L23-25YARD",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "SQUEEZE, FLOOR, 24IN, RUBBER, C/W HANDLE",
+            "quantity": "36",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "7",
+            "description": "MOP, HEAD COTTON RAWHIDE 24 OZ 4 PLY WITH HAND",
+            "quantity": "36",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "8",
+            "description": "BROOM, ANGLE 10-1/2 IN X 56 IN VINYL COATED[1]",
+            "quantity": "36",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "9",
+            "description": "WATER FINDING PASTE KOLOR KUT 3OZ",
+            "quantity": "10",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "10",
+            "description": "KOLOR KUT GASOLINE GAUGINGPASTE NET 2.25 OZ",
+            "quantity": "10",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5443,
+          "completion_tokens": 469,
+          "reasoning_tokens": 0,
+          "cost": 0.00030108,
+          "latency_s": 7.73
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 7.16,
+      "result": {
+        "document_type": "DN",
+        "document_number": "GDN-ARS-25-9329",
+        "po_reference": "193165",
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "COTTON RAGS-BANIYAN12KG/BDLE",
+            "quantity": "20",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "WD 40 330ml",
+            "quantity": "48",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3",
+            "description": "PERMATEX COPPER ANTI-SEIZE LUBRICANT NET.454g",
+            "quantity": "6",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": null,
+            "description": "DUCT TAPE GREY COLOUR CLASSIC KSA 2\"XL23-25YARD",
+            "quantity": "50",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "6",
+            "description": "SQUEEZE, FLOOR, 24IN, RUBBER, C/W HANDLE",
+            "quantity": "36",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "7",
+            "description": "MOP, HEAD COTTON RAWHIDE 24 OZ 4 PLY WITH HAND",
+            "quantity": "36",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "8",
+            "description": "BROOM, ANGLE 10-1/2 IN X 56 IN VINYL COATED[1]",
+            "quantity": "36",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "9",
+            "description": "WATER FINDING PASTE KOLOR KUT 3OZ",
+            "quantity": "10",
+            "unit_price": null,
+            "dn_no": null
+          },
+          {
+            "line_item_no": "10",
+            "description": "KOLOR KUT GASOLINE GAUGINGPASTE NET 2.25 OZ",
+            "quantity": "10",
+            "unit_price": null,
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5443,
+          "completion_tokens": 467,
+          "reasoning_tokens": 0,
+          "cost": 0.0009105,
+          "latency_s": 7.14
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

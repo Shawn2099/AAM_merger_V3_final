@@ -1,0 +1,159 @@
+{
+  "doc_id": 232,
+  "label": "P2",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P2.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.24,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079469",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 3,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "LUBRICANT,SILICONE,100 GRAM",
+            "quantity": "24.00",
+            "unit_price": "105.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2-1",
+            "description": "GAS-CALIBRATION,CALGAZ,HYDROGEN SULFIDE,25 PPM H2S,50 PCT LEL",
+            "quantity": "1.00",
+            "unit_price": "935.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3-1",
+            "description": "EARPLUGS,HOWARD LEIGHT,MAX-30,PRESHAPED FOAM,W/CORD,100/BOX,NRR 33",
+            "quantity": "5.00",
+            "unit_price": "210.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4-1",
+            "description": "LAMP-FLUORESCENT,PHILIPS,TLD18 W865,BASE G13,COOL DAYLIGHT,T8,2FT,EUROPE ITEM ONLY",
+            "quantity": "100.00",
+            "unit_price": "3.75",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 10474,
+          "completion_tokens": 437,
+          "reasoning_tokens": 104,
+          "cost": 0.001524375,
+          "latency_s": 9.03
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.59,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079469",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 3,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "LUBRICANT,SILICONE,100 GRAM",
+            "quantity": "24.00",
+            "unit_price": "105.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2-1",
+            "description": "GAS-CALIBRATION,CALGAZ,HYDROGEN SULFIDE,25 PPM H2S,50 PCT LEL",
+            "quantity": "1.00",
+            "unit_price": "935.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3-1",
+            "description": "EARPLUGS,HOWARD LEIGHT,MAX-30,PRESHAPED FOAM,W/CORD,100/BOX,NRR 33",
+            "quantity": "5.00",
+            "unit_price": "210.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4-1",
+            "description": "LAMP-FLUORESCENT,PHILIPS,TLD18 W865,BASE G13,COOL DAYLIGHT,T8,2FT,EUROPE ITEM ONLY",
+            "quantity": "100.00",
+            "unit_price": "3.75",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 10474,
+          "completion_tokens": 464,
+          "reasoning_tokens": 131,
+          "cost": 0.00034889,
+          "latency_s": 8.39
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 8.55,
+      "result": {
+        "document_type": "PO",
+        "document_number": "10006-0000079469",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 3,
+        "line_items": [
+          {
+            "line_item_no": "1-1",
+            "description": "LUBRICANT,SILICONE,100 GRAM",
+            "quantity": "24.00",
+            "unit_price": "105.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2-1",
+            "description": "GAS-CALIBRATION,CALGAZ,HYDROGEN SULFIDE,25 PPM H2S,50 PCT LEL",
+            "quantity": "1.00",
+            "unit_price": "935.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "3-1",
+            "description": "EARPLUGS,HOWARD LEIGHT,MAX-30,PRESHAPED FOAM,W/CORD,100/BOX,NRR 33",
+            "quantity": "5.00",
+            "unit_price": "210.00",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "4-1",
+            "description": "LAMP-FLUORESCENT,PHILIPS,TLD18 W865,BASE G13,COOL DAYLIGHT,T8,2FT,EUROPE ITEM ONLY",
+            "quantity": "100.00",
+            "unit_price": "3.75",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 10474,
+          "completion_tokens": 486,
+          "reasoning_tokens": 153,
+          "cost": 0.00035989,
+          "latency_s": 8.34
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

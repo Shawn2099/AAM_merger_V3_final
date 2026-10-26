@@ -1,0 +1,117 @@
+{
+  "doc_id": 262,
+  "label": "H_P4",
+  "model": "openai/gpt-6-luna",
+  "variant": "img150+eff=high",
+  "prompt_source": "prompt_improvement/eval/candidates/P4.py",
+  "runs": [
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 11.83,
+      "result": {
+        "document_type": "PO",
+        "document_number": "60213576 OPG",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "JOTUN THINNER NO.2",
+            "quantity": "15",
+            "unit_price": "2.2500",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "JOTUN THINNER NO.7",
+            "quantity": "15",
+            "unit_price": "2.3000",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5977,
+          "completion_tokens": 693,
+          "reasoning_tokens": 516,
+          "cost": 0.00109025,
+          "latency_s": 11.76
+        }
+      },
+      "repeat": 0
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 10.5,
+      "result": {
+        "document_type": "PO",
+        "document_number": "60213576 OPG",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "JOTUN THINNER NO.2",
+            "quantity": "15",
+            "unit_price": "2.2500",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "JOTUN THINNER NO.7",
+            "quantity": "15",
+            "unit_price": "2.3000",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5977,
+          "completion_tokens": 549,
+          "reasoning_tokens": 372,
+          "cost": 0.00034642,
+          "latency_s": 10.42
+        }
+      },
+      "repeat": 1
+    },
+    {
+      "ok": true,
+      "error": null,
+      "elapsed_s": 9.13,
+      "result": {
+        "document_type": "PO",
+        "document_number": "60213576 OPG",
+        "po_reference": null,
+        "po_reference_ambiguous": false,
+        "page_count": 1,
+        "line_items": [
+          {
+            "line_item_no": "1",
+            "description": "JOTUN THINNER NO.2",
+            "quantity": "15",
+            "unit_price": "2.2500",
+            "dn_no": null
+          },
+          {
+            "line_item_no": "2",
+            "description": "JOTUN THINNER NO.7",
+            "quantity": "15",
+            "unit_price": "2.3000",
+            "dn_no": null
+          }
+        ],
+        "_usage": {
+          "prompt_tokens": 5977,
+          "completion_tokens": 307,
+          "reasoning_tokens": 130,
+          "cost": 0.00022542,
+          "latency_s": 8.9
+        }
+      },
+      "repeat": 2
+    }
+  ]
+}

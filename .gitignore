@@ -22,10 +22,12 @@ data/logs/*
 !data/logs/.gitkeep
 data/samples/*
 !data/samples/.gitkeep
+data/real_samples/
 data/Automation/
 data/backup/
 data/combined/
 data/development/
+data/ui_test_probe/
 data/*.json
 data/extraction_dump.json
 data/raw_extractions/
@@ -117,3 +119,14 @@ prompt_improvement/**/*.db
 prompt_improvement/**/*.sqlite*
 scratch_*
 scratch_dump/
+
+# Release harness output (baselines under tests/ui/release/__snapshots__ ARE tracked)
+tests/ui/release/artifacts/
+tests/ui/release/snapshot_failures/
+reports/
+.playwright-mcp/
+
+data/ui_test_interactive*/
+data/ui_test_census/
+
+data/ui_test_real_*/

@@ -41,7 +41,7 @@ class PathsConfig(_StrictConfigModel):
     # ARCHIVE.txt) is written here. Optional so existing configs and the
     # many hand-written test configs keep validating; omitted means
     # `<config dir>/data/development/archived_sets`.
-    archive_folder: Path = Path("./data/development/archived_sets")
+    archive_folder: Path = Path("./data/quarantine/_archived_sets")
     # `unclassified_folder` was removed 2026-09-29. Unclassified documents
     # are identified by `documents.doc_type == UNKNOWN` and surfaced through
     # the web UI, so no folder was ever written to it.
@@ -604,7 +604,7 @@ def load_config_file(
         if "combined_folder" not in paths_raw:
             paths_raw["combined_folder"] = str(base_dir / "data" / "combined")
         if "archive_folder" not in paths_raw:
-            paths_raw["archive_folder"] = str(base_dir / "data" / "development" / "archived_sets")
+            paths_raw["archive_folder"] = str(base_dir / "data" / "quarantine" / "_archived_sets")
 
     mm_raw = data.get("manual_merge")
     if isinstance(mm_raw, dict):
