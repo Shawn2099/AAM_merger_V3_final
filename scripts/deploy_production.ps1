@@ -288,7 +288,7 @@ $installArgs = @(
     "-WithPrefectServer",
     "-StartServices"
 )
-if ($AllowAnyHost) {
+if ($AllowAnyHost -or $DryRun) {
     $installArgs += "-AllowAnyHost"
 }
 if ($DryRun) {
