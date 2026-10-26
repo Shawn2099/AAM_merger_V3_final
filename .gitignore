@@ -118,3 +118,9 @@ prompt_improvement/**/*.db
 prompt_improvement/**/*.sqlite*
 scratch_*
 scratch_dump/
+
+# Release harness output (baselines under tests/ui/release/__snapshots__ ARE tracked)
+tests/ui/release/artifacts/
+tests/ui/release/snapshot_failures/
+reports/
+.playwright-mcp/

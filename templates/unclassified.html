@@ -30,21 +30,45 @@
   </div>
 
   {% if documents and documents|length > 0 %}
-  <div class="table-container" style="margin-top:16px;">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Document</th>
-          <th>Received</th>
-          <th>Extraction</th>
-          <th>Assign Document Type</th>
-          <th>PO Number</th>
-          <th style="text-align:right;">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for doc in documents %}
-        <tr id="doc-row-{{ doc.id }}" data-testid="unclassified-row" data-doc-id="{{ doc.id }}" x-data="{ poInput: '', docType: '', norm: '', refreshNorm() { const q = this.poInput.trim(); if (!q) { this.norm = ''; return; } fetch('/unclassified/normalize?po_no=' + encodeURIComponent(q)).then(r => r.json()).then(d => { this.norm = d.normalized; }).catch(() => { this.norm = ''; }); } }">
+  {% set failed_c = failed_count or 0 %}
+  {% set all_c = documents|length %}
+  {% set needs_po_c = all_c - failed_c %}
+
+  <div x-data="{ activeTab: 'all' }" style="margin-top:16px;">
+    <!-- Sub-View Quick Filter Tabs -->
+    <div class="status-tabs" style="margin-bottom:12px;">
+      <button type="button" class="tab-btn" :class="{ 'active': activeTab === 'all' }" @click="activeTab = 'all'" data-testid="tab-subview-all">
+        <span>All Unmatched Files</span>
+        <span class="tab-count">{{ all_c }}</span>
+      </button>
+      <button type="button" class="tab-btn" :class="{ 'active': activeTab === 'needs_po' }" @click="activeTab = 'needs_po'" data-testid="tab-subview-needs-po">
+        <span>Needs PO Number</span>
+        <span class="tab-count">{{ needs_po_c }}</span>
+      </button>
+      <button type="button" class="tab-btn" :class="{ 'active': activeTab === 'failed' }" @click="activeTab = 'failed'" data-testid="tab-subview-failed">
+        <span>Unreadable / Failed</span>
+        <span class="tab-count">{{ failed_c }}</span>
+      </button>
+    </div>
+
+    <div class="table-container">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Document</th>
+            <th>Received</th>
+            <th>Extraction</th>
+            <th>Assign Document Type</th>
+            <th>PO Number</th>
+            <th style="text-align:right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for doc in documents %}
+          {% set is_doc_failed = (doc.extraction_status and doc.extraction_status.value == 'failed') or doc.ingest_reject_reason %}
+          <tr id="doc-row-{{ doc.id }}" data-testid="unclassified-row" data-doc-id="{{ doc.id }}"
+              x-show="activeTab === 'all' || (activeTab === 'needs_po' && !{{ 'true' if is_doc_failed else 'false' }}) || (activeTab === 'failed' && {{ 'true' if is_doc_failed else 'false' }})"
+              x-data="{ poInput: '', docType: '', norm: '', refreshNorm() { const q = this.poInput.trim(); if (!q) { this.norm = ''; return; } fetch('/unclassified/normalize?po_no=' + encodeURIComponent(q)).then(r => r.json()).then(d => { this.norm = d.normalized; }).catch(() => { this.norm = ''; }); } }">
             <td>
               <div style="font-weight:600; color:var(--text-main);">{{ doc.original_filename }}</div>
               <div class="muted" style="font-size:0.75rem; font-family:ui-monospace, monospace;">
@@ -153,7 +177,7 @@
                   hx-confirm="Move this file to the quarantine folder? It leaves this list. The original is kept there, and you can put a fixed copy back in the input folder."
                   title="Copy this file to the quarantine folder and remove it from this list"
                 >
-                  <span>Move to Quarantine</span>
+                  <span>Move to Quarantine Folder</span>
                 </button>
 
                 {% if not doc.ingest_reject_reason %}<button 
@@ -176,6 +200,7 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
   </div>
   {% else %}
   <div style="text-align:center; padding:48px 20px; color:var(--text-muted); background:#f8fafc; border-radius:var(--radius-md); margin-top:16px;">

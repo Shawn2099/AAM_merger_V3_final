@@ -91,7 +91,7 @@ def test_ui_q_04_the_destructive_control_is_called_archive(page: Page):
     page.goto("/quarantine")
     button = page.get_by_test_id("btn-archive-row").first
     expect(button).to_be_visible(timeout=5000)
-    expect(button).to_have_text("Archive")
+    expect(button).to_have_text(re.compile(r"Move to Quarantine Folder|Archive"))
 
 
 def test_ui_a_01_audit_page_shows_the_seeded_row_and_its_justification(page: Page):

@@ -11,7 +11,7 @@
       </a>
 
       <a href="/dashboard?status=mismatched" data-testid="tab-mismatched" class="tab-btn {% if current_status == 'mismatched' %}active{% endif %}">
-        <span>Quantity Discrepancy</span>
+        <span>Quantity Mismatch</span>
         {% if stats %}<span class="tab-count">{{ stats.mismatched }}</span>{% endif %}
       </a>
 
@@ -21,12 +21,12 @@
       </a>
 
       <a href="/dashboard?status=merged" data-testid="tab-merged" class="tab-btn {% if current_status == 'merged' %}active{% endif %}">
-        <span>Matched &amp; Completed</span>
+        <span>Merged &amp; Ready</span>
         {% if stats %}<span class="tab-count">{{ stats.merged }}</span>{% endif %}
       </a>
 
       <a href="/dashboard?status=quarantined" data-testid="tab-quarantined" class="tab-btn {% if current_status == 'quarantined' %}active{% endif %}">
-        <span>Quarantined</span>
+        <span>Flagged</span>
         {% if stats %}<span class="tab-count">{{ stats.quarantined }}</span>{% endif %}
       </a>
     </div>

@@ -6,8 +6,8 @@
     <span class="kpi-desc">Managed across pipeline</span>
   </a>
 
-  <a href="/dashboard?status=merged" class="kpi-card kpi-merged" data-testid="kpi-merged" title="Filter by Matched & Completed">
-    <span class="kpi-title">✅ Matched &amp; Completed</span>
+  <a href="/dashboard?status=merged" class="kpi-card kpi-merged" data-testid="kpi-merged" title="Filter by Merged &amp; Ready">
+    <span class="kpi-title">✅ Merged &amp; Ready</span>
     <span class="kpi-value" style="color:var(--clr-merged-text);">
       {{ stats.merged if stats else 0 }}
       <small style="font-size:0.9rem; font-weight:600;">({{ stats.merged_pct if stats else 0 }}%)</small>
@@ -15,8 +15,8 @@
     <span class="kpi-desc">Fully reconciled packets</span>
   </a>
 
-  <a href="/dashboard?status=mismatched" class="kpi-card kpi-mismatched" data-testid="kpi-mismatched" title="Filter by Quantity Discrepancy">
-    <span class="kpi-title">⚠️ Quantity Discrepancy</span>
+  <a href="/dashboard?status=mismatched" class="kpi-card kpi-mismatched" data-testid="kpi-mismatched" title="Filter by Quantity Mismatch">
+    <span class="kpi-title">⚠️ Quantity Mismatch</span>
     <span class="kpi-value" style="color:var(--clr-mismatch-text);">{{ stats.mismatched if stats else 0 }}</span>
     <span class="kpi-desc">Quantity discrepancies</span>
   </a>
@@ -27,8 +27,8 @@
     <span class="kpi-desc">Needs customs/shipping docs</span>
   </a>
 
-  <a href="/dashboard?status=quarantined" class="kpi-card kpi-quarantined" data-testid="kpi-quarantined" title="Filter by Quarantined">
-    <span class="kpi-title">🚨 Quarantined</span>
+  <a href="/dashboard?status=quarantined" class="kpi-card kpi-quarantined" data-testid="kpi-quarantined" title="Filter by Flagged">
+    <span class="kpi-title">🚨 Flagged</span>
     <span class="kpi-value" style="color:var(--clr-quarantined-text);">{{ stats.quarantined if stats else 0 }}</span>
     <span class="kpi-desc">Zero qty or critical conflict</span>
   </a>

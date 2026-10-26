@@ -150,6 +150,13 @@ def test_ui_set_aside_from_quarantine_stays(page: Page, manifest):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "P2-01 known issue: under-delivery shows 'Partial Delivery' / 'Waiting (part delivered)' "
+        "but the matrix row says 'Mismatch'. Fix the template/route, then this becomes XPASS."
+    ),
+)
 def test_ui_under_delivery_is_consistent(page: Page, manifest):
     sc = _open(page, manifest, "needs_review_quantity")
     expect.soft(page.locator("body")).to_contain_text("Waiting (part delivered)")

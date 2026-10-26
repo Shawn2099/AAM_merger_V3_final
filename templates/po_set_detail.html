@@ -70,14 +70,14 @@
         {% endif %}
       {% elif status_str == 'mismatched' %}
         {% if set_shortfall == 'under' %}
-          <span class="badge badge-pending" style="font-size:0.9rem; padding:6px 14px;" title="Waiting (part delivered)">Partial Delivery</span>
+          <span class="badge badge-pending" style="font-size:0.9rem; padding:6px 14px;">Waiting (part delivered)</span>
         {% else %}
           <span class="badge badge-mismatched" style="font-size:0.9rem; padding:6px 14px;">Quantity Mismatch</span>
         {% endif %}
       {% elif status_str == 'blocked_customs' %}
         <span class="badge badge-blocked" style="font-size:0.9rem; padding:6px 14px;">🔒 Awaiting Customs/Shipping Docs (2 docs needed)</span>
       {% elif status_str == 'quarantined' %}
-        <span class="badge badge-quarantined" style="font-size:0.9rem; padding:6px 14px;">🚨 Exception (Rejected)</span>
+        <span class="badge badge-quarantined" style="font-size:0.9rem; padding:6px 14px;">🚨 Flagged</span>
       {% elif status_str == 'pending' %}
         <span class="badge badge-pending" style="font-size:0.9rem; padding:6px 14px;">Awaiting Documents</span>
       {% endif %}
@@ -524,9 +524,9 @@
 <!-- Quarantined Archive Card (Only if quarantined and active) -->
 {% if status_str == 'quarantined' and not is_archived %}
 <div class="card" style="border-color:var(--clr-quarantined-border); background:#fff5f5;">
-  <h3 style="color:#991b1b; font-size:1.1rem; margin-bottom:4px;">📦 Archive Quarantined PO Set</h3>
+  <h3 style="color:#991b1b; font-size:1.1rem; margin-bottom:4px;">📦 Move Flagged PO Set to Quarantine Folder</h3>
   <p class="muted" style="margin-bottom:14px; font-size:0.85rem;">
-    Moves this PO Set to the archive folder and hides it from the active
+    Moves this PO Set to the quarantine folder (<code>data/quarantine/</code>) and hides it from the active
     worklists. The database rows, every stored PDF and the audit trail are kept. Nothing is destroyed.
   </p>
   <button 
@@ -535,18 +535,18 @@
     onclick="document.getElementById('quarantine-delete-modal').classList.add('open')"
     {% if is_locked %}disabled{% endif %}
   >
-    Archive from Pipeline
+    Move to Quarantine Folder
   </button>
 </div>
 
 <!-- Quarantine Delete Confirmation Modal -->
 <div id="quarantine-delete-modal" class="modal-backdrop">
   <div class="modal-dialog" role="dialog" aria-modal="true">
-    <h3 style="margin-bottom:8px; color:#991b1b;">Archive this quarantined PO Set?</h3>
+    <h3 style="margin-bottom:8px; color:#991b1b;">Move this Flagged PO Set to Quarantine Folder?</h3>
     <p class="muted" style="margin-bottom:16px;">
-      This moves the set to the archive folder and hides it from the
+      This moves the set to the quarantine folder (<code>data/quarantine/</code>) and hides it from the
       worklists. Its database rows, documents, line items, stored PDFs and audit trail are kept.
-      An audit log entry records the archive.
+      An audit log entry records the quarantine dismissal.
     </p>
     <div style="display:flex; gap:10px; justify-content:flex-end;">
       <button class="btn btn-secondary" onclick="document.getElementById('quarantine-delete-modal').classList.remove('open')">
@@ -559,7 +559,7 @@
         hx-swap="none" 
         onclick="document.getElementById('quarantine-delete-modal').classList.remove('open')"
       >
-        Archive
+        Move to Quarantine Folder
       </button>
     </div>
   </div>
@@ -606,20 +606,20 @@
 
 {% if not is_archived and status_str in ['pending', 'mismatched', 'quarantined', 'blocked_customs'] %}
 <div class="card" style="margin-top:20px; border-color:var(--clr-quarantined-border);" data-testid="remove-set-card">
-  <h3 style="font-size:1rem; margin-bottom:6px;">Move to quarantine and remove set</h3>
+  <h3 style="font-size:1rem; margin-bottom:6px;">Remove Set to Quarantine Folder</h3>
   <p class="muted" style="font-size:0.85rem; margin-bottom:12px;">
-    Copies every PDF of this set to the quarantine folder (with a JSON export and a
-    REMOVED.txt), then deletes this set's rows, so corrected documents can form a new set.
+    Copies every PDF of this set to the quarantine folder (<code>data/quarantine/_removed_sets/{{ po_set.po_no_normalized }}/</code> with a JSON export and a
+    REMOVED.txt), then deletes this set's database rows so corrected documents can form a fresh set.
     Stored copies and the audit trail are kept. Use this only when the set cannot be
     completed as it is.
   </p>
   <form method="post" action="/po_sets/{{ po_set.id }}/remove_to_quarantine"
-        onsubmit="return confirm('Remove this PO Set? Its rows are deleted. Its files are copied to the quarantine folder first.');">
+        onsubmit="return confirm('Remove this PO Set to Quarantine Folder? Its rows are deleted and files are copied to the quarantine folder first.');">
     <label class="muted" style="font-size:0.85rem; display:block; margin-bottom:8px;">
       Note (optional)
       <input name="note" maxlength="200" style="width:100%; max-width:420px; padding:6px 8px;">
     </label>
-    <button type="submit" class="btn btn-danger" data-testid="btn-confirm-remove-set">Move to quarantine and remove set</button>
+    <button type="submit" class="btn btn-danger" data-testid="btn-confirm-remove-set">Remove Set to Quarantine Folder</button>
   </form>
 </div>
 {% endif %}

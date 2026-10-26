@@ -79,6 +79,42 @@ def ui_env(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
+def empty_ui_env(tmp_path_factory):
+    """A second throwaway environment with every business table emptied.
+
+    The empty-state copy on the dashboard can only be reached with no sets.
+    The seeded session environment always has at least one of every status, so
+    this fixture builds the same real environment and then deletes its rows
+    (orders, documents, line items, audit) before returning the running server.
+    Tests use absolute URLs because the shared browser context's base_url still
+    points at the seeded environment.
+    """
+    env = _start_env(tmp_path_factory, "ui_test_empty_env")
+    con = sqlite3.connect(env.db_path)
+    try:
+        con.execute("PRAGMA foreign_keys = OFF")
+        tables = [
+            row[0]
+            for row in con.execute(
+                "select name from sqlite_master where type='table' "
+                "and name not like 'sqlite_%' and name != 'alembic_version'"
+            )
+        ]
+        with con:
+            for table in tables:
+                con.execute(f'delete from "{table}"')
+    finally:
+        con.close()
+    return env
+
+
+@pytest.fixture(scope="session")
+def empty_base_url(empty_ui_env):
+    """Absolute base URL for the empty environment (not the pytest-playwright base_url)."""
+    return empty_ui_env.base
+
+
+@pytest.fixture(scope="session")
 def scan_env(tmp_path_factory):
     """A second, throwaway environment for the one test that presses Scan (D-12).
 

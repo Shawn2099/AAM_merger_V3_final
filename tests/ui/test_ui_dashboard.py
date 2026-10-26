@@ -10,7 +10,7 @@ STATUS_TEXT = {
     "pending": ("Awaiting Documents", "Pending / Waiting"),
     "mismatched": ("Quantity Mismatch", "Partial Delivery", "Needs Review", "Waiting (part delivered)"),
     "blocked_customs": ("Awaiting Customs/Shipping Docs", "Awaiting Customs"),
-    "quarantined": ("Exception (Rejected)", "Quarantined"),
+    "quarantined": ("Flagged", "Exception (Rejected)", "Quarantined"),
 }
 
 

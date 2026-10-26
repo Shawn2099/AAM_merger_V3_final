@@ -3,6 +3,21 @@
     "gitnexus": {
       "command": "gitnexus",
       "args": ["mcp"]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "--yes",
+        "@playwright/mcp@latest",
+        "--isolated",
+        "--headless",
+        "--viewport-size",
+        "1440x900",
+        "--test-id-attribute",
+        "data-testid",
+        "--output-dir",
+        ".playwright-mcp"
+      ]
     }
   }
 }
