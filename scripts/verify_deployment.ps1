@@ -30,9 +30,9 @@ Write-Host "====================================================================
 Write-Host "Host: $env:COMPUTERNAME | Root: $ProjectRoot" -ForegroundColor Gray
 Write-Host ""
 
-$passes = 0
-$failures = 0
-$warnings = 0
+$script:passes = 0
+$script:failures = 0
+$script:warnings = 0
 
 function Report-Check {
     param(
@@ -42,15 +42,15 @@ function Report-Check {
     )
     switch ($Status) {
         "OK" {
-            $global:passes++
+            $script:passes++
             Write-Host ("  [PASS] {0,-35} : {1}" -f $Name, $Message) -ForegroundColor Green
         }
         "FAIL" {
-            $global:failures++
+            $script:failures++
             Write-Host ("  [FAIL] {0,-35} : {1}" -f $Name, $Message) -ForegroundColor Red
         }
         "WARN" {
-            $global:warnings++
+            $script:warnings++
             Write-Host ("  [WARN] {0,-35} : {1}" -f $Name, $Message) -ForegroundColor Yellow
         }
     }
@@ -120,26 +120,34 @@ if ($PythonExe) {
     $dbCheckScript = @"
 import sqlite3, sys
 from pathlib import Path
-db_path = Path("data/aam_merger.db")
+try:
+    from app.core.config import load_config
+    cfg = load_config()
+    db_path = cfg.paths.database_path
+except Exception:
+    db_path = Path("data/aam_merger.db")
+
 if not db_path.exists():
-    print("NO_DB")
+    print(f"NO_DB|{db_path}")
     sys.exit(0)
 con = sqlite3.connect(str(db_path))
 cur = con.cursor()
 mode = cur.execute("PRAGMA journal_mode;").fetchone()[0]
 integ = cur.execute("PRAGMA integrity_check;").fetchone()[0]
 counts = cur.execute("SELECT count(*) FROM po_sets;").fetchone()[0]
-print(f"{mode}|{integ}|{counts}")
+print(f"{mode}|{integ}|{counts}|{db_path}")
 "@
     $dbRes = $dbCheckScript | & $PythonExe - 2>$null
-    if ($dbRes -eq "NO_DB") {
-        Report-Check "SQLite Database" "WARN" "data/aam_merger.db does not exist yet (will be created on first sync)"
-    } elseif ($dbRes -match "^(.+)\|(.+)\|(.+)$") {
+    if ($dbRes -match "^NO_DB\|(.+)$") {
+        $foundPath = $matches[1]
+        Report-Check "SQLite Database" "WARN" "$foundPath does not exist yet (will be created on first sync)"
+    } elseif ($dbRes -match "^(.+)\|(.+)\|(.+)\|(.+)$") {
         $mode = $matches[1]
         $integ = $matches[2]
         $count = $matches[3]
+        $foundPath = $matches[4]
         if ($integ -eq "ok") {
-            Report-Check "Database Integrity" "OK" "Passed (PRAGMA integrity_check: ok)"
+            Report-Check "Database Integrity" "OK" "Passed ($foundPath integrity: ok)"
         } else {
             Report-Check "Database Integrity" "FAIL" "Integrity error: $integ"
         }
@@ -158,9 +166,33 @@ print(f"{mode}|{integ}|{counts}")
 
 # 5. Data Directories Write Permissions
 Write-Host "`n[5/7] Checking Directory Write Access..." -ForegroundColor Cyan
-$testDirs = @("data/input", "data/output", "data/quarantine", "data/stored", "data/logs", "data/backup")
-foreach ($td in $testDirs) {
-    $fullPath = Join-Path $ProjectRoot $td
+$dirCheckScript = @"
+import json
+try:
+    from app.core.config import load_config
+    cfg = load_config()
+    dirs = [
+        str(cfg.paths.input_folder),
+        str(cfg.paths.output_folder),
+        str(cfg.paths.quarantine_folder),
+        str(cfg.paths.stored_documents_folder),
+        str(cfg.paths.log_folder),
+        str(cfg.paths.backup_folder),
+    ]
+    print(json.dumps(dirs))
+except Exception:
+    print("[]")
+"@
+$dirsJson = $dirCheckScript | & $PythonExe - 2>$null
+$configuredDirs = @()
+if ($dirsJson -and $dirsJson.Trim().StartsWith("[")) {
+    try { $configuredDirs = ConvertFrom-Json $dirsJson } catch {}
+}
+if ($configuredDirs.Count -eq 0) {
+    $configuredDirs = @("data/input", "data/output", "data/quarantine", "data/stored", "data/logs", "data/backup")
+}
+foreach ($td in $configuredDirs) {
+    $fullPath = if ([System.IO.Path]::IsPathRooted($td)) { $td } else { Join-Path $ProjectRoot $td }
     if (Test-Path $fullPath) {
         $testFile = Join-Path $fullPath ".perm_test_$(Get-Random).tmp"
         try {
@@ -202,10 +234,10 @@ try {
 # Summary
 Write-Host ""
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "Audit Results: $passes Passed, $failures Failed, $warnings Warnings" -ForegroundColor $(if ($failures -gt 0) { "Red" } elseif ($warnings -gt 0) { "Yellow" } else { "Green" })
+Write-Host "Audit Results: $script:passes Passed, $script:failures Failed, $script:warnings Warnings" -ForegroundColor $(if ($script:failures -gt 0) { "Red" } elseif ($script:warnings -gt 0) { "Yellow" } else { "Green" })
 Write-Host "======================================================================" -ForegroundColor Cyan
 
-if ($failures -eq 0) {
+if ($script:failures -eq 0) {
     Write-Host "All critical systems are operational and ready for use." -ForegroundColor Green
     exit 0
 } else {

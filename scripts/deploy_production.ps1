@@ -332,8 +332,12 @@ if (-not $DryRun) {
     if ($apiUp) {
         # Ensure work pool exists before registering deployment
         Write-Host "  Ensuring Prefect work pool 'aam-merger-process-pool' exists..." -ForegroundColor Gray
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
         $poolOut = & $PythonExe -m prefect work-pool create aam-merger-process-pool --type process --overwrite 2>&1
-        if ($LASTEXITCODE -ne 0) {
+        $poolCode = $LASTEXITCODE
+        $ErrorActionPreference = $prevEap
+        if ($poolCode -ne 0) {
             Write-Host "  Notice on work pool: $poolOut" -ForegroundColor Yellow
         }
 
