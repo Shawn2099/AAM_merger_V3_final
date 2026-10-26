@@ -167,30 +167,25 @@ print(f"{mode}|{integ}|{counts}|{db_path}")
 # 5. Data Directories Write Permissions
 Write-Host "`n[5/7] Checking Directory Write Access..." -ForegroundColor Cyan
 $dirCheckScript = @"
-import json
 try:
     from app.core.config import load_config
     cfg = load_config()
-    dirs = [
-        str(cfg.paths.input_folder),
-        str(cfg.paths.output_folder),
-        str(cfg.paths.quarantine_folder),
-        str(cfg.paths.stored_documents_folder),
-        str(cfg.paths.log_folder),
-        str(cfg.paths.backup_folder),
-    ]
-    print(json.dumps(dirs))
+    for d in [cfg.paths.input_folder, cfg.paths.output_folder, cfg.paths.quarantine_folder, cfg.paths.stored_documents_folder, cfg.paths.log_folder]:
+        print(f"DIR|{d}")
 except Exception:
-    print("[]")
+    pass
 "@
-$dirsJson = $dirCheckScript | & $PythonExe - 2>$null
+$dirLines = $dirCheckScript | & $PythonExe - 2>$null
 $configuredDirs = @()
-if ($dirsJson -and $dirsJson.Trim().StartsWith("[")) {
-    try { $configuredDirs = ConvertFrom-Json $dirsJson } catch {}
+foreach ($line in $dirLines) {
+    if ($line -match "^DIR\|(.+)$") {
+        $configuredDirs += $matches[1]
+    }
 }
 if ($configuredDirs.Count -eq 0) {
-    $configuredDirs = @("data/input", "data/output", "data/quarantine", "data/stored", "data/logs", "data/backup")
+    $configuredDirs = @("data/input", "data/output", "data/quarantine", "data/stored", "data/logs")
 }
+$configuredDirs += "data/backup"
 foreach ($td in $configuredDirs) {
     $fullPath = if ([System.IO.Path]::IsPathRooted($td)) { $td } else { Join-Path $ProjectRoot $td }
     if (Test-Path $fullPath) {

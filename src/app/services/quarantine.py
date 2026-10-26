@@ -1640,10 +1640,19 @@ def remove_set_to_quarantine(
         try:
             (final / "REMOVED.txt").write_text(report_text, encoding="utf-8")
             (final / "REMOVAL_IN_PROGRESS.txt").unlink(missing_ok=True)
-            if merged_output_file:
-                Path(str(merged_output_file)).unlink(missing_ok=True)
         except OSError:
-            logger.warning("Could not finalize set removal files after commit", exc_info=True)
+            logger.warning("Could not write REMOVED.txt after commit", exc_info=True)
+
+        if merged_output_file:
+            try:
+                Path(str(merged_output_file)).unlink(missing_ok=True)
+            except OSError:
+                logger.warning(
+                    "Could not unlink merged packet %s after commit; copy is in %s",
+                    merged_output_file,
+                    final,
+                    exc_info=True,
+                )
 
         # A future set with this id must not adopt the old quarantine folder (id reuse).
         for marker in Path(cfg.paths.quarantine_folder).glob("*/.po_set_id"):

@@ -41,9 +41,13 @@ def _last_touched(st: os.stat_result) -> float:
     A copy, a ZIP extraction or a robocopy keeps the SOURCE's modified time (often days old)
     but gets a new creation time on Windows, so the modified time alone would call a file that
     is still being written "old". Python 3.12 exposes the creation time as `st_birthtime` on
-    Windows; where it is missing (Linux development) the modified time is used.
+    Windows; on Python 3.11 on Windows, `st_ctime` is the creation time. Elsewhere (Linux
+    development, where `st_ctime` is the inode change time), only the modified time is used.
     """
-    return max(st.st_mtime, getattr(st, "st_birthtime", 0.0))
+    birth = getattr(st, "st_birthtime", None)
+    if birth is None and os.name == "nt":
+        birth = getattr(st, "st_ctime", 0.0)
+    return max(st.st_mtime, birth or 0.0)
 
 
 def _old_enough(p: Path) -> bool:
