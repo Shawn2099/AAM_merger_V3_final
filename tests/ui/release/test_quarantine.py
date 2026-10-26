@@ -28,7 +28,7 @@ def test_archive_modal_is_named_for_the_quarantine_folder(page: Page, manifest, 
     modal = row.get_by_test_id("archive-row-modal")
     expect(modal).to_have_class(re.compile(r"\bopen\b"))
     expect(modal).to_contain_text("Move to Quarantine Folder")
-    expect(modal).to_contain_text("data/quarantine/")
+    expect(modal).to_contain_text("archive")
     expect(modal.get_by_test_id("btn-confirm-archive-row")).to_contain_text(
         "Quarantine Folder"
     )

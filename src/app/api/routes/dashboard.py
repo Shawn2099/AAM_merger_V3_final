@@ -1224,7 +1224,10 @@ def _upload_manual_doc_impl(
                 ps_rel = s_rel.get(POSet, po_set_id)
                 if ps_rel is not None:
                     release_lock(ps_rel, s_rel, "manual_upload")
-    return RedirectResponse(url=f"/po_sets/{po_set_id}/view", status_code=302)
+    return RedirectResponse(
+        url=f"/po_sets/{po_set_id}/view?notice=" + quote(f"Attached {safe_name} to PO Set."),
+        status_code=302,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1456,6 +1459,7 @@ def quarantine_view(request: Request):
                 "unclassified_count": unclassified_count,
                 "now_ts": _now_ts(),
                 "archive_folder": str(cfg.paths.archive_folder),
+                "archive_folder_name": Path(cfg.paths.archive_folder).name,
             },
         )
 
@@ -1510,6 +1514,7 @@ def quarantine_table(request: Request):
                 "po_sets": enriched,
                 "now_ts": _now_ts(),
                 "archive_folder": str(cfg.paths.archive_folder),
+                "archive_folder_name": Path(cfg.paths.archive_folder).name,
             },
         )
 
@@ -1633,12 +1638,27 @@ def set_aside_route(doc_id: int, request: Request):
     except ValueError:  # pragma: no cover - only if the config is unusual
         where = folder.name
     where = html.escape(where)
+    eng = get_engine(cfg)
+    with Session(eng) as s_counts:
+        total_c = _holding_area_query(s_counts).count()
+        failed_c = _holding_area_query(s_counts).filter(
+            (Document.extraction_status == ExtractionStatus.failed)
+            | (Document.raw_extraction_json.like('%"ingest_rejected"%'))
+        ).count()
+        needs_po_c = total_c - failed_c
+    oob_html = (
+        f'<span class="badge badge-gray" id="unclassified-header-count" data-testid="unclassified-count" style="font-size:0.8rem;" hx-swap-oob="true">{total_c} awaiting classification</span>'
+        f'<span class="tab-count" id="count-subview-all" hx-swap-oob="true">{total_c}</span>'
+        f'<span class="tab-count" id="count-subview-needs-po" hx-swap-oob="true">{needs_po_c}</span>'
+        f'<span class="tab-count" id="count-subview-failed" hx-swap-oob="true">{failed_c}</span>'
+    )
     return HTMLResponse(
         content=(
             f'<tr id="doc-row-{doc_id}" data-testid="set-aside-result">'
             '<td colspan="6" style="padding:12px 14px; background:#f0fdf4;">'
             f"Moved to the quarantine folder: <code>{where}</code>. "
             "Fix or split it, then put it back in the input folder."
+            f'<span style="display:none;">{oob_html}</span>'
             "</td></tr>"
         )
     )
@@ -2104,10 +2124,26 @@ def reclassify_document(
 
     if request.headers.get("HX-Request") == "true":
         msg = f"Reclassified document #{doc_id} as {new_doc_type.value}"
+        eng = get_engine(cfg)
+        with Session(eng) as s_counts:
+            total_c = _holding_area_query(s_counts).count()
+            failed_c = _holding_area_query(s_counts).filter(
+                (Document.extraction_status == ExtractionStatus.failed)
+                | (Document.raw_extraction_json.like('%"ingest_rejected"%'))
+            ).count()
+            needs_po_c = total_c - failed_c
+        oob_html = (
+            f'<span class="badge badge-gray" id="unclassified-header-count" data-testid="unclassified-count" style="font-size:0.8rem;" hx-swap-oob="true">{total_c} awaiting classification</span>'
+            f'<span class="tab-count" id="count-subview-all" hx-swap-oob="true">{total_c}</span>'
+            f'<span class="tab-count" id="count-subview-needs-po" hx-swap-oob="true">{needs_po_c}</span>'
+            f'<span class="tab-count" id="count-subview-failed" hx-swap-oob="true">{failed_c}</span>'
+        )
         html = (
             f'<tr id="doc-row-{doc_id}">'
             f'<td colspan="6" style="color: #166534; background: #dcfce7; padding: 8px;">'
-            f"{msg}</td></tr>"
+            f"{msg}"
+            f'<span style="display:none;">{oob_html}</span>'
+            "</td></tr>"
         )
         return HTMLResponse(content=html)
     return RedirectResponse(url="/unclassified", status_code=302)

@@ -116,6 +116,7 @@ def test_ui_u_07_previewing_a_failed_file_explains_itself(page: Page, manifest):
     """U-07: the drawer must not render chrome's JSON viewer (F-02)."""
     held = manifest["held"]["rejected_on_arrival"]
     page.goto("/unclassified")
+    page.get_by_test_id("tab-subview-failed").click()
     row = page.locator(f'[data-testid="unclassified-row"][data-doc-id="{held["id"]}"]')
     with page.expect_response(re.compile(rf"/documents/{held['id']}/preview")) as resp:
         row.get_by_text("Preview").click()
@@ -191,6 +192,7 @@ def test_ui_u_08_a_file_rejected_on_arrival_cannot_be_routed(page: Page, manifes
     held = manifest["held"]["rejected_on_arrival"]
     assert held["po_set_id"] is None
     page.goto("/unclassified")
+    page.get_by_test_id("tab-subview-failed").click()
     row = page.locator(f'[data-testid="unclassified-row"][data-doc-id="{held["id"]}"]')
     expect(row).to_have_count(1)
     expect(row.get_by_test_id("select-doc-type")).to_have_count(0)

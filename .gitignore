@@ -125,3 +125,6 @@ tests/ui/release/artifacts/
 tests/ui/release/snapshot_failures/
 reports/
 .playwright-mcp/
+
+data/ui_test_interactive*/
+data/ui_test_census/

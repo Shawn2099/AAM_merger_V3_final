@@ -44,7 +44,7 @@
               <h3 style="color:#991b1b; margin-bottom:8px;">Move to Quarantine Folder?</h3>
               <p class="muted" style="margin-bottom:16px;">
                 This moves PO Set <strong>{{ ps.po_no_normalized }}</strong> to
-                the quarantine folder (<code>data/quarantine/</code>) and removes it from the active worklists.
+                the archive folder (<code>{{ archive_folder_name or 'archive' }}</code>) and removes it from the active worklists.
                 The database rows, every stored PDF and the audit trail are kept — nothing is destroyed.
                 An audit log entry records the quarantine dismissal.
               </p>

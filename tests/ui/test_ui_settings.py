@@ -115,8 +115,8 @@ def settings_env(tmp_path_factory):
 
 
 def _bump_mtime(path: Path) -> None:
-    stat_now = path.stat()
-    os.utime(path, ns=(stat_now.st_atime_ns, stat_now.st_mtime_ns + 1_000_000_000))
+    now = max(time.time() + 2.0, path.stat().st_mtime + 2.0)
+    os.utime(path, (now, now))
 
 
 def _delete_settings_audit_rows(env) -> None:

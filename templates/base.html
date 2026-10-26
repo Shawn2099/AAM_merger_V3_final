@@ -59,9 +59,14 @@
     </div>
 
     <div class="nav-right">
-      <a href="/health" class="nav-link" title="System Health Status" style="font-size:0.82rem;">
-        <span class="health-dot"></span>
-        <span style="color:#94a3b8;">Service Online</span>
+      <a href="/dashboard" id="nav-sync-pill" class="sync-navbar-pill" style="display:none; text-decoration:none;" title="Ingestion sync in progress — click to view on dashboard">
+        <span class="spinner" style="width:10px; height:10px; border-width:2px; border-color:#4f46e5; border-top-color:transparent;"></span>
+        <span id="nav-sync-text">Sync: 0%</span>
+      </a>
+
+      <a href="/health" id="nav-health-link" class="nav-link" title="System Health Status (Click to inspect)" style="font-size:0.82rem; display:inline-flex; align-items:center; gap:6px;">
+        <span id="health-dot" class="health-dot"></span>
+        <span id="health-text" style="color:#94a3b8;">Service Online</span>
       </a>
     </div>
   </nav>

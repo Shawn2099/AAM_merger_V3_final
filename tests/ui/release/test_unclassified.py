@@ -102,30 +102,15 @@ def test_switching_subviews_does_not_reload_the_page(page: Page):
     assert page.url.endswith("/unclassified")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Phase 4 plan specifies activeTab: 'needs_po' (the actionable inbox) as the default; "
-        "the current template opens on 'all'. Change the default or update the approved plan."
-    ),
-)
 def test_default_subview_is_the_actionable_inbox(page: Page):
     _open(page)
     expect(page.get_by_test_id("tab-subview-needs-po")).to_have_class(re.compile(r"\bactive\b"))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Accessibility: the three sub-view controls are plain <button> elements with a CSS "
-        "'active' class. They are not exposed as tabs (role=tab / aria-selected), so a screen "
-        "reader cannot tell which view is selected."
-    ),
-)
 def test_subviews_are_announced_as_tabs(page: Page):
     _open(page)
-    expect(page.get_by_test_id("tab-subview-all")).to_have_attribute("role", "tab")
-    expect(page.get_by_test_id("tab-subview-all")).to_have_attribute("aria-selected", "true")
+    expect(page.get_by_test_id("tab-subview-needs-po")).to_have_attribute("role", "tab")
+    expect(page.get_by_test_id("tab-subview-needs-po")).to_have_attribute("aria-selected", "true")
     _select_subview(page, "tab-subview-failed")
     expect(page.get_by_test_id("tab-subview-failed")).to_have_attribute("aria-selected", "true")
-    expect(page.get_by_test_id("tab-subview-all")).to_have_attribute("aria-selected", "false")
+    expect(page.get_by_test_id("tab-subview-needs-po")).to_have_attribute("aria-selected", "false")

@@ -43,7 +43,9 @@ document.addEventListener('alpine:init', () => {
     isOpen: false,
     url: '',
     title: 'Document Preview',
-    open(url, title = 'Document Preview') {
+    trigger: null,
+    open(url, title = 'Document Preview', trigger = null) {
+      this.trigger = trigger || (document.activeElement && document.activeElement !== document.body ? document.activeElement : null);
       this.url = url;
       this.title = title;
       this.isOpen = true;
@@ -51,6 +53,11 @@ document.addEventListener('alpine:init', () => {
     close() {
       this.isOpen = false;
       this.url = '';
+      const el = this.trigger;
+      this.trigger = null;
+      if (el && typeof el.focus === 'function') {
+        el.focus();
+      }
     },
   });
 
@@ -449,30 +456,157 @@ document.addEventListener('keydown', function (e) {
 });
 
 
-// Keep the Scan button honest. `/sync/status` is the authority; the POST
-// returns as soon as the background thread starts, so a one-shot indicator
-// stayed enabled while the sweep was still running.
-async function refreshSyncState() {
-  if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
-  if (typeof fetch !== 'function') return;
-  const btn = document.getElementById('sync-btn');
-  if (!btn) return;
-  try {
-    const response = await fetch('/sync/status', { cache: 'no-store' });
-    if (!response.ok) return;
-    const state = await response.json();
-    btn.disabled = !!state.running;
-    const spinner = document.getElementById('sync-spinner');
-    if (spinner) spinner.style.display = state.running ? 'inline-flex' : 'none';
-  } catch (e) {
-    /* a status poll failure must not break the dashboard */
+// ---------------------------------------------------------------------------
+// Real-time Ingestion Progress & Service Health Polling (FR-CONC-3)
+// ---------------------------------------------------------------------------
+
+let _wasSyncRunning = false;
+let _completionHideTimeout = null;
+
+function formatSeconds(sec) {
+  if (!sec || sec < 0) return '0s';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  if (m === 0) return s + 's';
+  return m + 'm ' + s + 's';
+}
+
+function updateHealthIndicator(isOnline) {
+  const dot = document.getElementById('health-dot');
+  const text = document.getElementById('health-text');
+  if (dot) {
+    if (isOnline) {
+      dot.classList.remove('offline');
+    } else {
+      dot.classList.add('offline');
+    }
+  }
+  if (text) {
+    text.textContent = isOnline ? 'Service Online' : 'Service Offline';
+    text.style.color = isOnline ? '#94a3b8' : '#ef4444';
   }
 }
+
+async function refreshSyncState() {
+  if (typeof document === 'undefined') return;
+  if (typeof fetch !== 'function') return;
+
+  try {
+    const response = await fetch('/sync/status', { cache: 'no-store' });
+    if (!response.ok) {
+      updateHealthIndicator(false);
+      return;
+    }
+    updateHealthIndicator(true);
+
+    const state = await response.json();
+    const isRunning = !!state.running;
+
+    // 1. Update Scan Button & Small Spinner (Dashboard)
+    const btn = document.getElementById('sync-btn');
+    if (btn) btn.disabled = isRunning;
+    const spinner = document.getElementById('sync-spinner');
+    if (spinner) spinner.style.display = isRunning ? 'inline-flex' : 'none';
+
+    // 2. Update Global Navbar Sync Pill
+    const navPill = document.getElementById('nav-sync-pill');
+    const navText = document.getElementById('nav-sync-text');
+    if (navPill && navText) {
+      if (isRunning) {
+        navPill.style.display = 'inline-flex';
+        navText.textContent = `Sync: ${state.percent || 0}% (${state.current || 0}/${state.total || 0})`;
+      } else {
+        navPill.style.display = 'none';
+      }
+    }
+
+    // 3. Update Dashboard Progress Card
+    const card = document.getElementById('sync-progress-card');
+    if (card) {
+      if (isRunning) {
+        _wasSyncRunning = true;
+        if (_completionHideTimeout) {
+          clearTimeout(_completionHideTimeout);
+          _completionHideTimeout = null;
+        }
+        card.style.display = 'block';
+
+        // Phase Title
+        const phaseTitle = document.getElementById('sync-progress-phase');
+        if (phaseTitle) {
+          if (state.phase === 'scanning') {
+            phaseTitle.textContent = 'Scanning Input Folder & Checking File Stability…';
+          } else if (state.phase === 'reconciling') {
+            phaseTitle.textContent = 'Grouping Documents & 3-Way Reconciling…';
+          } else {
+            phaseTitle.textContent = `AI Vision Extraction in Progress (${state.current || 0} of ${state.total || 0} files)`;
+          }
+        }
+
+        // Percent & Progress Bar
+        const percent = Math.min(100, Math.max(0, Number(state.percent) || 0));
+        const percentEl = document.getElementById('sync-progress-percent');
+        if (percentEl) percentEl.textContent = percent + '%';
+        const bar = document.getElementById('sync-progress-bar');
+        if (bar) bar.style.width = percent + '%';
+
+        // Current File & Count
+        const currentFileEl = document.getElementById('sync-current-file');
+        if (currentFileEl) currentFileEl.textContent = state.current_file || 'Preparing…';
+        const countInfoEl = document.getElementById('sync-count-info');
+        if (countInfoEl) countInfoEl.textContent = `(${state.current || 0} of ${state.total || 0} files)`;
+
+        // Timers & Counters
+        const elapsedEl = document.getElementById('sync-elapsed');
+        if (elapsedEl) elapsedEl.textContent = formatSeconds(state.elapsed_seconds);
+        const etaEl = document.getElementById('sync-eta');
+        if (etaEl) {
+          if (state.current > 0 && state.eta_seconds > 0) {
+            etaEl.textContent = '~' + formatSeconds(state.eta_seconds);
+          } else if (state.current === 0) {
+            etaEl.textContent = 'calculating…';
+          } else {
+            etaEl.textContent = 'almost done';
+          }
+        }
+        const extractedEl = document.getElementById('sync-extracted');
+        if (extractedEl) extractedEl.textContent = state.extracted || 0;
+        const errorsEl = document.getElementById('sync-errors');
+        if (errorsEl) errorsEl.textContent = state.errors || 0;
+      } else if (_wasSyncRunning) {
+        // Just transitioned from running -> finished
+        _wasSyncRunning = false;
+        const phaseTitle = document.getElementById('sync-progress-phase');
+        if (phaseTitle) phaseTitle.textContent = '✅ Ingestion Sync Complete';
+        const percentEl = document.getElementById('sync-progress-percent');
+        if (percentEl) percentEl.textContent = '100%';
+        const bar = document.getElementById('sync-progress-bar');
+        if (bar) {
+          bar.style.width = '100%';
+          bar.style.background = '#10b981';
+        }
+        const spinnerIcon = document.getElementById('sync-spinner-icon');
+        if (spinnerIcon) spinnerIcon.style.display = 'none';
+
+        _completionHideTimeout = setTimeout(() => {
+          if (card) card.style.display = 'none';
+          if (bar) bar.style.background = 'var(--primary)';
+          if (spinnerIcon) spinnerIcon.style.display = 'inline-block';
+        }, 8000);
+      } else {
+        card.style.display = 'none';
+      }
+    }
+  } catch (e) {
+    updateHealthIndicator(false);
+  }
+}
+
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   window.addEventListener('load', () => {
     refreshSyncState();
     if (typeof setInterval === 'function') {
-      setInterval(refreshSyncState, 5000);
+      setInterval(refreshSyncState, 3500);
     }
   });
 }

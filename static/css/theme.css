@@ -181,6 +181,30 @@ nav.app-navbar {
   background: #10b981;
   box-shadow: 0 0 8px #10b981;
   display: inline-block;
+  transition: background 200ms ease, box-shadow 200ms ease;
+}
+
+.health-dot.offline {
+  background: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+}
+
+.sync-navbar-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: #4f46e5;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  transition: all 150ms ease;
+}
+
+.sync-navbar-pill:hover {
+  background: rgba(99, 102, 241, 0.2);
 }
 
 /* Card */

@@ -696,6 +696,10 @@ def sync_flow(cfg_path: str | None = None, held_lock=None) -> dict:
         from app.services.extraction import end_provider_breaker
 
         end_provider_breaker()
+        with contextlib.suppress(Exception):
+            from app.services.sync_progress import progress_tracker
+
+            progress_tracker.finish()
         if own_lock is not None:
             release_sync_lock(own_lock)
 
@@ -756,6 +760,11 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     errors = 0
     touched_po_set_ids: set[int] = set()
 
+    with contextlib.suppress(Exception):
+        from app.services.sync_progress import progress_tracker
+
+        progress_tracker.start(len(files), phase="scanning")
+
     # Stability poll (FR-4.5) for the whole batch, taken together.
     stable_map = _poll_stability(files, cfg)
     heartbeat_sync_lock(cfg_path)
@@ -775,8 +784,12 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     #: Documents the VLM was called for in THIS pass; recovery must not read them again.
     tried_ids: list[int] = []
     deferred_400: list[tuple[int, Path | None]] = []
-    for f in files:
+    for idx, f in enumerate(files, 1):
         heartbeat_sync_lock(cfg_path)
+        with contextlib.suppress(Exception):
+            from app.services.sync_progress import progress_tracker
+
+            progress_tracker.update_file(idx, f.name, extracted=extracted, errors=errors)
         if provider_breaker_tripped():
             # Several documents in a row were rejected with an HTTP 400: the
             # request is wrong, not the documents. Leave the rest in input.
@@ -883,6 +896,14 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
 
     _flush_deferred_quarantines(deferred_400, cfg, eng, touched_po_set_ids)
 
+    with contextlib.suppress(Exception):
+        from app.services.sync_progress import progress_tracker
+
+        progress_tracker.set_phase(
+            "reconciling",
+            f"Extraction complete ({extracted}/{len(files)}). Reconciling PO sets and checking quantities…",
+        )
+
     # Run recovery flow as a Prefect subflow (or directly if outside Prefect context)
     from prefect.context import FlowRunContext
 
@@ -905,7 +926,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     total_processed = processed + rec_res.get("processed", 0)
     total_errors = errors + scan_errors + rec_res.get("errors", 0)
 
-    return {
+    summary_result = {
         "processed": total_processed,
         "extracted": extracted + rec_res.get("extracted", 0),
         "errors": total_errors,
@@ -915,3 +936,9 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
         "vlm_halt_reason": provider_breaker_reason(),
         "unstable": unstable,
     }
+    with contextlib.suppress(Exception):
+        from app.services.sync_progress import progress_tracker
+
+        progress_tracker.finish(summary_result)
+
+    return summary_result
