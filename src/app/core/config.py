@@ -373,6 +373,12 @@ class AppConfig(BaseSettings):
                 p.mkdir(parents=True, exist_ok=True)
                 logger.info("Initialized required path: %s", p)
         if v.database_path and isinstance(v.database_path, Path):
+            db_str = str(v.database_path).replace("\\", "/")
+            if db_str.startswith("//"):
+                raise ValueError(
+                    f"database_path ({v.database_path}) cannot be a UNC or network share path. "
+                    "SQLite WAL mode requires local NTFS storage."
+                )
             v.database_path.parent.mkdir(parents=True, exist_ok=True)
         return v
 

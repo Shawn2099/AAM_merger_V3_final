@@ -79,8 +79,19 @@ if (-not (Test-Path $PythonExe)) {
 $hasUv = Get-Command uv -ErrorAction SilentlyContinue
 if ($hasUv) {
     & uv sync
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: Dependency sync failed (uv sync exited with code $LASTEXITCODE)." -ForegroundColor Red
+        exit 1
+    }
 } elseif ($PythonExe -and (Test-Path "requirements.txt")) {
     & $PythonExe -m pip install -r requirements.txt --quiet
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: Dependency installation failed (pip exited with code $LASTEXITCODE)." -ForegroundColor Red
+        exit 1
+    }
+} else {
+    Write-Host "ERROR: Neither 'uv' nor 'requirements.txt' found to install dependencies." -ForegroundColor Red
+    exit 1
 }
 
 $migrateScript = Join-Path $ProjectRoot "scripts\migrate_db.py"
