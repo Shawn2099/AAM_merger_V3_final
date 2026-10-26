@@ -952,6 +952,9 @@ table.data-table tbody tr:hover td {
   .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .table-container { overflow-x: auto; }
 }
+@media (max-width: 600px) {
+  .nav-links { flex-wrap: wrap; }
+}
 
 /* Interactive Customs Toggle Button Switch */
 .customs-toggle-btn {

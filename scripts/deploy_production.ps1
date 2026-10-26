@@ -312,27 +312,56 @@ Write-Host "  Windows Services installed and started successfully." -ForegroundC
 # ---------------------------------------------------------------------------
 Write-Host "[7/9] Registering Prefect midnight sync schedule..." -ForegroundColor Cyan
 if (-not $DryRun) {
-    $env:PREFECT_API_URL = "http://127.0.0.1:4200/api"
+    $prefectApi = "http://127.0.0.1:4200/api"
+    $env:PREFECT_API_URL = $prefectApi
     $deployPrefectScript = Join-Path $ProjectRoot "scripts\deploy_prefect.py"
 
-    # Give Prefect Server a moment to bind
-    Start-Sleep -Seconds 3
+    # Wait for Prefect Server API to be healthy (first boot/migrations can take 15-30s)
+    $apiUp = $false
+    $healthUrl = $prefectApi.TrimEnd('/') + "/health"
+    Write-Host "  Waiting for Prefect API to bind at $healthUrl..." -ForegroundColor Gray
+    for ($i = 1; $i -le 60; $i++) {
+        try {
+            $r = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 2
+            if ($r.StatusCode -eq 200) { $apiUp = $true; break }
+        } catch {
+            Start-Sleep -Seconds 1
+        }
+    }
 
-    $prevEap = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $prefOut = & $PythonExe $deployPrefectScript 2>&1
-    $prefCode = $LASTEXITCODE
-    $ErrorActionPreference = $prevEap
+    if ($apiUp) {
+        # Ensure work pool exists before registering deployment
+        Write-Host "  Ensuring Prefect work pool 'aam-merger-process-pool' exists..." -ForegroundColor Gray
+        $poolOut = & $PythonExe -m prefect work-pool create aam-merger-process-pool --type process --overwrite 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  Notice on work pool: $poolOut" -ForegroundColor Yellow
+        }
 
-    if ($prefCode -ne 0) {
-        Write-Host "WARNING: Prefect deployment returned code $prefCode. Server might still be initializing." -ForegroundColor Yellow
-        foreach ($l in @($prefOut)) { Write-Host "  $l" -ForegroundColor Yellow }
-        Write-Host "  You can re-run 'uv run python scripts/deploy_prefect.py' once the server is ready." -ForegroundColor Yellow
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $prefOut = & $PythonExe $deployPrefectScript 2>&1
+        $prefCode = $LASTEXITCODE
+        $ErrorActionPreference = $prevEap
+
+        if ($prefCode -ne 0) {
+            Write-Host "WARNING: Prefect deployment returned code $($prefCode):" -ForegroundColor Yellow
+            foreach ($l in @($prefOut)) { Write-Host "  $l" -ForegroundColor Yellow }
+            Write-Host "  You can re-run 'uv run python scripts/deploy_prefect.py' once the server is ready." -ForegroundColor Yellow
+        } else {
+            Write-Host "  Prefect midnight sync registered successfully." -ForegroundColor Green
+            # Restart the worker so it connects to the created work pool and picks up the deployment
+            $workerSvc = Get-Service -Name "AAMMerger-Worker" -ErrorAction SilentlyContinue
+            if ($workerSvc) {
+                Restart-Service -Name "AAMMerger-Worker" -Force -ErrorAction SilentlyContinue
+                Write-Host "  Worker restarted against work pool." -ForegroundColor Green
+            }
+        }
     } else {
-        Write-Host "  Prefect midnight sync registered successfully." -ForegroundColor Green
+        Write-Host "WARNING: Prefect Server did not respond at $healthUrl within 60s." -ForegroundColor Yellow
+        Write-Host "  The service may still be initializing. Run 'scripts/deploy_prefect.py' once online." -ForegroundColor Yellow
     }
 } else {
-    Write-Host "[DRY-RUN] Would register Prefect deployment with PREFECT_API_URL=http://127.0.0.1:4200/api" -ForegroundColor Magenta
+    Write-Host "[DRY-RUN] Would wait for Prefect API, create work pool, register deployment, and restart worker." -ForegroundColor Magenta
 }
 
 # ---------------------------------------------------------------------------

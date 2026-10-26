@@ -90,20 +90,44 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# 6. Re-register Prefect Deployment
-Write-Host "[5/6] Updating Prefect deployment..." -ForegroundColor Cyan
+# 6. Start Services
+Write-Host "[5/6] Starting services..." -ForegroundColor Cyan
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $manageScript -Action start
+
+# 7. Re-register Prefect Deployment & Verify Health
+Write-Host "[6/6] Updating Prefect deployment & verifying health..." -ForegroundColor Cyan
+$prefectApi = "http://127.0.0.1:4200/api"
+$env:PREFECT_API_URL = $prefectApi
+$healthUrl = $prefectApi.TrimEnd('/') + "/health"
+
+# Wait for Prefect API to respond
+for ($i = 1; $i -le 30; $i++) {
+    try {
+        $r = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 2
+        if ($r.StatusCode -eq 200) { break }
+    } catch {
+        Start-Sleep -Seconds 1
+    }
+}
+
 $deployPrefScript = Join-Path $ProjectRoot "scripts\deploy_prefect.py"
-$env:PREFECT_API_URL = "http://127.0.0.1:4200/api"
 $prevEap = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
-& $PythonExe $deployPrefScript 2>$null
+$prefOut = & $PythonExe $deployPrefScript 2>&1
+$prefCode = $LASTEXITCODE
 $ErrorActionPreference = $prevEap
+if ($prefCode -ne 0) {
+    Write-Host "WARNING: Prefect deployment returned code $($prefCode):" -ForegroundColor Yellow
+    foreach ($l in @($prefOut)) { Write-Host "  $l" -ForegroundColor Yellow }
+} else {
+    Write-Host "  Prefect midnight sync updated successfully." -ForegroundColor Green
+    $workerSvc = Get-Service -Name "AAMMerger-Worker" -ErrorAction SilentlyContinue
+    if ($workerSvc) {
+        Restart-Service -Name "AAMMerger-Worker" -Force -ErrorAction SilentlyContinue
+    }
+}
 
-# 7. Start Services & Verify
-Write-Host "[6/6] Restarting services & verifying..." -ForegroundColor Cyan
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $manageScript -Action start
-Start-Sleep -Seconds 3
-
+Start-Sleep -Seconds 2
 $verifyScript = Join-Path $ProjectRoot "scripts\verify_deployment.ps1"
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $verifyScript
 

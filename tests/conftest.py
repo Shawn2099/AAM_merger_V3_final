@@ -99,7 +99,7 @@ def _session_paths() -> dict[str, str]:
 
 
 def _is_placeholder(path) -> bool:
-    """True when a path points into the repository's own data folder.
+    r"""True when a path points into the repository's own data folder.
 
     Those are the relative placeholders of `config.example.yaml`
     (`./data/output` and friends). They are unsafe: the suite would write

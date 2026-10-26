@@ -21,7 +21,6 @@ from app.api.routes.po_sets import _scrub_paths
 from app.api.templating import templates
 from app.core.config import load_config
 from app.core.database import get_engine
-from app.core.http_errors import wants_html
 from app.models import (
     AuditAction,
     AuditLog,

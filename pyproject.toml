@@ -78,6 +78,8 @@ ignore = ["D", "COM812", "ISC001"]
 "src/app/services/customs.py" = ["E501"]
 "src/app/flows/sync.py" = ["E501"]
 "src/app/services/extraction.py" = ["E501", "RUF001"]
+"src/app/api/routes/dashboard.py" = ["E501"]
+"src/app/services/quarantine.py" = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src", "app", "release_helpers"]
