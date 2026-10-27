@@ -1,4 +1,4 @@
-"""Deploy sync_flow with midnight cron schedule (FR-4.2).
+"""Deploy sync_flow with 11:00 AM daily cron schedule (FR-4.2).
 
 Run once during initial deployment or updates:
     uv run python scripts/deploy_prefect.py
@@ -18,11 +18,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from app.core.config import load_config  # noqa: E402
 from app.flows.sync import sync_flow  # noqa: E402
 
-CRON = "0 0 * * *"
+CRON = "0 11 * * *"
 
 
 def _schedule(cfg):
-    """Cron at the site's local midnight, IST when nothing is configured.
+    """Cron at the site's local 11:00 AM, IST when nothing is configured.
 
     Always return a CronSchedule object: `to_deployment(cron=...)` takes a
     string, while `to_deployment(schedule=...)` takes a schedule object. The
@@ -71,7 +71,7 @@ def deploy() -> None:
         name="aam-midnight-sync",
         schedule=schedule,
         work_pool_name=pool_name,
-        description="Nightly automated ingestion scan for AAM Merger V3",
+        description="Daily 11:00 AM automated ingestion scan for AAM Merger V3",
         parameters={"cfg_path": cfg_path},
         job_variables={"working_dir": str(ROOT), "env": {"AAM_CONFIG_PATH": cfg_path}},
     )
@@ -79,7 +79,7 @@ def deploy() -> None:
     print(
         f"[OK] Prefect deployment 'aam-midnight-sync' registered successfully "
         f"(ID: {deployment_id}, Pool: {pool_name}, "
-        + (f"Schedule: {CRON} {tz_note})" if nightly else "nightly sweep OFF: no schedule)")
+        + (f"Schedule: {CRON} {tz_note})" if nightly else "daily sweep OFF: no schedule)")
     )
 
 

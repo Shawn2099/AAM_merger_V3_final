@@ -38,9 +38,9 @@ Get-ChildItem -Recurse *.ps1 | Unblock-File
    was created by `create_all`, so it has no `alembic_version` and Alembic
    would try to create existing tables. The script detects the schema, writes a
    pre-migration backup, stamps the proven revision, then upgrades.)
-5. **Prefect Deployment**: Registers the midnight sync schedule (`0 0 * * *`).
+5. **Prefect Deployment**: Registers the daily sync schedule (`0 11 * * *` at 11:00 AM).
 6. **Firewall**: Adds an inbound Windows Firewall rule for TCP port 8000 (if `-OpenFirewall` is passed).
-7. **Daily Backups**: Schedules a daily Windows Scheduled Task at 01:00 AM (if `-ScheduleBackup` is passed).
+7. **Daily Backups**: Schedules a daily Windows Scheduled Task at 11:30 AM (if `-ScheduleBackup` is passed).
 8. **NSSM Services**: Automatically downloads NSSM (if missing) and installs `AAMMerger-Web` and `AAMMerger-Worker`.
 9. **Health Verification**: Performs an automated HTTP smoke check against `http://127.0.0.1:8000/health`.
 
