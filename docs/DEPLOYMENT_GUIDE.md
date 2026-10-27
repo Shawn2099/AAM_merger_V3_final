@@ -66,7 +66,7 @@ AAM Merger runs as three dedicated Windows Services configured to start automati
 
 ## 4. Automated Daily Database Backups (NFR-6)
 
-- **Schedule:** Runs every night at **01:00 AM** automatically via Windows Task Scheduler task named `AAMMerger-DailyBackup`.
+- **Schedule:** Runs every day at **11:30 AM** automatically via Windows Task Scheduler task named `AAMMerger-DailyBackup`.
 - **Target Folder:** `data/backup/`
 - **Mechanism:** Uses SQLite online streaming backup API (`VACUUM INTO` / `sqlite3_backup`). Never locks the live database; runs safely while the web dashboard and worker are active.
 - **Verification:** Runs `PRAGMA integrity_check` on the backup copy before finalizing.

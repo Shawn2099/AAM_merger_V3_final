@@ -15,7 +15,7 @@
            - AAMMerger-Worker (Prefect background sync worker)
            - AAMMerger-Web (FastAPI / Uvicorn dashboard)
       9. Deploys the Prefect midnight sync schedule (scripts/deploy_prefect.py).
-     10. Registers the automated daily database backup task in Windows Task Scheduler (01:00 AM daily).
+     10. Registers the automated daily database backup task in Windows Task Scheduler (11:30 AM daily).
      11. Adds a Windows Firewall rule to allow LAN traffic on port 8000.
      12. Starts all services and verifies live health check (/health & /dashboard).
 
@@ -371,7 +371,7 @@ if (-not $DryRun) {
 # ---------------------------------------------------------------------------
 # 9. Register Automated Daily Backup Task
 # ---------------------------------------------------------------------------
-Write-Host "[8/9] Configuring daily automated database backup (01:00 AM)..." -ForegroundColor Cyan
+Write-Host "[8/9] Configuring daily automated database backup (11:30 AM)..." -ForegroundColor Cyan
 if (-not $SkipBackupTask) {
     $taskName = "AAMMerger-DailyBackup"
     $backupScript = Join-Path $ProjectRoot "scripts\backup_db.ps1"
@@ -379,10 +379,10 @@ if (-not $SkipBackupTask) {
 
     if (-not $DryRun) {
         try {
-            # Use schtasks.exe to create a reliable daily task at 01:00 AM
-            $schOutput = & schtasks.exe /create /tn $taskName /tr $taskAction /sc daily /st 01:00 /ru "SYSTEM" /f 2>&1
+            # Use schtasks.exe to create a reliable daily task at 11:30 AM (staggered after 11:00 AM sync)
+            $schOutput = & schtasks.exe /create /tn $taskName /tr $taskAction /sc daily /st 11:30 /ru "SYSTEM" /f 2>&1
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "  Windows Scheduled Task '$taskName' created (Runs daily at 01:00 AM under SYSTEM)." -ForegroundColor Green
+                Write-Host "  Windows Scheduled Task '$taskName' created (Runs daily at 11:30 AM under SYSTEM)." -ForegroundColor Green
             } else {
                 Write-Host "  Notice on Scheduled Task: $schOutput" -ForegroundColor Yellow
             }
@@ -390,7 +390,7 @@ if (-not $SkipBackupTask) {
             Write-Host "  Warning: Could not schedule backup task automatically: $($_.Exception.Message)" -ForegroundColor Yellow
         }
     } else {
-        Write-Host "[DRY-RUN] Would schedule task '$taskName' to run scripts/backup_db.ps1 daily at 01:00 AM" -ForegroundColor Magenta
+        Write-Host "[DRY-RUN] Would schedule task '$taskName' to run scripts/backup_db.ps1 daily at 11:30 AM" -ForegroundColor Magenta
     }
 } else {
     Write-Host "  Skipping backup task registration (-SkipBackupTask)." -ForegroundColor Gray

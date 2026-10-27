@@ -21,7 +21,7 @@
 .PARAMETER OpenFirewall
     Switch to automatically add a Windows Firewall inbound rule for the web port.
 .PARAMETER ScheduleBackup
-    Switch to register a daily Windows Scheduled Task for SQLite backups (01:00 AM).
+    Switch to register a daily Windows Scheduled Task for SQLite backups (11:30 AM).
 .PARAMETER WithPrefectServer
     Switch to install a local self-hosted Prefect server as a Windows Service.
 .PARAMETER PrefectApiUrl
@@ -299,23 +299,23 @@ if ($ScheduleBackup) {
     $backupDir = Join-Path $ProjectRoot "data\development\snapshots\db"
     $backupArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$backupScript`" -RetentionDays 0 -BackupDir `"$backupDir`""
     $action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument $backupArgs -WorkingDirectory $ProjectRoot
-    $trigger = New-ScheduledTaskTrigger -Daily -At 1am
+    $trigger = New-ScheduledTaskTrigger -Daily -At 11:30am
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
-    Write-Host "  Registered scheduled task '$taskName' at 01:00 AM daily (no pruning)." -ForegroundColor Green
+    Write-Host "  Registered scheduled task '$taskName' at 11:30 AM daily (no pruning)." -ForegroundColor Green
 
     # The development snapshot runs after the DB backup and copies logs/files.
     $snapshotTask = "AAMMerger-DevelopmentSnapshot"
     $snapshotScript = Join-Path $ProjectRoot "scripts\development_snapshot.ps1"
     $snapshotArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$snapshotScript`""
     $snapshotAction = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument $snapshotArgs -WorkingDirectory $ProjectRoot
-    $snapshotTrigger = New-ScheduledTaskTrigger -Daily -At 1:30am
+    $snapshotTrigger = New-ScheduledTaskTrigger -Daily -At 12:00pm
     Unregister-ScheduledTask -TaskName $snapshotTask -Confirm:$false -ErrorAction SilentlyContinue
     Register-ScheduledTask -TaskName $snapshotTask -Action $snapshotAction -Trigger $snapshotTrigger -Principal $principal -Settings $settings | Out-Null
-    Write-Host "  Registered scheduled task '$snapshotTask' at 01:30 AM daily (copy-only)." -ForegroundColor Green
+    Write-Host "  Registered scheduled task '$snapshotTask' at 12:00 PM daily (copy-only)." -ForegroundColor Green
 } else {
     Write-Host "[5/8] Skipping Scheduled Backup Task registration (-ScheduleBackup not set)." -ForegroundColor Gray
 }

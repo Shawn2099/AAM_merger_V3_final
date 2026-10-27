@@ -43,7 +43,7 @@ def test_schedule_carries_the_configured_timezone():
 
     schedule = module._schedule(cfg)
 
-    assert schedule.cron == "0 0 * * *"
+    assert schedule.cron == "0 11 * * *"
     assert schedule.timezone == "Asia/Kolkata"
 
 
@@ -52,7 +52,7 @@ def test_schedule_is_a_cron_schedule_and_defaults_to_ist():
     cfg = SimpleNamespace(prefect=SimpleNamespace(schedule_timezone=None))
 
     schedule = module._schedule(cfg)
-    assert schedule.cron == "0 0 * * *"
+    assert schedule.cron == "0 11 * * *"
     assert schedule.timezone == "Asia/Kolkata"
 
 
@@ -75,7 +75,7 @@ def test_to_deployment_accepts_the_schedule_object():
     )
     assert len(deployment.schedules) == 1
     built = deployment.schedules[0].schedule
-    assert built.cron == "0 0 * * *"
+    assert built.cron == "0 11 * * *"
     assert built.timezone == "Asia/Kolkata"
 
 

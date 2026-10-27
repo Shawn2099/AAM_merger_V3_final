@@ -83,7 +83,7 @@ prefect:
   work_pool_name: "aam-merger-process-pool"
   # Not enforced: extraction is sequential. Do not treat it as a concurrency control.
   max_concurrent_extraction_tasks: 3
-  # The midnight sync runs at 00:00 in this zone. IST is the client default and
+  # The scheduled daily sync runs at 11:00 AM in this zone. IST is the client default and
   # is also what `scripts/deploy_prefect.py` falls back to when the key is
   # absent — an unset key does NOT mean UTC.
   schedule_timezone: "Asia/Kolkata"
