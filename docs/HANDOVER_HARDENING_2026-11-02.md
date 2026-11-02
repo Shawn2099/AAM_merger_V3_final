@@ -147,11 +147,15 @@ handover risk.
    `open(stream=..., filetype="pdf")` / `get_pixmap(dpi=...).tobytes("png")`
    calls work unchanged (checked in an isolated environment). Upgrading does
    **not** change the licence: 2.1 is still AGPL-3.0 or Artifex commercial.
-   The licence choice therefore remains: buy a commercial licence, accept
-   AGPL, or replace the renderer. `pypdfium2` 5.14 (BSD-3/Apache-2.0) is the
-   viable replacement, but its raster output must be compared against the
-   real STS/IRE/Ensign samples before switching; a blind swap could change
-   what the VLM reads.
+   A full renderer selection (PDF Oxide, pypdfium2, pdf.js, Poppler,
+   Ghostscript, PDFBox and the rest) is in
+   [`PDF_RENDERER_EVALUATION_2026-11-03.md`](./PDF_RENDERER_EVALUATION_2026-11-03.md).
+   Decision: **pypdfium2 5.14.0 is the intended permissive replacement**
+   (BSD/Apache, 693/695 real PDFs, low memory), pending the implementation and
+   WS2016/VLM gates in that document. PDF Oxide 0.3.78 is rejected for now:
+   30/695 real files fail to render and user-password PDFs render blank pages
+   without raising. The licence choice is therefore: fund the pypdfium2
+   migration, buy an Artifex licence, or accept AGPL.
 3. **Real install, reboot and restore drill.** A full NSSM install requires an
    elevated shell; this workstation session is not elevated, so the service
    install and reboot were **not** run here. What was run: the NSSM installer

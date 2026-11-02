@@ -61,6 +61,9 @@ reconciliation, grouping or the reporting routes.
 - [`docs/HANDOVER_HARDENING_2026-11-02.md`](./docs/HANDOVER_HARDENING_2026-11-02.md) —
   authentication, parallel extraction, and the remaining owner decisions
   (TLS, PyMuPDF licence, restore drill, installer consolidation).
+- [`docs/PDF_RENDERER_EVALUATION_2026-11-03.md`](./docs/PDF_RENDERER_EVALUATION_2026-11-03.md) —
+  full library comparison and the pypdfium2 replacement decision (not yet
+  implemented).
 - [`docs/TESTER_GUIDE.md`](./docs/TESTER_GUIDE.md) — the one-page guide for the
   people who will use the dashboard.
 - [`docs/PILOT_RELEASE_2026-10-23.md`](./docs/PILOT_RELEASE_2026-10-23.md) —

@@ -180,6 +180,14 @@ cp config.example.yaml config.yaml  # then edit paths/model/thresholds; set OPEN
 
 Exact patch versions to pin; LAN IP/firewall for `server.host`/`port` (config-only, no code change). DB backup cadence is now 13:00 daily (development snapshot 15:00) and was verified by a backup/restore drill.
 
+**PDF renderer replacement is evaluated but NOT implemented.** Read
+[`docs/PDF_RENDERER_EVALUATION_2026-11-03.md`](docs/PDF_RENDERER_EVALUATION_2026-11-03.md).
+Decision: replace PyMuPDF (AGPL/commercial) with **pypdfium2 5.14.0** (BSD/Apache),
+with a process-wide PDFium lock and the 8-number-MediaBox repair. PDF Oxide 0.3.78
+is rejected (30/695 real files fail; password-protected PDFs render blank).
+Remaining gates: WS2016 clean-image render, 2-core timing, and a paid VLM A/B
+on 20–30 real documents before removing PyMuPDF from runtime deps.
+
 ---
 
 *This file is the agent's entry point. New agents: read SPEC §1 first, then this file, then `find-skills`/`gitnexus-guide` as needed. When stuck: ask.*
