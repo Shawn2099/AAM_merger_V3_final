@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parent.parent
 # Add src to pythonpath so app can be imported
 sys.path.insert(0, str(ROOT / "src"))
 
+from prefect.types.entrypoint import EntrypointType  # noqa: E402
+
 from app.core.config import load_config  # noqa: E402
 from app.flows.sync import sync_flow  # noqa: E402
 
@@ -67,13 +69,27 @@ def deploy() -> None:
     schedule = _schedule(cfg) if nightly else None
     tz_note = (schedule.timezone or "UTC") if schedule is not None else "none"
 
+    # MODULE_PATH, not the default FILE_PATH. A protected release ships
+    # `src/app.cp311-win_amd64.pyd` and no `app/flows/sync.py`; Prefect's
+    # FILE_PATH entrypoint would name a file that does not exist. The module
+    # entrypoint also works for an ordinary source checkout because this script
+    # has already put `src/` on sys.path.
+    #
+    # PYTHONPATH is repeated in the job environment because a process worker
+    # starts the flow in a child interpreter: the child must be able to import
+    # the compiled app package even when the worker service's environment was
+    # installed by an older version of the installer.
     deployment = sync_flow.to_deployment(
         name="aam-midnight-sync",
         schedule=schedule,
         work_pool_name=pool_name,
         description="Daily 11:00 AM automated ingestion scan for AAM Merger V3",
         parameters={"cfg_path": cfg_path},
-        job_variables={"working_dir": str(ROOT), "env": {"AAM_CONFIG_PATH": cfg_path}},
+        entrypoint_type=EntrypointType.MODULE_PATH,
+        job_variables={
+            "working_dir": str(ROOT),
+            "env": {"AAM_CONFIG_PATH": cfg_path, "PYTHONPATH": str(ROOT / "src")},
+        },
     )
     deployment_id = deployment.apply()
     print(

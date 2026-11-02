@@ -295,6 +295,12 @@ Set `server.allowed_hosts` first (section 2), or the installer refuses. The inst
 skipped `git pull` because the client has no git, copy the new files over and
 run the same command.
 
+For a **protected (compiled) handover**, "the new files" means the contents of
+`dist/aam-merger-protected-<version>.zip`, not a git checkout. Stop the
+services, copy the release over the install directory, then run
+`setup_test_rig.ps1`. The release has no `.git`, so `update_production.ps1`
+skips the pull. See [`SOURCE_PROTECTION.md`](./SOURCE_PROTECTION.md).
+
 ---
 
 ## 9. Troubleshooting

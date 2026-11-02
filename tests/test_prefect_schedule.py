@@ -87,6 +87,8 @@ def test_deployment_sets_working_dir_and_config_path(monkeypatch):
     """
     import os
 
+    from prefect.types.entrypoint import EntrypointType
+
     from app.flows.sync import sync_flow
 
     module = _load_deploy_module()
@@ -114,9 +116,13 @@ def test_deployment_sets_working_dir_and_config_path(monkeypatch):
     root = Path(module.ROOT)
     assert root == ROOT
     assert captured["cwd"] == str(ROOT)
+    # A compiled release has no app/flows/sync.py: the deployment must use the
+    # module entrypoint, and the worker's child interpreter needs src/ on path.
+    assert captured["entrypoint_type"] is EntrypointType.MODULE_PATH
     jv = captured["job_variables"]
     assert jv["working_dir"] == str(ROOT)
     assert jv["env"]["AAM_CONFIG_PATH"] == str(ROOT / "config.yaml")
+    assert jv["env"]["PYTHONPATH"] == str(ROOT / "src")
     assert captured["parameters"]["cfg_path"] == str(ROOT / "config.yaml")
 
 

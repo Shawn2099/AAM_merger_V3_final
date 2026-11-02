@@ -122,6 +122,15 @@ if (Test-Path $PythonExe) {
     exit 1
 }
 
+$protectedPyd = Get-ChildItem (Join-Path $ProjectRoot "src") -Filter "app.cp*.pyd" -ErrorAction SilentlyContinue
+if ($protectedPyd -and (Test-Path $PythonExe)) {
+    $pyVersion = & $PythonExe -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+    if ($pyVersion.Trim() -ne "3.11") {
+        Write-Error "Protected release: src\$($protectedPyd[0].Name) requires CPython 3.11 x64, but $PythonExe is Python $pyVersion. Install Python 3.11, delete .venv, and re-run."
+        exit 1
+    }
+}
+
 # ---------------------------------------------------------------------------
 # 3. Environment Variables & OpenRouter API Key
 # ---------------------------------------------------------------------------

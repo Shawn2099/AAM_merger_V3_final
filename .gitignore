@@ -51,7 +51,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.pyd
 .venv/
+.venv-build/
+.venv311/
 venv/
 .env*/
 .conda/

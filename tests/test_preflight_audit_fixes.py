@@ -167,7 +167,7 @@ def test_windows_ctime_fallback_in_last_touched(monkeypatch):
     assert ingestion._last_touched(st) == 500.0
 
 
-def test_non_windows_ignores_ctime(monkeypatch):
+def test_non_windows_ignores_ctime(monkeypatch, require_source):
     """On Linux/POSIX, ctime is metadata change time and must NOT be used as birthtime."""
     from types import SimpleNamespace
 

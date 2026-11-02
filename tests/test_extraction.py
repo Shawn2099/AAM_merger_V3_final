@@ -420,7 +420,7 @@ def _cfg_with_vlm(tmp_path):
     return cfg
 
 
-def test_prompts_are_clean_utf8():
+def test_prompts_are_clean_utf8(require_source):
     """The prompt text is sent to the model verbatim — it must not be corrupted.
 
     A file round-tripped through the wrong encoding turns every em-dash into

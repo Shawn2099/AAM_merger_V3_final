@@ -133,6 +133,9 @@ if ($isAdmin) {
 # Find uv or python
 $hasUv = [bool](Get-Command uv -ErrorAction SilentlyContinue)
 $venvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+# A compiled package is tied to CPython 3.11 x64. Empty this for a source
+# checkout; a protected release ships src\app.cp311-win_amd64.pyd.
+$protectedPyd = Get-ChildItem (Join-Path $ProjectRoot "src") -Filter "app.cp*.pyd" -ErrorAction SilentlyContinue
 
 if (-not $hasUv) {
     if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
@@ -173,7 +176,14 @@ if ($hasUv) {
         }
         & $venvPython -m pip install --upgrade pip
     }
-    & $venvPython -m pip install -e .
+    # A protected release has src\app.cp311-win_amd64.pyd instead of src\app\,
+    # so `pip install -e .` cannot build the project. It ships a locked
+    # requirements.txt for exactly this fallback path.
+    if ($protectedPyd -and (Test-Path (Join-Path $ProjectRoot "requirements.txt"))) {
+        & $venvPython -m pip install -r (Join-Path $ProjectRoot "requirements.txt")
+    } else {
+        & $venvPython -m pip install -e .
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Dependency installation failed."
         exit $LASTEXITCODE
@@ -182,6 +192,13 @@ if ($hasUv) {
 if (-not (Test-Path $venvPython)) {
     Write-Error "Python environment missing at $venvPython."
     exit 1
+}
+if ($protectedPyd) {
+    $pyVersion = & $venvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+    if ($pyVersion.Trim() -ne "3.11") {
+        Write-Error "This is a protected (compiled) release: src\$($protectedPyd[0].Name) is CPython 3.11 x64 only. The venv at $venvPython is Python $pyVersion. Install Python 3.11 x64, delete .venv, and re-run."
+        exit 1
+    }
 }
 # PyMuPDF is a compiled wheel that loads the Visual C++ runtime. Fail here, with the fix,
 # rather than on the first PDF. Native stderr is kept out of the terminating-error path.

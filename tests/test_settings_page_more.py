@@ -353,7 +353,7 @@ EXCLUDED = (
 )
 
 
-def test_b_09_every_setting_is_visible_to_it_and_read_somewhere():
+def test_b_09_every_setting_is_visible_to_it_and_read_somewhere(require_source):
     """A setting that IT cannot see in the example, or that no code reads, is a trap."""
     example = _example_data()
     sources = [

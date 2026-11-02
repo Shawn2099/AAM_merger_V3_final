@@ -19,7 +19,7 @@ from pathlib import Path
 _ALLOWED = {"models.py", "extraction.py"}
 
 
-def test_no_combined_references_in_engine():
+def test_no_combined_references_in_engine(require_source):
     root = Path(__file__).resolve().parents[1]
     offenders = []
     for base in (root / "src", root / "templates"):

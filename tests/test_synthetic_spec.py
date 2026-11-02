@@ -536,7 +536,7 @@ def _product_doc() -> str:
     return pathlib.Path("AAM_merger_V3_PRODUCT.md").read_text(encoding="utf-8")
 
 
-def test_product_doc_lists_every_reason_code_the_reconciler_emits():
+def test_product_doc_lists_every_reason_code_the_reconciler_emits(require_source):
     """PRODUCT 3.1 must cover every reason `reconcile_po_set` can return.
 
     The dashboard renders `reconcile_reason` from REASON_TEXT. A reason the

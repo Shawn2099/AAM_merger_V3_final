@@ -6,6 +6,13 @@
 
 This guide details the single-host production and test rig setup for **AAM Merger V3** (FastAPI, SQLite WAL, Prefect 3.x, NSSM Windows Services).
 
+> **Protected (compiled) handover:** if the client receives a build produced by
+> `scripts/build_protected_release.py`, `src/` contains
+> `app.cp311-win_amd64.pyd` instead of `src/app/`. The installer, services and
+> Prefect entrypoint are already adapted. Read
+> [`docs/SOURCE_PROTECTION.md`](./docs/SOURCE_PROTECTION.md) before copying
+> files or rebuilding, and never copy a source `src/app/` over the release.
+
 ---
 
 ## 1. Quick Automated Setup (Recommended)

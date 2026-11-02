@@ -76,6 +76,15 @@ if (-not (Test-Path $PythonExe)) {
     $PythonExe = (Get-Command python -ErrorAction SilentlyContinue).Source
 }
 
+$protectedPyd = Get-ChildItem (Join-Path $ProjectRoot "src") -Filter "app.cp*.pyd" -ErrorAction SilentlyContinue
+if ($protectedPyd -and $PythonExe -and (Test-Path $PythonExe)) {
+    $pyVersion = & $PythonExe -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+    if ($pyVersion.Trim() -ne "3.11") {
+        Write-Host "ERROR: Protected release: src\$($protectedPyd[0].Name) requires CPython 3.11 x64, but $PythonExe is Python $pyVersion. Install Python 3.11, delete .venv, and re-run." -ForegroundColor Red
+        exit 1
+    }
+}
+
 $hasUv = Get-Command uv -ErrorAction SilentlyContinue
 if ($hasUv) {
     & uv sync

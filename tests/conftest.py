@@ -145,6 +145,26 @@ def _load_config(path=None):
 config_module.load_config = _load_config
 
 
+@pytest.fixture(scope="session")
+def app_is_compiled() -> bool:
+    """True when the suite imported the Nuitka package instead of ``src/app``."""
+    import app
+
+    return type(app.__loader__).__name__.lower().startswith("nuitka")
+
+
+@pytest.fixture
+def require_source(app_is_compiled):
+    """Skip guards that read ``src/app/**/*.py`` text.
+
+    Those checks protect the source tree itself. A compiled release has no
+    application Python files to read; the same behaviour is covered by the
+    functional tests, which run against either import form.
+    """
+    if app_is_compiled:
+        pytest.skip("source-text guard is not applicable to a compiled release")
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _no_minimum_file_age():
     """Tests write a file and ingest it at once; the 30 s copy-safety age would hold every one.
