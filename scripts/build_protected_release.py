@@ -54,6 +54,7 @@ RUNTIME_FILES = (
     "DEPLOY.md",
     "docs/DELIVERY.md",
     "docs/SOURCE_PROTECTION.md",
+    "docs/PROTECTED_BUILD_GUIDE.md",
 )
 
 #: Convenience wrappers kept at the repository root.

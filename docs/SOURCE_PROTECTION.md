@@ -4,6 +4,9 @@
 > **Decision:** compile `src/app` with Nuitka package mode and ship no
 > application `.py` / `.pyc` files. This is a deterrent and a trade-secret
 > measure, not a technical guarantee. The client owns the machine.
+>
+> **Rebuild/verify:** [`PROTECTED_BUILD_GUIDE.md`](./PROTECTED_BUILD_GUIDE.md)
+> has the exact toolchain, commands, traps and the full-suite procedure.
 
 ## 1. What this actually protects against
 
@@ -88,6 +91,10 @@ Keep `BUILD_INFO.json` with the release archive.
 Output: `dist/aam-merger-protected-<version>/` and
 `dist/aam-merger-protected-<version>.zip`.
 
+The full conversion/verification workflow, including the traps found while
+building this branch, is in
+[`PROTECTED_BUILD_GUIDE.md`](./PROTECTED_BUILD_GUIDE.md).
+
 Re-assemble without recompiling Nuitka (useful while checking what ships):
 
 ```powershell
@@ -151,6 +158,7 @@ reintroduces the source-code exposure this change removes.
 |---|---|---|
 | Baseline source suite | `.venv\Scripts\python -m pytest --no-cov -q` | Green (0 failures) |
 | Release assembly contract tests | `.venv\Scripts\python -m pytest --no-cov -q tests/test_protected_release.py` | 5 passed |
+| Compiled == source | `.venv\Scripts\python scripts\verify_protected_release.py` | Prompts, Pydantic schema, `REASON_TEXT` identical; loader `nuitka_module_loader`; `/health`, `/dashboard`, `/openapi.json` 200 |
 | Compiled import | `PYTHONPATH=<release>/src python -c "import app"` | `app.__file__` = `<release>/src/app/__init__.py` (Nuitka virtual path); no source file exists; loader is `nuitka_module_loader` |
 | Template resolution | `import app.api.templating` | `TEMPLATES_DIR` resolved to `<release>/templates`, exists |
 | Alembic migrations | `python scripts\migrate_db.py` in the release | Reached head `e8f9a0b1c2d3` against the compiled models |

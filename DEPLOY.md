@@ -12,6 +12,8 @@ This guide details the single-host production and test rig setup for **AAM Merge
 > Prefect entrypoint are already adapted. Read
 > [`docs/SOURCE_PROTECTION.md`](./docs/SOURCE_PROTECTION.md) before copying
 > files or rebuilding, and never copy a source `src/app/` over the release.
+> Developers rebuilding it should follow
+> [`docs/PROTECTED_BUILD_GUIDE.md`](./docs/PROTECTED_BUILD_GUIDE.md).
 
 ---
 
