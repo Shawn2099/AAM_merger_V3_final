@@ -198,9 +198,19 @@ def test_file_still_growing_is_left_for_the_next_sync(rcfg, monkeypatch):
 def test_402_mid_sync_then_key_restored_merges_on_the_next_sync(rcfg, monkeypatch):
     responses = _good()
     good_dn = responses[W_DN]
-    responses[W_DN] = ("status", 402, {"error": {"message": "Key limit exceeded", "code": 402}})
     HttpVLM(monkeypatch, responses)
-    _drop(rcfg)
+
+    # Seed the PO Set first. If PO/DN/SI are dropped together, the input order
+    # is filesystem-dependent; a 402 on the DN can halt the pass before the PO
+    # has minted its set. The product behavior under test is the 402 on a
+    # document inside an existing set, not the input order.
+    _drop(rcfg, "PO")
+    assert run_sync()["errors"] == 0
+    (ps,) = sets(rcfg)
+    assert ps.status == POSetStatus.pending and ps.merged_output_path is None
+
+    responses[W_DN] = ("status", 402, {"error": {"message": "Key limit exceeded", "code": 402}})
+    _drop(rcfg, "DN", "SI")
     first = run_sync()
     assert first["errors"] >= 1
     (ps,) = sets(rcfg)
