@@ -17,21 +17,21 @@ def _pdf_bytes() -> bytes:
 
 
 def test_is_file_stable(tmp_path, monkeypatch):
+    """Two identical samples pass the stability loop.
+
+    The real file/age behavior lives in `test_s2_copy_safety.py` and
+    `test_ingestion_truncated_pdf.py`. This unit test pins the loop itself
+    without depending on the host's mtime/anti-virus timing (CI touched the
+    file between samples and made the old version flaky).
+    """
     import importlib
 
-    # Resolve the LIVE module, not the function imported at collection time:
-    # another test may reload app.services.ingestion, leaving the imported
-    # function bound to a stale module whose globals the autouse fixture does
-    # not patch.
     ingestion = importlib.import_module("app.services.ingestion")
     p = tmp_path / "a.pdf"
     p.write_bytes(b"x")
-    monkeypatch.setattr(ingestion, "MIN_FILE_AGE_SECONDS", 0)
-    # A file created "now" can have a Windows creation time a hair in the future;
-    # the age rule is not what this test is about. Pin the clock to mtime.
-    monkeypatch.setattr(ingestion, "_last_touched", lambda st: st.st_mtime)
-    # 2sx2 stable if not growing
-    assert ingestion.is_file_stable(p, interval=0, count=2) is True  # real 2s
+    monkeypatch.setattr(ingestion, "file_signature", lambda _p: (1, 0))
+    monkeypatch.setattr(ingestion, "_old_enough", lambda _p: True)
+    assert ingestion.is_file_stable(p, interval=0, count=2) is True
 
 
 def test_dedup_sha256(tmp_path):
