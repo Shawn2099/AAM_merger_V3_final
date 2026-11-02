@@ -109,6 +109,11 @@ Safety properties:
 - New `tests/test_parallel_extraction.py` (7 tests): concurrency cap, one call
   per document, slow document isolation, breaker drain/refund, failure
   isolation, `database is locked` refund, CAS race, monotonic progress.
+- Real Uvicorn smoke (port 8877, temp config): `/health` 200, CLI created an
+  admin, login redirected to `/dashboard` 200, an authenticated POST without
+  the CSRF header returned 403, and the same POST with `X-CSRF-Token` reached
+  the route (404 for a missing set). This exercises the real ASGI server, not
+  only `TestClient`.
 - Existing suites re-run: concurrency/409, extraction, WS6 crash/restart,
   robustness containment, quarantine, migration, best-case pipeline.
 - The full existing suite is run with `auth.enabled=false` (tests/conftest.py)
