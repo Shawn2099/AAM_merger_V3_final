@@ -29,15 +29,16 @@
 |---|---|---|
 | Web | FastAPI 0.124.x + Uvicorn 0.3x + Pydantic v2.9+ | ASGI; Uvicorn standalone wrapped by NSSM — **never Gunicorn** (Unix-only) |
 | Validation / LLM | `pydantic-settings` + `instructor` + OpenRouter GPT-5.6 Luna | Model id from `config.yaml`, never hardcoded |
-| Orchestration | Prefect 3.x `process` pool (`aam-merger-process-pool`) | Already running — midnight cron is Prefect schedule, not Task Scheduler |
+| Orchestration | Prefect 3.x `process` pool (`aam-merger-process-pool`) | Daily 11:00 IST schedule is Prefect, not Task Scheduler |
 | DB | SQLAlchemy 2.x **sync** + Alembic + SQLite WAL | Single-writer; `def` handlers run in threadpool — **no `aiosqlite`** |
+| Auth | `argon2-cffi` (Argon2id) + opaque DB-backed sessions + CSRF token | `app/auth/`; no Passlib, no signed-cookie-only sessions; `python -m app.auth.cli` for accounts |
 | Matching/PDF | `rapidfuzz` 3.x + `pypdf` (not `PyPDF2`) | 85% token-sort threshold from `config.yaml` |
 | Testing | `pytest` + `pytest-asyncio` (latest) | Standard per SPEC §5.2 — TDD-first workflow (§7) |
 | Config | YAML `config.yaml` validated by `pydantic-settings` | + `config.example.yaml` (committed), real `config.yaml` gitignored; secrets only via `OPENROUTER_API_KEY` env/`.env` |
 | Frontend | Jinja2 + HTMX + Alpine.js (server-rendered) | No React SPA / Node build |
 | Service | NSSM (external) | Wraps web + Prefect worker as Windows Services |
 
-**Ban list:** bare `except:`, blocking I/O inside `async def`, manual SQL strings, global mutable request state, hand-rolled retry/scheduler where Prefect covers it, `PyPDF2`.
+**Ban list:** bare `except:`, blocking I/O inside `async def`, manual SQL strings, global mutable request state, hand-rolled retry/scheduler where Prefect covers it, plaintext passwords, session IDs in client-readable cookies, `PyPDF2`.
 
 ---
 
@@ -53,7 +54,10 @@ aw_extraction_json; po_no_raw/po_no_normalized; po_reference_ambiguous (multi-PO
 | line_items | id PK; document_id FK; line_item_no text nullable (**the** matching key); description; quantity int ×1000; dn_no nullable (per-line DN reference) |
 | po_sets | id PK; po_no_normalized indexed (grouping key); status enum pending, mismatched, quarantined, blocked_customs, merged; has_customs_toggle; customs_doc_count; merged_output_path; description_match_count (advisory fallback-link count, UI tag only);
 econcile_reason (plain-language, dashboard reads it); merged_at (immutable); locked_by_action; locked_at; created_at/updated_at |
-| udit_log | id PK; po_set_id FK nullable ON DELETE SET NULL; ction enum orce_merge, quarantine_delete, manual_status_change; detail JSON; justification (operator note, >= 20 chars when given); 	imestamp; source |
+| udit_log | id PK; po_set_id FK nullable ON DELETE SET NULL; ction enum orce_merge, quarantine_delete, manual_status_change; detail JSON; justification (operator note, >= 20 chars when given); 	imestamp; source (`operator:<username>` when authenticated, `system` for machine writes) |
+| users | id PK; username unique (NFKC+casefold); password_hash (Argon2id); role enum admin, operator; is_active; must_change_password; password_changed_at; last_login_at; created_at/updated_at |
+| auth_sessions | token_hash PK (SHA-256 of the cookie token, never the token); user_id FK ON DELETE CASCADE; csrf_token; created_at; last_seen_at; expires_at; absolute_expires_at; revoked_at; ip_address; user_agent |
+| auth_events | id PK; user_id FK nullable ON DELETE SET NULL; username (attempted on failure); event; ip_address; user_agent; detail; created_at |
 
 **line_items has NO part_no, NO line_type, NO uom.** These existed
 briefly to serve a retired matcher and were dropped in migration
@@ -94,7 +98,7 @@ test/<short>  experiments / sample-PDF validation
 
 Dev = Linux, prod = single Win Server 2016 (2 cores, 128GB, `0.0.0.0:<port>` LAN, DB + stored/quarantine/input/output local to host — **never SQLite on SMB share**, WAL requires shared memory).
 
-* All environment-specific values in `config.yaml` (paths, host/port, model, timeouts, thresholds, `po_set_lock_timeout_seconds`, `max_concurrent_extraction_tasks=3`). App fails fast on invalid config. `max_concurrent_extraction_tasks` is fixed at `3` per SPEC §13.2 (`prefect.max_concurrent_extraction_tasks: 3 # generous headroom for 10 sets/day, not a scaling knob`) — not a range; a 2–3 range would be a spec amendment, not an AGENTS.md drift.
+* All environment-specific values in `config.yaml` (paths, host/port, model, timeouts, thresholds, `po_set_lock_timeout_seconds`, `max_concurrent_extraction_tasks=3`, `vlm.rasterize_concurrency=2`, the `auth:` block). App fails fast on invalid config. `max_concurrent_extraction_tasks` is fixed at `3` per SPEC §13.2 and is now **enforced** as the parallel extraction cap — not a range; a 2–3 range would be a spec amendment, not an AGENTS.md drift. `vlm.rasterize_concurrency` must stay at or below it.
 * Code: `pathlib.Path` everywhere, never hardcode `C:\AAM\...`; use `pathlib` + `os.path` join; separators from config; no `\\` literals.
 * Keep Windows-only code isolated: NSSM wrapper + deployment runbook; app stays portable (Uvicorn, sync SQLAlchemy, `RotatingFileHandler`, `pydantic-settings` env).
 * No dual-OS CI required (accepted); note Windows deltas in runbook. If volume grows beyond ~10 PO Sets/day, tune `config.yaml` only — no code change.
@@ -122,7 +126,7 @@ NPM_CONFIG_CACHE=/tmp/npm-cache npx --yes skills add <owner/repo@skill> -y
 * If index stale → `GITNEXUS_HOME=/tmp/gitnexus_tmp gitnexus analyze --skip-git .` (`~/.gitnexus` currently RO by sandbox; remote is `https://github.com/Shawn2099/AAM_merger_V3_final`)
 * Guide: [.agents/skills/gitnexus-guide/SKILL.md](.agents/skills/gitnexus-guide/SKILL.md) and siblings (`-exploring`, `-impact-analysis`, `-debugging`, `-refactoring`, `-cli`)
 
-**Already wired non-superpowers:** `python-best-practices`, `modern-python`, `python-error-handling`, `db`/`sqlite-database-expert`, `pdf`/`pypdf`, `playwright-best-practices` (dashboard E2E), `security-and-hardening` (no-auth accepted risk, `audit_log` is accountability).
+**Already wired non-superpowers:** `python-best-practices`, `modern-python`, `python-error-handling`, `db`/`sqlite-database-expert`, `pdf`/`pypdf`, `playwright-best-practices` (dashboard E2E), `security-and-hardening` (authentication + CSRF; `audit_log` is accountability and now records the username).
 
 ---
 
@@ -133,8 +137,13 @@ NPM_CONFIG_CACHE=/tmp/npm-cache npx --yes skills add <owner/repo@skill> -y
 2. **TDD:** one test per behaviour, Given/When/Then with static expected
    values. Examples that hold today: PO 100 = DN 40+60 and SI 70+30 →
    `merged`; an orphan vendor line → `quarantined`; a set with no SI number →
-   auto-merge refuses; Delete (archive) moves the set to `data/development/archived_sets` and writes an audit row. Move to quarantine and remove set copies the files to `quarantine/_removed_sets/` and deletes the rows (decision 2026-10-25); second
-   Force Merge on a locked set → 409.
+   auto-merge refuses; Delete (archive) moves the set to `<paths.archive_folder>`
+   (default `data/quarantine/_archived_sets`) and writes an audit row. Move to
+   quarantine and remove set copies the files to `quarantine/_removed_sets/` and deletes the rows (decision 2026-10-25); second
+   Force Merge on a locked set → 409; an unauthenticated browser is redirected
+   to `/login`; a write without the session CSRF token is 403; N documents are
+   read with at most `max_concurrent_extraction_tasks` VLM calls in flight and
+   each document is called once.
 3. **If you remove a guard, add the limitation to PRODUCT §8 and pin it with a
    test named `test_limitation_*` or `test_known_limitation_*`.** A removed
    guard that leaves no trace is how this document came to be needed.

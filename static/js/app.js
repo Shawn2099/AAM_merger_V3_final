@@ -2,6 +2,15 @@
  * AAM Merger V3 — Client-side Interactivity & Alpine.js Store
  */
 
+// CSRF: every HTMX request carries the session's synchronizer token from the
+// page meta tag. Covered verbs: hx-post, hx-put, hx-patch, hx-delete.
+document.addEventListener('htmx:configRequest', (event) => {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  if (meta && meta.content) {
+    event.detail.headers['X-CSRF-Token'] = meta.content;
+  }
+});
+
 document.addEventListener('alpine:init', () => {
   // 1. Universal Toast Notification Store
   //

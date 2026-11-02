@@ -1,5 +1,12 @@
 # Delivery Runbook — one PC in the client's office
 
+> **2026-11-02 handover update:** authentication is now required, extraction
+> runs in parallel up to `prefect.max_concurrent_extraction_tasks`, and the
+> database head is `f1a2b3c4d5e6` (three auth tables). Times, paths and the
+> "no login" statements below are historical; the current install steps are in
+> [`DEPLOY.md`](../DEPLOY.md) and the change record is
+> [`HANDOVER_HARDENING_2026-11-02.md`](./HANDOVER_HARDENING_2026-11-02.md).
+
 This is the short version for handing the MVP to the client. The full technical
 detail is in [`DEPLOY.md`](../DEPLOY.md); this page is what to follow on the day.
 

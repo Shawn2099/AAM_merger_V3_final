@@ -139,6 +139,11 @@ def _load_config(path=None):
     # Production quarantines combined PDFs unsplit; the splitter tests need it on.
     # Tests of the default set `cfg.extraction.split_combined = False` themselves.
     cfg.extraction.split_combined = True
+    # The suite's thousands of existing route tests predate authentication and
+    # exercise business logic, not login. Auth has its own dedicated tests that
+    # build the app with `auth_enabled=True`. Never let a test run inherit a live
+    # login requirement from config.example.yaml.
+    cfg.auth.enabled = False
     return cfg
 
 

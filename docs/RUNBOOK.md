@@ -10,6 +10,21 @@ Sources: `docs/CUSTOMS_OPERATIONS.md`, `docs/DELIVERY.md`, `docs/CORE_LOGIC.md`,
 
 ---
 
+## 0. Signing in
+
+1. Open `http://[TO CONFIRM: server IP]:8000/` in the browser.
+2. Enter your own username and password. The first administrator is created by
+   IT on the server; do not use a shared account.
+3. The top-right corner shows your name and role. **Sign out** when you leave
+   the PC, especially on a shared machine.
+4. If you see "No accounts are configured", IT has not created the first
+   administrator yet. That is a setup task, not a fault you can fix from the
+   browser.
+5. After several wrong passwords the page asks you to wait a few minutes. This
+   is deliberate; do not keep trying.
+
+---
+
 ## 1. What the system does
 
 1. You drop PDF files (purchase orders, delivery notes, sales invoices) into the input folder.
@@ -24,7 +39,7 @@ Sources: `docs/CUSTOMS_OPERATIONS.md`, `docs/DELIVERY.md`, `docs/CORE_LOGIC.md`,
 
 ### Morning (before you start work)
 
-1. Open the dashboard: `http://[TO CONFIRM: server IP]:8000/dashboard`.
+1. Open the dashboard: `http://[TO CONFIRM: server IP]:8000/dashboard`. If the login page appears, sign in first (section 0).
 2. Look at the four cards at the top: **Merged & Ready**, **Needs Review**, **Awaiting Customs**, **Quarantined**.
 3. Open the **Pending** tab. Check that yesterday's new files show **Read** on their set page, not **Extracting** or **Failed** for a long time.
 4. Check the **Unclassified** page (left menu). The number badge shows documents the app could not place.
@@ -40,7 +55,7 @@ counts that you recognise, and yesterday's new files either merged or held with 
 1. Open the **Quarantined** and **Needs Review** tabs. Each row should have a reason you understand.
 2. Open each **Awaiting Customs** set. Is anyone still sending the customs or shipping file?
 3. Check the **Merged** tab: every row you merged today should have a packet you have checked (section 6).
-4. Check that today's backup file exists: `data\development\snapshots\db` (backup runs at 01:00 every night).
+4. Check that today's backup file exists: `data\development\snapshots\db` (the scheduled backup runs at 11:30). If the machine was installed with `deploy.bat` instead of `setup_test_rig.ps1`, the backup is in `data\backup`.
 5. Write the day's notes (section 6, "What to record").
 
 **Bad looks like:** a set is "Pending" for days with no reason, a merged set has no packet
@@ -216,7 +231,14 @@ The first week is supervised. **Nobody runs the system unattended.** A one-digit
 - Do **not** put the database on a network drive, or share the whole `data` folder. Share only `data\input`, if at all.
 - Do **not** use Force Merge for customs, and do not use it to clear a mismatch you have not understood.
 - Do **not** change `config.yaml` or `.env` without the on-site contact. After a change to the poll or settle settings, restart the web service. After a change to `vlm:` settings, re-run `scripts\deploy_prefect.py`.
-- Do **not** expose port 8000 to the internet. There is no login. Anyone on the office network who can reach the app can press every button.
+- Do **not** expose port 8000 to the internet. Sign-in is required, but the
+  connection is still plain HTTP unless IT puts a TLS proxy in front of it.
+- Do **not** share one login between people. The audit log records the username;
+  a shared account destroys that record. Ask IT to create a named account
+  (`python -m app.auth.cli create-user --username <name> --role operator`) and
+  to disable it when someone leaves (`disable-user --username <name>`).
+- Do **not** tell anyone your password or leave the session open on a shared PC.
+  Use **Sign out** in the top-right corner.
 - Do **not** use a personal OpenRouter key. The pilot uses the tester key in `.env`.
 - Do **not** rebuild a packet that may already have been sent. A customs append overwrites it in place.
 

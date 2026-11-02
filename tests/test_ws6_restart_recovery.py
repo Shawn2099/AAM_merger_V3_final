@@ -197,9 +197,9 @@ def _crash_mid_extraction_then_restart(cfg, vlm):
     """7.3 up to (and including) the restart pass, shared by the test and its WS6-03 twin.
 
     Two complete sets, path order known. The second set's DN dies inside the VLM call:
-    the process is gone, so the document row stays `processing`, the files after it are
-    never ingested, and the sync sidecar stays behind. Returns the rows needed to judge
-    what the restart pass did.
+    the process is gone, so the document row stays `processing`, the stable batch has
+    already been ingested (parallel phase split), and the sync sidecar stays behind.
+    Returns the rows needed to judge what the restart pass did.
     """
     from app.flows.sync import _sync_flow_locked
     from app.main import app
@@ -231,7 +231,15 @@ def _crash_mid_extraction_then_restart(cfg, vlm):
     stuck = document_row(cfg, "e_dn2.pdf")
     assert stuck is not None
     assert stuck.extraction_status == ExtractionStatus.processing
-    assert document_row(cfg, "f_si2.pdf") is None
+    # Parallel extraction ingests the whole stable batch before it reads any
+    # document (so workers never move/delete input files another worker needs).
+    # A later file may therefore already have a row; it must be unread and
+    # unattached, never valid or placed in a set.
+    later = document_row(cfg, "f_si2.pdf")
+    assert later is None or later.po_set_id is None, (
+        "a document read by a parallel worker must not be attached to a set by a "
+        "run that crashed before its grouping phase"
+    )
     assert sync_lock._sidecar_for(sync_lock._lock_file()).exists()
 
     # Restart: the web service's lifespan clears the orphan, then the poller runs one pass.

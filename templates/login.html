@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in — AAM Merger V3</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
+</head>
+<body style="min-height:100vh; display:flex; align-items:center; justify-content:center; background:var(--bg);">
+  <main class="card" style="width:100%; max-width:420px; padding:32px;" data-testid="login-card">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+      <div class="brand-icon" style="font-size:1.4rem;">⚡</div>
+      <div>
+        <h1 style="font-size:1.15rem; margin:0;">AAM Merger V3</h1>
+        <p class="muted" style="margin:2px 0 0; font-size:0.82rem;">Operator sign in</p>
+      </div>
+    </div>
+
+    {% if error %}
+    <div role="alert" data-testid="login-error"
+         style="margin:16px 0; padding:10px 12px; border:1px solid var(--clr-quarantined-border); background:var(--clr-quarantined-bg); border-radius:var(--radius-sm); font-size:0.88rem; color:#991b1b;">
+      {{ error }}
+    </div>
+    {% endif %}
+
+    {% if not auth_enabled %}
+    <p class="muted" style="margin:16px 0; font-size:0.88rem;">
+      Authentication is disabled in this configuration.
+    </p>
+    {% elif no_accounts %}
+    <div role="alert" data-testid="login-no-accounts"
+         style="margin:16px 0; padding:12px; border:1px solid var(--clr-quarantined-border); background:var(--clr-quarantined-bg); border-radius:var(--radius-sm); font-size:0.88rem; color:#991b1b;">
+      No accounts are configured. On the server, create the first administrator:<br>
+      <code style="display:block; margin-top:6px; font-size:0.78rem;">python -m app.auth.cli create-user --username admin --role admin</code>
+    </div>
+    {% else %}
+    <form method="post" action="/login" autocomplete="on" style="margin-top:16px;">
+      <input type="hidden" name="next" value="{{ next }}">
+      <label for="username" class="muted" style="display:block; font-size:0.85rem; margin-bottom:4px;">Username</label>
+      <input id="username" name="username" type="text" required autofocus autocomplete="username"
+             value="{{ username }}" data-testid="login-username"
+             style="width:100%; padding:9px 10px; margin-bottom:12px; border:1px solid var(--border); border-radius:var(--radius-sm);">
+      <label for="password" class="muted" style="display:block; font-size:0.85rem; margin-bottom:4px;">Password</label>
+      <input id="password" name="password" type="password" required autocomplete="current-password"
+             data-testid="login-password"
+             style="width:100%; padding:9px 10px; margin-bottom:12px; border:1px solid var(--border); border-radius:var(--radius-sm);">
+      <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; margin-bottom:16px;">
+        <input type="checkbox" name="remember" value="on">
+        Keep me signed in on this computer
+      </label>
+      <button type="submit" class="btn btn-primary" style="width:100%;" data-testid="login-submit">Sign in</button>
+    </form>
+    {% endif %}
+  </main>
+</body>
+</html>

@@ -4,19 +4,21 @@ GET  /settings  the current values, what each does and when a change takes effec
 POST /settings  validate and save. A bad value is refused with a message beside the field and
                 the file on disk is untouched; see `app.services.settings_admin`.
 
-Like the rest of the app there is no login (PRODUCT section 8); the Origin guard and the allowed
-hosts apply, and every save is written to the audit log.
+Like the rest of the app this page requires a signed-in administrator (PRODUCT section 10); the
+Origin guard, CSRF token and allowed hosts also apply, and every save is written to the audit log.
 """
 
 from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 
 from app.api.templating import templates as _templates
+from app.auth.context import actor_source
+from app.auth.middleware import RequireAdmin
 from app.core import config as config_module
 from app.services import settings_admin as svc
 
@@ -55,19 +57,19 @@ def _render(
     )
 
 
-@router.get("/settings", response_class=HTMLResponse)
+@router.get("/settings", response_class=HTMLResponse, dependencies=[Depends(RequireAdmin())])
 def settings_page(request: Request) -> HTMLResponse:
     return _render(request)
 
 
-@router.post("/settings", response_class=HTMLResponse)
+@router.post("/settings", response_class=HTMLResponse, dependencies=[Depends(RequireAdmin())])
 async def settings_save(request: Request) -> HTMLResponse:
     form = await request.form()
     if len(form) > _MAX_FORM_FIELDS:
         return _render(request, status=413)
     submitted = {k: str(form.getlist(k)[-1]) for k in form if isinstance(k, str)}
     version = submitted.pop("config_version", "")
-    result = await run_in_threadpool(svc.save, submitted, version=version)
+    result = await run_in_threadpool(svc.save, submitted, version=version, actor=actor_source())
     if result.changed:
         _start_poller_if_switched_on(request)
     status = 200 if result.ok else 409 if result.general else 422

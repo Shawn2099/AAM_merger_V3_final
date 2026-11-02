@@ -20,10 +20,12 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Form, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
+from app.auth.context import actor_source
+from app.auth.middleware import RequireAdmin
 from app.core.config import load_config
 from app.core.database import get_engine
 from app.models import ExtractionStatus, POSet, POSetStatus
@@ -351,7 +353,7 @@ def force_merge(po_set_id: int, justification: str = Form("")):
     try:
         from app.services.merge import force_merge as svc_force_merge
 
-        result = svc_force_merge(po_set_id, cfg, justification=justification, source="operator")
+        result = svc_force_merge(po_set_id, cfg, justification=justification, source=actor_source())
         detail = {"merged_path": str(result) if result else None}
         return {"status": "merged", "po_set_id": po_set_id, "detail": detail}
     except HTTPException:
@@ -597,7 +599,7 @@ def confirm_placement(po_set_id: int, doc_id: int):
                             "filename": doc.original_filename,
                         }
                     ),
-                    source="operator",
+                    source=actor_source(),
                 )
             )
             s.commit()
@@ -616,7 +618,11 @@ def confirm_placement(po_set_id: int, doc_id: int):
         _release_lock(po_set_id, cfg, "confirm_placement")
 
 
-@router.post("/{po_set_id}/remove_to_quarantine", response_class=HTMLResponse)
+@router.post(
+    "/{po_set_id}/remove_to_quarantine",
+    response_class=HTMLResponse,
+    dependencies=[Depends(RequireAdmin())],
+)
 def remove_to_quarantine(po_set_id: int, request: Request, note: str = Form("")):
     """Copy the set's files to the quarantine folder, then delete its rows (step 13).
 
@@ -653,7 +659,9 @@ def remove_to_quarantine(po_set_id: int, request: Request, note: str = Form(""))
     except HTTPException as exc:
         return refuse(exc.status_code, str(exc.detail))
     try:
-        result = remove_set_to_quarantine(po_set_id, cfg, note=note.strip()[:200])
+        result = remove_set_to_quarantine(
+            po_set_id, cfg, note=note.strip()[:200], source=actor_source()
+        )
     except SetRemovalRefused as exc:
         return refuse(exc.status_code, exc.message)
     finally:
@@ -661,7 +669,9 @@ def remove_to_quarantine(po_set_id: int, request: Request, note: str = Form(""))
 
     folder_rel = result.get("folder_name") or Path(result["folder"]).name
     po_no = result.get("po_no_normalized") or f"#{po_set_id}"
-    rel_display = f"quarantine/{folder_rel}" if not folder_rel.startswith("quarantine/") else folder_rel
+    rel_display = (
+        f"quarantine/{folder_rel}" if not folder_rel.startswith("quarantine/") else folder_rel
+    )
 
     if browser:
         return templates.TemplateResponse(
@@ -754,7 +764,7 @@ def remove_supporting_document(po_set_id: int, doc_id: int):
                             "filename": filename,
                         }
                     ),
-                    source="operator",
+                    source=actor_source(),
                 )
             )
             count = ps.customs_doc_count
@@ -804,7 +814,7 @@ def redo_match(po_set_id: int):
         _release_lock(po_set_id, cfg, "redo_match")
 
 
-@router.delete("/{po_set_id}/quarantine")
+@router.delete("/{po_set_id}/quarantine", dependencies=[Depends(RequireAdmin())])
 def delete_quarantined(po_set_id: int, response: Response, justification: str = Form("")):
     """Delete quarantined PO Set - per-PO locked (FR-CONC-1).
 
@@ -828,7 +838,7 @@ def delete_quarantined(po_set_id: int, response: Response, justification: str = 
     try:
         from app.services.quarantine import delete_quarantined as svc_delete
 
-        audit = svc_delete(po_set_id, cfg, justification=justification, source="operator")
+        audit = svc_delete(po_set_id, cfg, justification=justification, source=actor_source())
         response.headers["HX-Redirect"] = "/quarantine"
         try:
             detail = json.loads(audit.detail or "{}")

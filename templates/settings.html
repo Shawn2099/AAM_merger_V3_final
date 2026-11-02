@@ -75,6 +75,7 @@
   </p>
 
   <form method="post" action="/settings" data-testid="settings-form" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token|default('') }}">
     <input type="hidden" name="config_version" value="{{ version }}">
 
     {% for g in groups %}

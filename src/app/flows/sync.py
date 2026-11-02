@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 
 from prefect import flow, task
 from sqlalchemy.orm import Session
 
 from app.core.config import load_config
-from app.core.database import get_engine
+from app.core.database import ensure_schema
 from app.models import ExtractionStatus
-from app.models.base import Base
 from app.services.sync_lock import heartbeat_sync_lock
 
 logger = logging.getLogger(__name__)
@@ -271,8 +272,6 @@ def extract_task(doc_id: int, cfg_path: str | None = None) -> str:
     live config via with_options at every call site (FR-6.5, NFR-2).
     """
     cfg = load_config(cfg_path) if cfg_path else load_config()
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
     from app.services.extraction import extract_document
 
     doc = extract_document(doc_id, cfg)
@@ -294,17 +293,174 @@ def _retry_unless_provider_rejected(task, task_run, state) -> bool:
     return not isinstance(exc, ProviderRequestRejected)
 
 
-def _extract_task_for(cfg):
-    """extract_task with retry policy driven by config (NFR-2).
+class _ExtractionCall:
+    """The retry envelope used by the parallel extraction pool.
 
-    Tasks run sequentially in the sync loop (one call at a time), so
-    prefect.max_concurrent_extraction_tasks is trivially satisfied.
+    A Prefect task invoked from a worker thread has no flow-run context and
+    creates one task run per document (extra API writes on a 2-core host whose
+    Prefect server is itself SQLite). The sync only needs the retry semantics,
+    so this callable applies exactly the same retries/backoff as
+    `extract_task` and is safe to call from N threads. `extract_task` remains
+    registered for any external Prefect caller and for backward compatibility.
+
+    `.retries` and `.retry_delay_seconds` are kept because the contract tests
+    read them from `_extract_task_for(cfg)`.
     """
-    return extract_task.with_options(
-        retries=cfg.extraction.max_retries,
-        retry_delay_seconds=list(cfg.extraction.retry_backoff_seconds),
-        retry_condition_fn=_retry_unless_provider_rejected,
-    )
+
+    def __init__(self, cfg) -> None:
+        self.retries = cfg.extraction.max_retries
+        self.retry_delay_seconds = list(cfg.extraction.retry_backoff_seconds)
+        self._cfg = cfg
+
+    def __call__(self, doc_id: int, cfg_path: str | None = None):
+        from app.services.extraction import ProviderRequestRejected, extract_document
+        from app.services.retry import with_backoff_retry
+
+        return with_backoff_retry(
+            lambda: extract_document(doc_id, self._cfg),
+            max_retries=self.retries,
+            backoff_seconds=self.retry_delay_seconds,
+            label=f"extract doc={doc_id}",
+            retry_if=lambda exc: not isinstance(exc, ProviderRequestRejected),
+        )
+
+
+def _extract_task_for(cfg):
+    """Return the per-document extraction callable for this sync.
+
+    Historically this returned a Prefect task. It now returns the equivalent
+    plain callable so the bounded thread pool can run several documents at
+    once without Prefect task-run bookkeeping in every worker thread.
+    """
+    return _ExtractionCall(cfg)
+
+
+@dataclass(frozen=True)
+class ExtractionJob:
+    """The only data that crosses into a worker thread.
+
+    Never pass an ORM object or a Session across threads: the worker opens its
+    own short-lived session, and the job carries primitives only.
+    """
+
+    doc_id: int
+    input_file: Path | None
+    filename: str
+
+
+@dataclass
+class ExtractionOutcome:
+    job: ExtractionJob
+    status: str  # valid | failed | pending | error | skipped | halted
+    error: str | None = None
+    halted: bool = False
+
+
+def _extract_one(job: ExtractionJob, extract_fn) -> ExtractionOutcome:
+    """Run one document; convert every failure into a value, never a thread crash."""
+    from app.services.extraction import ProviderRequestRejected, provider_breaker_tripped
+
+    if provider_breaker_tripped():
+        return ExtractionOutcome(job, "skipped", halted=True)
+    try:
+        result = extract_fn(job.doc_id)
+    except ProviderRequestRejected as exc:
+        return ExtractionOutcome(job, "halted", error=str(exc), halted=True)
+    except Exception as exc:
+        return ExtractionOutcome(job, "error", error=f"{type(exc).__name__}: {exc}")
+    # The production callable returns a Document; the legacy Prefect task and
+    # test doubles return the status string. Accept both.
+    if isinstance(result, str):
+        status_value = result
+    else:
+        status = getattr(result, "extraction_status", result)
+        status_value = status.value if hasattr(status, "value") else str(status)
+    return ExtractionOutcome(job, status_value, halted=provider_breaker_tripped())
+
+
+def run_extractions(
+    jobs: list[ExtractionJob],
+    cfg,
+    *,
+    extract_fn=None,
+    progress=None,
+    heartbeat=None,
+) -> list[ExtractionOutcome]:
+    """Read documents with a bounded pool, at most `max_concurrent...` at once.
+
+    Invariants:
+    * one job per `doc_id` (duplicate input files resolve to one document);
+    * at most `cfg.prefect.max_concurrent_extraction_tasks` VLM calls in flight;
+    * the provider breaker is checked before every launch; a trip stops new
+      work, lets in-flight calls finish, and leaves the rest untouched;
+    * DB writes stay in each worker's short session; the caller owns grouping,
+      quarantine and reconciliation on the flow thread.
+
+    `extract_fn` is injectable so tests can gate completions without sleeping.
+    """
+    from concurrent.futures import FIRST_COMPLETED, wait
+
+    from app.services.extraction import provider_breaker_tripped
+
+    unique: list[ExtractionJob] = []
+    seen: set[int] = set()
+    for job in jobs:
+        if job.doc_id in seen:
+            continue
+        seen.add(job.doc_id)
+        unique.append(job)
+    if not unique:
+        return []
+
+    extract_fn = extract_fn or _extract_task_for(cfg)
+    workers = max(1, min(int(cfg.prefect.max_concurrent_extraction_tasks), len(unique)))
+    outcomes: list[ExtractionOutcome] = []
+    futures: dict = {}
+    stop = threading.Event()
+    iterator = iter(unique)
+
+    def _refill() -> None:
+        while not stop.is_set() and len(futures) < workers:
+            try:
+                job = next(iterator)
+            except StopIteration:
+                return
+            if provider_breaker_tripped():
+                stop.set()
+                return
+            futures[pool.submit(_extract_one, job, extract_fn)] = job
+            if progress is not None:
+                progress.task_started(job.filename)
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="aam-extract") as pool:
+        _refill()
+        while futures:
+            done, _ = wait(list(futures), return_when=FIRST_COMPLETED)
+            for future in done:
+                job = futures.pop(future)
+                try:
+                    outcome = future.result()
+                except Exception as exc:  # a BaseException still propagates
+                    outcome = ExtractionOutcome(job, "error", f"{type(exc).__name__}: {exc}")
+                outcomes.append(outcome)
+                if heartbeat is not None:
+                    heartbeat()
+                if progress is not None:
+                    progress.task_finished(
+                        job.filename, failed=outcome.status in ("failed", "error")
+                    )
+                if outcome.halted or provider_breaker_tripped():
+                    stop.set()
+            _refill()
+
+        # Jobs never submitted because the breaker tripped are explicitly
+        # reported, so summary counts and the UI do not imply they were read.
+        for job in iterator:
+            outcomes.append(ExtractionOutcome(job, "skipped", halted=True))
+            if progress is not None:
+                progress.task_finished(job.filename, failed=False)
+
+    return outcomes
 
 
 def _flush_deferred_quarantines(deferred, cfg, eng, touched_po_set_ids) -> None:
@@ -376,13 +532,11 @@ def _recovery_flow_locked(
     from app.core.logging_setup import setup_logging
 
     setup_logging(cfg)
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
+    eng = ensure_schema(cfg)
     from app.models import Document as _Doc
     from app.models import POSet as _POSet
     from app.models import POSetStatus
     from app.services.extraction import (
-        provider_breaker_tripped,
         reclaim_stale_processing,
         rejected_400_ids,
     )
@@ -479,21 +633,38 @@ def _recovery_flow_locked(
 
     deferred_400: list[tuple[int, Path | None]] = []
     tried_this_pass = set(already_tried_ids or [])
+
+    # Read every pending document with the same bounded pool as the main pass.
+    # Documents the main pass already tried in this run are excluded: a
+    # transient fault must not be retried against the same outage twice.
+    pending_jobs = [
+        ExtractionJob(doc_id=doc_id, input_file=None, filename=f"document {doc_id}")
+        for doc_id in pending_ids
+        if doc_id not in tried_this_pass
+    ]
+    pending_outcomes = run_extractions(
+        pending_jobs,
+        cfg,
+        extract_fn=_extract_task_for(cfg),
+        heartbeat=lambda: heartbeat_sync_lock(cfg_path),
+    )
+    pending_by_id = {outcome.job.doc_id: outcome for outcome in pending_outcomes}
+    skipped_docs = 0
+
     for doc_id in pending_ids:
         heartbeat_sync_lock(cfg_path)
-        if provider_breaker_tripped():
-            logger.error("Provider breaker tripped: leaving the remaining pending documents unread")
-            break
         if doc_id in tried_this_pass:
             # The main loop already called the provider for this document in this pass and
             # it is still pending (a transient fault). It is read again on the next scan.
             logger.info("Document %s was already tried in this pass; not read again", doc_id)
             continue
+        outcome = pending_by_id.get(doc_id)
+        if outcome is None or outcome.status == "skipped" or outcome.halted:
+            skipped_docs += 1
+            continue
         recovered_processed += 1
-        try:
-            _extract_task_for(cfg)(doc_id, cfg_path=cfg_path)
-        except Exception:
-            logger.warning("Extract task failed for pending doc %s", doc_id, exc_info=True)
+        if outcome.status == "error":
+            logger.warning("Extract task failed for pending doc %s: %s", doc_id, outcome.error)
             recovered_errors += 1
         else:
             persisted = _persisted_extraction_status(eng, doc_id)
@@ -541,6 +712,8 @@ def _recovery_flow_locked(
             logger.warning("Grouping failed for pending doc %s", doc_id, exc_info=True)
             recovered_errors += 1
 
+    if skipped_docs:
+        logger.error("Provider breaker tripped: %d pending document(s) left unread", skipped_docs)
     _flush_deferred_quarantines(deferred_400, cfg, eng, touched_po_set_ids)
 
     # 2. Resolve unattached documents (e.g. Delivery Notes without PO printed on face)
@@ -709,8 +882,7 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     from app.core.logging_setup import setup_logging
 
     setup_logging(cfg)
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
+    eng = ensure_schema(cfg)
     from app.models import Document as _Doc
     from app.services.extraction import (
         provider_breaker_reason,
@@ -784,12 +956,23 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
     #: Documents the VLM was called for in THIS pass; recovery must not read them again.
     tried_ids: list[int] = []
     deferred_400: list[tuple[int, Path | None]] = []
+
+    progress = None
+    with contextlib.suppress(Exception):
+        from app.services.sync_progress import progress_tracker
+
+        progress = progress_tracker
+        progress.start(len(files), phase="scanning")
+
+    # Phase A — ingest every stable file on the flow thread. Ingest writes to
+    # SQLite and may move a split parent; interleaving it with extraction
+    # workers would let a worker delete an input file another worker is about
+    # to read. One writer, deterministic order.
+    ingested: list[tuple[Path, int, bool]] = []
     for idx, f in enumerate(files, 1):
         heartbeat_sync_lock(cfg_path)
-        with contextlib.suppress(Exception):
-            from app.services.sync_progress import progress_tracker
-
-            progress_tracker.update_file(idx, f.name, extracted=extracted, errors=errors)
+        if progress is not None:
+            progress.set_phase("scanning", f"Checking {f.name} ({idx}/{len(files)})")
         if provider_breaker_tripped():
             # Several documents in a row were rejected with an HTTP 400: the
             # request is wrong, not the documents. Leave the rest in input.
@@ -814,85 +997,107 @@ def _sync_flow_locked(cfg_path: str | None = None) -> dict:
 
             doc = ingest_file(f, cfg)
             processed += 1
-
-            # Extract & Classify via VLM. A document that has been read
-            # already is not scheduled at all (see _already_read): the task
-            # would return it unchanged, and scheduling it costs a process
-            # launch per file.
-            if _already_read(doc):
-                logger.debug("Document %s was read already; not scheduled again", doc.id)
-                extracted += 1
-            else:
-                tried_ids.append(doc.id)
-                try:
-                    _extract_task_for(cfg)(doc.id, cfg_path=cfg_path)
-                except Exception:
-                    logger.warning("Extract task failed for doc %s", doc.id, exc_info=True)
-                    errors += 1
-                else:
-                    # A clean task return is NOT proof of success — see
-                    # _persisted_extraction_status. Count the document from the
-                    # row it left behind, and quarantine it if it is broken.
-                    if _persisted_extraction_status(eng, doc.id) == ExtractionStatus.failed:
-                        logger.error(
-                            "Extraction did not succeed for doc %s; counted as an error",
-                            doc.id,
-                        )
-                        errors += 1
-                        if doc.id in rejected_400_ids():
-                            deferred_400.append((doc.id, f))
-                        else:
-                            _quarantine_broken_document(doc.id, cfg, eng, f, touched_po_set_ids)
-                    else:
-                        extracted += 1
-
-            # Group into PO Set (FR-7.1-7.2). Only PO mints;
-            # DN/SI/UNKNOWN attach to an open set or wait unattached.
-            try:
-                with Session(eng) as s2:
-                    d2 = s2.get(_Doc, doc.id)
-                    if d2 is None:
-                        # The row was removed between extraction and grouping
-                        # (a concurrent delete or quarantine). Nothing to place.
-                        logger.warning("Document %s disappeared before grouping", doc.id)
-                        continue
-                    ps_id, problem = group_document(d2, cfg)
-                    if problem == "missing_po_number":
-                        # Read successfully, but no PO reference on the face
-                        # of the document. It is NOT broken and it is NOT
-                        # quarantined: it waits, visible, until the content
-                        # allows it to be placed (a PO that names its DN) or
-                        # until a human names its PO. Marking it failed
-                        # would hide it from both the sweeps and the
-                        # operator.
-                        logger.warning(
-                            "Document %s (%s) carries no PO reference — it stays unplaced "
-                            "and visible in the holding area",
-                            d2.id,
-                            d2.original_filename,
-                        )
-                    elif problem == "ambiguous_po_number":
-                        logger.warning(
-                            "Document %s (%s) shows more than one PO number — it was not "
-                            "placed in a PO Set and waits for a human",
-                            d2.id,
-                            d2.original_filename,
-                        )
-                    elif ps_id is not None:
-                        if d2.po_set_id is None:
-                            d2.po_set_id = ps_id
-                            s2.commit()
-                        touched_po_set_ids.add(ps_id)
-            except Exception:
-                logger.warning("Grouping failed for doc %s", doc.id, exc_info=True)
-                errors += 1
-
-            _clear_resent_duplicate(eng, doc.id, f)
-
+            ingested.append((f, doc.id, _already_read(doc)))
         except Exception:
-            logger.warning("Ingestion loop failed for file %s", f, exc_info=True)
+            logger.warning("Ingestion failed for file %s", f, exc_info=True)
             errors += 1
             continue
+
+    # Phase B — extraction, bounded and parallel. A document that has been read
+    # already is not scheduled at all (`_already_read`); duplicate input files
+    # resolve to one doc_id and `run_extractions` keeps one job per document.
+    jobs = [
+        ExtractionJob(doc_id=doc_id, input_file=f, filename=f.name)
+        for f, doc_id, already in ingested
+        if not already
+    ]
+    concurrency = max(1, int(cfg.prefect.max_concurrent_extraction_tasks))
+    if progress is not None and jobs:
+        progress.set_phase(
+            "extracting",
+            f"Extracting {len(jobs)} document(s), up to {concurrency} in parallel…",
+        )
+    outcomes = run_extractions(
+        jobs,
+        cfg,
+        extract_fn=_extract_task_for(cfg),
+        progress=progress,
+        heartbeat=lambda: heartbeat_sync_lock(cfg_path),
+    )
+    outcomes_by_id = {outcome.job.doc_id: outcome for outcome in outcomes}
+
+    # Phase C — group every ingested row in input order, then quarantine.
+    # Grouping before quarantine makes the quarantine folder's snapshot
+    # complete and reproducible: every valid member has already attached.
+    failed_docs: list[tuple[int, Path | None]] = []
+    for f, doc_id, already in ingested:
+        heartbeat_sync_lock(cfg_path)
+        if already:
+            logger.debug("Document %s was read already; not scheduled again", doc_id)
+            extracted += 1
+        else:
+            tried_ids.append(doc_id)
+            outcome = outcomes_by_id.get(doc_id)
+            if outcome is None or outcome.status == "skipped":
+                vlm_halted = True
+            elif outcome.halted:
+                vlm_halted = True
+                errors += 1
+            elif outcome.status == "error":
+                logger.warning("Extract task failed for doc %s: %s", doc_id, outcome.error)
+                errors += 1
+            else:
+                # A clean task return is NOT proof of success — read the row.
+                persisted = _persisted_extraction_status(eng, doc_id)
+                if persisted == ExtractionStatus.failed:
+                    logger.error(
+                        "Extraction did not succeed for doc %s; counted as an error",
+                        doc_id,
+                    )
+                    errors += 1
+                    if doc_id in rejected_400_ids():
+                        deferred_400.append((doc_id, f))
+                    else:
+                        failed_docs.append((doc_id, f))
+                elif persisted == ExtractionStatus.valid:
+                    extracted += 1
+
+        # Group into PO Set (FR-7.1-7.2). Only PO mints; DN/SI/UNKNOWN attach
+        # to an open set or wait unattached.
+        try:
+            with Session(eng) as s2:
+                d2 = s2.get(_Doc, doc_id)
+                if d2 is None:
+                    logger.warning("Document %s disappeared before grouping", doc_id)
+                    continue
+                ps_id, problem = group_document(d2, cfg)
+                if problem == "missing_po_number":
+                    logger.warning(
+                        "Document %s (%s) carries no PO reference — it stays unplaced "
+                        "and visible in the holding area",
+                        d2.id,
+                        d2.original_filename,
+                    )
+                elif problem == "ambiguous_po_number":
+                    logger.warning(
+                        "Document %s (%s) shows more than one PO number — it was not "
+                        "placed in a PO Set and waits for a human",
+                        d2.id,
+                        d2.original_filename,
+                    )
+                elif ps_id is not None:
+                    if d2.po_set_id is None:
+                        d2.po_set_id = ps_id
+                        s2.commit()
+                    touched_po_set_ids.add(ps_id)
+        except Exception:
+            logger.warning("Grouping failed for doc %s", doc_id, exc_info=True)
+            errors += 1
+
+        _clear_resent_duplicate(eng, doc_id, f)
+
+    for doc_id, f in failed_docs:
+        _quarantine_broken_document(doc_id, cfg, eng, f, touched_po_set_ids)
 
     _flush_deferred_quarantines(deferred_400, cfg, eng, touched_po_set_ids)
 

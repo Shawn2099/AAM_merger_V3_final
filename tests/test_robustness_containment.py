@@ -198,6 +198,11 @@ def test_file_still_growing_is_left_for_the_next_sync(rcfg, monkeypatch):
 
 
 def test_402_mid_sync_then_key_restored_merges_on_the_next_sync(rcfg, monkeypatch):
+    # One worker keeps the original deterministic order: PO is read and its set
+    # exists before the DN's 402 stops the pass. Parallel fault behaviour (no
+    # new work after the trip, in-flight window drains) is pinned separately in
+    # tests/test_parallel_extraction.py.
+    rcfg.prefect.max_concurrent_extraction_tasks = 1
     responses = _good()
     good_dn = responses[W_DN]
     responses[W_DN] = ("status", 402, {"error": {"message": "Key limit exceeded", "code": 402}})
@@ -298,9 +303,14 @@ def test_document_stuck_in_processing_after_a_crash_is_reclaimed_and_read(rcfg, 
     assert ps.status == POSetStatus.merged, ps.reconcile_reason
 
 
-def test_a_recent_processing_claim_is_respected_and_counted_as_extracted(rcfg, monkeypatch):
-    """Observed: a fresh `processing` row (another worker) is not touched, but the
-    sync summary counts it under `extracted` (flows/sync.py:648) - cosmetic."""
+def test_a_recent_processing_claim_is_respected_and_not_counted_as_extracted(rcfg, monkeypatch):
+    """A fresh `processing` row (another worker) is not touched and is not
+    reported as extracted.
+
+    The old summary counted any status that was not `failed` as extracted,
+    which hid a crashed/unread document behind a green number. The row is the
+    source of truth: only `valid` counts.
+    """
     HttpVLM(monkeypatch, _good())
     from app.services.ingestion import ingest_file
 
@@ -315,7 +325,7 @@ def test_a_recent_processing_claim_is_respected_and_counted_as_extracted(rcfg, m
         )
         s.commit()
     res = run_sync()
-    assert res["extracted"] == 1 and res["errors"] == 0
+    assert res["extracted"] == 0 and res["errors"] == 0
     assert _status(rcfg, doc.id)[0] == ExtractionStatus.processing
 
 

@@ -37,6 +37,9 @@ vlm:
   raster_dpi: 150
   reasoning_effort: "high"
   max_pages: 30
+  # PDF rendering is CPU-bound: on a 2-core host keep this at 2 even when
+  # extraction reads 3 documents in parallel.
+  rasterize_concurrency: 2
   api_key_env_var: "OPENROUTER_API_KEY"
 
 extraction:
@@ -81,7 +84,10 @@ ingestion:
 
 prefect:
   work_pool_name: "aam-merger-process-pool"
-  # Not enforced: extraction is sequential. Do not treat it as a concurrency control.
+  # Hard cap on documents read at the same time by one sync. The flow runs this
+  # many VLM calls in parallel (bounded thread pool); the default of 3 is the
+  # SPEC value and is sized for a 2-core host. Raising it is a capacity change,
+  # not a tuning knob: each call is a paid request and holds one connection.
   max_concurrent_extraction_tasks: 3
   # The scheduled daily sync runs at 11:00 AM in this zone. IST is the client default and
   # is also what `scripts/deploy_prefect.py` falls back to when the key is
@@ -138,3 +144,30 @@ logging:
 # Database backup is NOT configured here. It was removed 2026-09-29 because
 # nothing read it. NFR-6 backup is a runbook item for the Windows host
 # (SQLite .backup), not application code.
+
+auth:
+  # Handover hardening (2026-11-02). ON by default: every route except /health,
+  # /login and /static requires a signed-in account. Create the first admin
+  # before starting the service:
+  #     python -m app.auth.cli create-user --username alice --role admin
+  # With no accounts the service starts fail-closed: /health works, everything
+  # else sends you to /login, and login says no accounts are configured.
+  enabled: true
+  cookie_name: "aam_session"
+  # auto = Secure only over HTTPS; always = behind a TLS-terminating proxy;
+  # never = only for a loopback-only lab install.
+  cookie_secure: "auto"
+  session_idle_minutes: 480
+  session_absolute_hours: 12
+  remember_me_days: 14
+  password_min_length: 12
+  # Failed logins are counted in the database (shared by every worker).
+  login_max_failures: 5
+  login_max_failures_per_ip: 20
+  login_window_minutes: 15
+  auth_event_retention_days: 180
+  # Unattended install only: when the users table is empty, create the first
+  # admin from AAM_BOOTSTRAP_ADMIN_USERNAME / AAM_BOOTSTRAP_ADMIN_PASSWORD.
+  # The account must change its password at first login. Remove the variables
+  # afterwards (they are ignored once any user exists).
+  bootstrap_from_env: false

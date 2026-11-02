@@ -85,8 +85,10 @@ the existing watcher idle at its next tick.
 
 ## Security
 
-No login, as everywhere else (PRODUCT section 8); the Origin guard and the allowed-host list apply to the POST, and every
-save is audited. The API key is never read into a response.
+The page is administrator-only. Operators do not see the link and the server
+returns 403 for both GET and POST; the Origin guard, the session CSRF token and
+the allowed-host list also apply, and every save is audited with the
+administrator's username. The API key is never read into a response.
 
 ## Tests
 

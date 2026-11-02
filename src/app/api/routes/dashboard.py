@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.routes.po_sets import _scrub_paths
 from app.api.templating import templates
+from app.auth.context import actor_source
 from app.core.config import load_config
 from app.core.database import get_engine
 from app.models import (
@@ -1297,7 +1298,7 @@ def _audit_summary(action: str, detail: dict) -> str:
         changes = detail.get("changes")
         if isinstance(changes, dict) and changes:
             return "; ".join(
-                f"{key}: {value.get('old')} → {value.get('new')}"
+                f"{key}: {value.get('old')} — {value.get('new')}"
                 for key, value in changes.items()
                 if isinstance(value, dict)
             )
@@ -2012,7 +2013,7 @@ def reclassify_document(
                         "note": note,
                     }
                 ),
-                source="operator",
+                source=actor_source(),
             )
         )
         s.commit()
@@ -2068,7 +2069,7 @@ def reclassify_document(
             try:
                 from app.services.merge import append_customs_if_complete
 
-                append_customs_if_complete(attached_ps_id, cfg)
+                append_customs_if_complete(attached_ps_id, cfg, source=actor_source())
             except Exception as e:
                 # append_customs_if_complete has already persisted the pending
                 # flag; the operator is told rather than left with a log line.

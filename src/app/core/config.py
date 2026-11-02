@@ -70,6 +70,10 @@ class VLMConfig(_StrictConfigModel):
     raster_dpi: int = Field(default=150, ge=72, le=300)
     reasoning_effort: Literal["minimal", "low", "medium", "high"] = "high"
     max_pages: int = Field(default=30, ge=1)
+    #: PDF pages are rasterised with PyMuPDF (CPU + memory). On a 2-core host,
+    #: three simultaneous renders starve the web process and SQLite; keep this
+    #: at or below prefect.max_concurrent_extraction_tasks.
+    rasterize_concurrency: int = Field(default=2, ge=1, le=4)
 
 
 class ExtractionConfig(_StrictConfigModel):
@@ -271,6 +275,40 @@ class ReconciliationConfig(_StrictConfigModel):
     single_po_document: bool = True
 
 
+class AuthConfig(_StrictConfigModel):
+    """Operator authentication (handover hardening, 2026-11-02).
+
+    Authentication was an accepted risk while the tool was a single-operator
+    LAN experiment. Before handover it is on by default: every route except
+    health, login and static assets requires a session.
+
+    Sessions are opaque random tokens stored (hashed) in the database, not
+    signed cookies. That keeps logout/revocation working, and the same table
+    works unchanged when the service moves to Postgres or runs multiple
+    uvicorn workers. No signing secret is required.
+
+    `cookie_secure: auto` sets the Secure flag only when the request arrived
+    over HTTPS. Behind a TLS-terminating proxy set `always` (and configure
+    uvicorn `--proxy-headers` only for trusted proxies).
+    """
+
+    enabled: bool = True
+    cookie_name: str = "aam_session"
+    cookie_secure: Literal["auto", "always", "never"] = "auto"
+    session_idle_minutes: int = Field(default=480, ge=5, le=10080)
+    session_absolute_hours: int = Field(default=12, ge=1, le=720)
+    remember_me_days: int = Field(default=14, ge=0, le=365)
+    password_min_length: int = Field(default=12, ge=8, le=128)
+    login_max_failures: int = Field(default=5, ge=1, le=100)
+    login_max_failures_per_ip: int = Field(default=20, ge=1, le=1000)
+    login_window_minutes: int = Field(default=15, ge=1, le=1440)
+    auth_event_retention_days: int = Field(default=180, ge=1, le=3650)
+    #: Create the first admin from AAM_BOOTSTRAP_ADMIN_USERNAME /
+    #: AAM_BOOTSTRAP_ADMIN_PASSWORD when the users table is empty. Intended
+    #: for unattended installs; remove the variables after first login.
+    bootstrap_from_env: bool = False
+
+
 class LoggingConfig(_StrictConfigModel):
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     max_file_size_mb: int = Field(default=10, ge=1, le=1024)
@@ -291,6 +329,7 @@ class AppConfig(BaseSettings):
     manual_merge: ManualMergeConfig = ManualMergeConfig()
     reconciliation: ReconciliationConfig = ReconciliationConfig()
     logging: LoggingConfig = LoggingConfig()
+    auth: AuthConfig = AuthConfig()
 
     # Audit P2-16: an unknown *top-level* key (e.g. `pathz:`) is an error too.
     # The YAML file is the only settings source — see

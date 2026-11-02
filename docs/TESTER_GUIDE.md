@@ -18,8 +18,10 @@ Open this address in Chrome or Edge:
 http://<server-ip>:8000/dashboard
 ```
 
-There is no login. Everyone in the office sees the same dashboard and the same
-documents. The tool runs on one PC; your browser only displays it.
+Sign in with your own username and password. Everyone in the office sees the
+same dashboard and the same documents, but each person has a named account so
+the audit log records who acted. The tool runs on one PC; your browser only
+displays it. Sign out when you leave a shared machine.
 
 ---
 
@@ -114,8 +116,8 @@ The **🚨 Quarantine** page lists sets that failed a critical check and documen
 that could not be read at all. Each row states the reason in plain language.
 
 **Delete is an archive action.** It moves the set to
-`data/development/archived_sets`, keeps every database record and every stored
-PDF, and writes an audit entry.
+`data/quarantine/_archived_sets` (the configured `paths.archive_folder`), keeps
+every database record and every stored PDF, and writes an audit entry.
 
 **Move to quarantine and remove set** is the one action that deletes rows. It is
 at the bottom of an open set's page. It copies every PDF of the set (and the

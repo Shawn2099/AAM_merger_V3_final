@@ -1,5 +1,13 @@
 # AAM Merger V3 — Production Deployment & Operations Guide
 
+> **2026-11-02:** authentication is required; create the first administrator
+> with `python -m app.auth.cli create-user --username <name> --role admin`.
+> Extraction is parallel up to `prefect.max_concurrent_extraction_tasks` and the
+> database head is `f1a2b3c4d5e6`. See
+> [`HANDOVER_HARDENING_2026-11-02.md`](./HANDOVER_HARDENING_2026-11-02.md).
+> This guide's `deploy.bat` path is the older of the two installers; `DEPLOY.md`
+> currently recommends `setup_test_rig.ps1`.
+
 > **Target Platform:** Windows Server 2016 / Windows 10/11 (64-bit)  
 > **Architecture:** Standalone Host with LAN client browser access (`http://<server-ip>:8000`)  
 > **Key Services:** FastAPI (Web Dashboard) + Prefect Process Worker + Prefect Server (NSSM Windows Services)

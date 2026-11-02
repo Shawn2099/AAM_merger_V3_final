@@ -3,14 +3,16 @@
 Cross-platform configuration, WAL SQLite engine, static asset mounting,
 RotatingFileHandler logging (SPEC NFR-4), and comprehensive route inclusion.
 
-Two hardened middlewares sit in front of every route (audit P1-10):
+Three hardened middlewares sit in front of every route:
 
+* `AuthMiddleware` — default-deny. Every route except `/health`, `/login` and
+  `/static` needs a valid session; a write also needs the session's CSRF token
+  (enforced by the `csrf_protect` dependency).
 * `OriginGuardMiddleware` — a state-changing request whose `Origin`/`Referer`
   names a different host than the request is refused. Requests that carry
-  neither header (curl, an HTMX client, an integration test) are still
-  accepted: the app has no cookie-based session to ride, so the guard is
-  against a *browser* being told to act for someone else (CSRF), not a
-  general authentication layer.
+  neither header (curl, an integration test) are still passed through; the
+  CSRF token is the primary defence for a cookie-bearing browser, and this
+  guard is defence in depth. It is not an authentication layer.
 * `TrustedHostMiddleware` — only mounted when `server.allowed_hosts` is not
   `["*"]` (the default). It closes DNS rebinding when the host has a stable
   name or address.
@@ -25,7 +27,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import URL, Headers
@@ -40,9 +42,13 @@ from app.api.routes.po_sets import router as po_sets_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.sync import router as sync_router
 from app.api.templating import templates
+from app.auth.csrf import csrf_protect
+from app.auth.middleware import AuthMiddleware
+from app.auth.routes import router as auth_router
 from app.core.config import load_config
 from app.core.http_errors import BodyTooLarge, error_response, wants_html
 from app.core.limits import MAX_MANUAL_MERGE_REQUEST_BYTES, MAX_UPLOAD_BYTES
+from app.core.security_headers import SecurityHeadersMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +83,14 @@ def _origin_parts(value: str) -> tuple[str, int | None, int | None] | None:
 class OriginGuardMiddleware:
     """Refuse cross-origin POST/PUT/PATCH/DELETE (audit P1-10).
 
-    No authentication is accepted risk (PRODUCT §8); CSRF is not. A malicious
-    page can otherwise make the operator's browser force-merge a PO Set or
-    upload a PDF. The check is a same-origin comparison of the `Origin` (or
-    the `Referer` when the browser sends only that) against the request's
-    `Host`. A request with neither header is allowed so the documented
-    operator workflows — `curl`, HTMX, `TestClient` — keep working.
+    CSRF is defended primarily by the per-session synchronizer token in
+    `app.auth.csrf`; this same-origin check is the second layer. A malicious
+    page must not be able to make the operator's browser force-merge a PO Set
+    or upload a PDF even if it somehow obtains a token. The check compares the
+    `Origin` (or the `Referer` when the browser sends only that) against the
+    request's `Host`. A request with neither header is allowed so the
+    documented operator workflows — `curl`, HTMX, `TestClient` — keep working;
+    a cookie-bearing write still needs the CSRF token.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -268,11 +276,22 @@ async def lifespan(app: FastAPI):
     # Schema creation is a startup action, not a per-poll one. Every route used
     # to call `create_all` (the dashboard does it every 2 s); `CREATE TABLE IF
     # NOT EXISTS` is cheap but it is still a writer competing with merges.
-    from app.core.database import get_engine
-    from app.models.base import Base
+    from app.core.database import ensure_schema
 
-    Base.metadata.create_all(get_engine(cfg))
+    engine = ensure_schema(cfg)
     _setup_logging()
+
+    # Authentication: create the first admin from the environment only on an
+    # empty install, then prune expired sessions/events. Fail closed — if the
+    # auth tables cannot be prepared, startup fails rather than running open.
+    if cfg.auth.enabled:
+        from sqlalchemy.orm import Session
+
+        from app.auth.service import bootstrap_from_env, cleanup
+
+        bootstrap_from_env(cfg)
+        with Session(engine) as s:
+            cleanup(s, cfg=cfg)
 
     # A crashed merge can leave `mm-*.pdf` staging files behind. Sweep only
     # this tool's own prefix in its own folder; never touch a real document.
@@ -350,28 +369,52 @@ def _configured_allowed_hosts() -> list[str]:
             exc_info=True,
         )
         return ["*"]
+    if hosts and hosts != ["*"]:
+        # The installer and verify_deployment.ps1 probe /health over loopback.
+        # Allowing loopback names does not widen LAN exposure: a remote client
+        # cannot make its Host header resolve to 127.0.0.1 on this machine.
+        for loopback in ("127.0.0.1", "localhost"):
+            if loopback not in hosts:
+                hosts.append(loopback)
     return hosts or ["*"]
 
 
 def _styled_http_error(request: Request, exc: Exception):
-    """A browser navigation to an unknown page gets the themed error page.
+    """A browser navigation to an unknown or refused page gets the themed page.
 
-    API clients, HTMX requests and any non-404 status keep the JSON body that
-    FastAPI returns by default. Synchronous on purpose: it does no I/O.
+    API clients, HTMX requests and any status outside the browser-facing set
+    keep the JSON body that FastAPI returns by default. Synchronous on purpose:
+    it does no I/O.
     """
     if not isinstance(exc, StarletteHTTPException):
         raise exc
-    if exc.status_code == 404 and wants_html(request) and "HX-Request" not in request.headers:
+    browser_statuses = {
+        401: ("Sign in required", "Your session has ended. Sign in again to continue."),
+        403: ("Not allowed", "You do not have permission to perform this action."),
+        429: ("Too many attempts", "Wait a few minutes, then try again."),
+        404: ("Page not found", None),
+        503: ("Temporarily unavailable", "The service is busy or starting. Try again shortly."),
+    }
+    if (
+        exc.status_code in browser_statuses
+        and wants_html(request)
+        and "HX-Request" not in request.headers
+    ):
+        heading, default_message = browser_statuses[exc.status_code]
         message = (
-            "There is no page at this address. Check the link, or go back to the dashboard."
-            if exc.detail in (None, "Not Found")
-            else str(exc.detail)
+            default_message
+            if default_message is not None
+            else (
+                "There is no page at this address. Check the link, or go back to the dashboard."
+                if exc.detail in (None, "Not Found")
+                else str(exc.detail)
+            )
         )
         return templates.TemplateResponse(
             request,
             "error.html",
-            {"code": 404, "heading": "Page not found", "message": message},
-            status_code=404,
+            {"code": exc.status_code, "heading": heading, "message": message},
+            status_code=exc.status_code,
         )
     return JSONResponse(
         {"detail": exc.detail},
@@ -380,19 +423,29 @@ def _styled_http_error(request: Request, exc: Exception):
     )
 
 
-def create_app(allowed_hosts: list[str] | None = None) -> FastAPI:
+def create_app(allowed_hosts: list[str] | None = None, auth_enabled: bool | None = None) -> FastAPI:
     """Build the application.
 
-    `allowed_hosts` is injectable so a test can assert the TrustedHost wiring
-    without writing a config file.
+    `allowed_hosts` and `auth_enabled` are injectable so a test can assert the
+    wiring without writing a config file. `auth_enabled=None` follows config.
     """
     hosts = _configured_allowed_hosts() if allowed_hosts is None else list(allowed_hosts)
 
-    app = FastAPI(title="AAM Merger V3", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(
+        title="AAM Merger V3",
+        version="0.1.0",
+        lifespan=lifespan,
+        # The schema listed every route, parameter and model to anonymous LAN
+        # users. There is no public API contract to publish on this host.
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.add_exception_handler(StarletteHTTPException, _styled_http_error)
 
-    # Middleware order: the last added is the outermost. TrustedHost runs
-    # before the body guard, which runs before the origin check.
+    # Middleware order: the last added is the outermost. A request passes
+    # TrustedHost -> security headers -> authentication -> body cap -> origin
+    # check -> route.
     app.add_middleware(OriginGuardMiddleware)
     app.add_middleware(
         BodySizeLimitMiddleware,
@@ -411,6 +464,17 @@ def create_app(allowed_hosts: list[str] | None = None) -> FastAPI:
         heading="That upload didn't work",
         back_href=lambda scope: scope["path"].removesuffix("/upload") + "/view",
     )
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        paths=("/login", "/settings", "/account/password"),
+        methods=("POST",),
+        max_bytes=1024 * 1024,
+        display_mb=1,
+        heading="That form was too large",
+        back_href="/dashboard",
+    )
+    app.add_middleware(AuthMiddleware, enabled=auth_enabled)
+    app.add_middleware(SecurityHeadersMiddleware)
     if hosts != ["*"]:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 
@@ -419,12 +483,14 @@ def create_app(allowed_hosts: list[str] | None = None) -> FastAPI:
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-    # Include routers
-    app.include_router(sync_router)
-    app.include_router(po_sets_router)
-    app.include_router(manual_router)
-    app.include_router(settings_router)
-    app.include_router(dashboard_router)
+    # Include routers. Login/logout/password carry their own CSRF rule; every
+    # business route requires the session token on writes.
+    app.include_router(auth_router)
+    app.include_router(sync_router, dependencies=[Depends(csrf_protect)])
+    app.include_router(po_sets_router, dependencies=[Depends(csrf_protect)])
+    app.include_router(manual_router, dependencies=[Depends(csrf_protect)])
+    app.include_router(settings_router, dependencies=[Depends(csrf_protect)])
+    app.include_router(dashboard_router, dependencies=[Depends(csrf_protect)])
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():

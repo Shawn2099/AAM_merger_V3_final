@@ -30,8 +30,14 @@ exactly, in scaled integers. One unresolvable line fails the whole set.
 cp config.example.yaml config.yaml    # then edit paths; set OPENROUTER_API_KEY in .env
 uv sync --all-groups
 uv run python scripts/migrate_db.py   # safe for fresh and create_all-era DBs
+uv run python -m app.auth.cli create-user --username admin --role admin
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+
+Authentication is on by default (`auth.enabled: true`). Open
+`http://<host>:8000/login`; with no accounts the service says so and refuses
+every page until an administrator is created. The CLI prompts for the password
+(twice); `--password-stdin` exists for an unattended installer.
 
 Checks:
 
@@ -50,8 +56,11 @@ reconciliation, grouping or the reporting routes.
 ## Delivering it to users
 
 - [`docs/DELIVERY.md`](./docs/DELIVERY.md) — install on the client's single PC
-  (firewall, Windows services, Prefect pool + midnight schedule, no-pruning
+  (firewall, Windows services, Prefect pool + 11:00 IST schedule, no-pruning
   backups, development snapshots, archive, handover checklist).
+- [`docs/HANDOVER_HARDENING_2026-11-02.md`](./docs/HANDOVER_HARDENING_2026-11-02.md) —
+  authentication, parallel extraction, and the remaining owner decisions
+  (TLS, PyMuPDF licence, restore drill, installer consolidation).
 - [`docs/TESTER_GUIDE.md`](./docs/TESTER_GUIDE.md) — the one-page guide for the
   people who will use the dashboard.
 - [`docs/PILOT_RELEASE_2026-10-23.md`](./docs/PILOT_RELEASE_2026-10-23.md) —
@@ -73,7 +82,8 @@ rapidfuzz · pypdf · PyMuPDF (page rasterising) · Jinja2 + HTMX + Alpine.js ·
 | `src/app/services/matching.py` | the rule: group, sum, compare |
 | `src/app/services/reconciliation.py` | `compare_po_set_lines` (one entry point, used by the engine *and* the dashboard) and `reconcile_po_set` |
 | `src/app/services/extraction.py` | the VLM schema — the whole contract with the model |
-| `src/app/models/models.py` | the four tables |
+| `src/app/auth/` | Argon2id passwords, DB sessions, CSRF, login/logout, account CLI |
+| `src/app/models/models.py` | the business tables plus `users`/`auth_sessions`/`auth_events` |
 | `AAM_merger_V3_PRODUCT.md` | the contract. Read before changing anything. |
 
 ## Known limitations

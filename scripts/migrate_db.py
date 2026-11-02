@@ -72,6 +72,8 @@ _MARKERS: list[tuple[str, str]] = [
     # d5e6 dropped line_items.unit_price: an ABSENCE, so a synthetic key.
     ("unit_price_dropped", "d5e6f7a8b9c0"),
     ("po_sets.line_mapping_rule", "e8f9a0b1c2d3"),
+    # Handover hardening: the three authentication tables are created together.
+    ("auth_schema", "f1a2b3c4d5e6"),
 ]
 
 
@@ -143,6 +145,8 @@ def detect_stamp(db_path: Path) -> str | None:
             and "archived_at IS NULL" in index_sql.get("ix_documents_sha256_hash", "")
         ):
             known.add("archive_schema")
+        if {"users", "auth_sessions", "auth_events"} <= tables:
+            known.add("auth_schema")
         stamp: str | None = None
         for marker, revision in _MARKERS:
             if marker in known:
@@ -201,7 +205,7 @@ def _alembic_config():
     return cfg
 
 
-HEAD_REVISION = "e8f9a0b1c2d3"
+HEAD_REVISION = "f1a2b3c4d5e6"
 
 
 def _current_revision(db_path: Path) -> str | None:
@@ -259,6 +263,9 @@ def verify(report: dict) -> None:
         cols = _columns(conn, "documents")
         ps_cols = _columns(conn, "po_sets")
         li_cols = _columns(conn, "line_items")
+        tables = {
+            row[0] for row in conn.execute("select name from sqlite_master where type='table'")
+        }
         index_sql = {
             row[0]: row[1] or ""
             for row in conn.execute(
@@ -310,6 +317,12 @@ def verify(report: dict) -> None:
         raise RuntimeError(
             f"migration reported {report['revision']!r} but {db_path} has the old "
             "document hash index; archived bytes could never be re-ingested"
+        )
+    missing_auth = sorted({"users", "auth_sessions", "auth_events"} - tables)
+    if missing_auth:
+        raise RuntimeError(
+            f"migration reported {report['revision']!r} but {db_path} is missing "
+            f"authentication tables {missing_auth} — do not start the app"
         )
 
 

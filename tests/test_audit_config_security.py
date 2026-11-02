@@ -217,6 +217,26 @@ def test_trusted_host_is_mounted_when_configured():
         assert refused.post("/no-such-route").status_code == 400
 
 
+def test_configured_allowed_hosts_also_allows_loopback_health_probes(monkeypatch):
+    """The installer and verify_deployment.ps1 probe /health over 127.0.0.1.
+
+    A pinned host list must not make the installer's own smoke test fail.
+    Loopback is not a LAN exposure: a remote client cannot claim 127.0.0.1
+    as its Host and reach this machine.
+    """
+    import app.main as main_module
+
+    cfg = _load(EXAMPLE)
+    cfg.server.allowed_hosts = ["aam.test", "10.0.0.5"]
+    monkeypatch.setattr(main_module, "load_config", lambda path=None: cfg)
+
+    hosts = main_module._configured_allowed_hosts()
+
+    assert "aam.test" in hosts
+    assert "127.0.0.1" in hosts
+    assert "localhost" in hosts
+
+
 # ---------------------------------------------------------------------------
 # P2-16 — a typo stops startup instead of silently running on the default
 # ---------------------------------------------------------------------------

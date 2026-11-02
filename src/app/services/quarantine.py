@@ -14,7 +14,8 @@ from pathlib import Path
 from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
 
-from app.core.database import get_engine
+from app.auth.context import actor_source
+from app.core.database import ensure_schema, get_engine
 from app.models import (
     AuditAction,
     AuditLog,
@@ -24,7 +25,6 @@ from app.models import (
     POSet,
     POSetStatus,
 )
-from app.models.base import Base
 from app.services.manual_merge import manual_merge  # noqa: F401  (re-export, FR-14.11)
 
 logger = logging.getLogger(__name__)
@@ -401,8 +401,7 @@ def quarantine_copy(
     Accepts POSet object or po_set_id int.
     """
     if isinstance(po_set, int):
-        eng = get_engine(cfg)
-        Base.metadata.create_all(eng)
+        eng = ensure_schema(cfg)
         with Session(eng) as s:
             ps = s.get(POSet, po_set)
             if ps is None:
@@ -451,8 +450,7 @@ def quarantine_document(doc_id: int, cfg, reason: str, *, source: str = "system"
 
     Returns the quarantine folder for the document.
     """
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
+    eng = ensure_schema(cfg)
     with Session(eng) as s:
         doc = s.get(Document, doc_id)
         if doc is None:
@@ -649,8 +647,7 @@ def _set_aside_locked(doc_id: int, cfg) -> Path | None:
     a quarantine copy (a rejected file, or an earlier quarantine), its original
     reason is kept and no second copy is made.
     """
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
+    eng = ensure_schema(cfg)
     with Session(eng) as s:
         doc = s.get(Document, doc_id)
         if doc is None:
@@ -701,13 +698,13 @@ def _set_aside_locked(doc_id: int, cfg) -> Path | None:
             cfg,
             SET_ASIDE_REASON,
             text,
-            source="operator",
+            source=actor_source(),
             document_id=doc_id,
             folder=str(folder),
             set_aside=True,
         )
     else:
-        folder = quarantine_document(doc_id, cfg, SET_ASIDE_REASON, source="operator")
+        folder = quarantine_document(doc_id, cfg, SET_ASIDE_REASON, source=actor_source())
 
     with Session(eng) as s:
         result = s.execute(
@@ -997,8 +994,7 @@ def archive_quarantined(
     resurrect the set. A newer active document with the same bytes is left
     alone: re-uploading after an archive is a supported workflow.
     """
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
+    eng = ensure_schema(cfg)
     with Session(eng) as s:
         ps = s.get(POSet, po_set_id)
         if ps is None:
@@ -1373,8 +1369,7 @@ def remove_set_to_quarantine(
             "They resume when the sync finishes; a large batch can take an hour or more.",
         )
     try:
-        eng = get_engine(cfg)
-        Base.metadata.create_all(eng)
+        eng = ensure_schema(cfg)
         with Session(eng) as s:
             ps = s.get(POSet, po_set_id)
             if ps is None:
@@ -1442,7 +1437,9 @@ def remove_set_to_quarantine(
             files_dir = stage / "files"
             files_dir.mkdir(parents=True)
         except OSError as exc:
-            raise SetRemovalRefused(500, f"Could not create removal staging directory: {exc}") from exc
+            raise SetRemovalRefused(
+                500, f"Could not create removal staging directory: {exc}"
+            ) from exc
         moved: list[tuple[Path, Path]] = []
         missing: list[str] = []
         try:
