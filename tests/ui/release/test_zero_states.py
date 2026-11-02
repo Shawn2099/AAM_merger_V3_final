@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from playwright.sync_api import Page, expect
 
-from release_helpers import FAVICON
+from release_helpers import FAVICON, number_in
 
 EMPTY_STATES = [
     (
@@ -61,6 +61,8 @@ def test_empty_all_tab_explains_how_to_start(page: Page, empty_base_url: str):
 def test_empty_database_still_has_zeroed_kpis_and_navigation(page: Page, empty_base_url: str):
     page.goto(f"{empty_base_url}/dashboard")
     for test_id in ("kpi-total", "kpi-merged", "kpi-mismatched", "kpi-quarantined"):
-        expect(page.get_by_test_id(test_id)).to_be_visible()
+        kpi = page.get_by_test_id(test_id)
+        expect(kpi).to_be_visible()
+        assert number_in(kpi) == 0, f"{test_id} should be zero, got {kpi.inner_text()!r}"
     for href in ("/dashboard", "/unclassified", "/quarantine", "/audit", "/manual/merger"):
         assert page.locator(f'nav a[href="{href}"]').count() >= 1, href

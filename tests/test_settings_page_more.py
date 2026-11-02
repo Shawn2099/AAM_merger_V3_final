@@ -12,7 +12,6 @@ from __future__ import annotations
 import copy
 import os
 import re
-import stat
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -120,25 +119,27 @@ def config_version(html: str) -> str:
 # ------------------------------------------------------------------------ B-01
 
 
-def test_b_01_an_unwritable_file_is_refused_without_a_500(client, cfg_file):
-    """A read-only config must be explained, not crash, and must stay untouched."""
+def test_b_01_an_unwritable_file_is_refused_without_a_500(client, cfg_file, monkeypatch):
+    """A read-only config must be explained, not crash, and must stay untouched.
+
+    The failure is forced at the atomic-replace step, so the test runs the same
+    way on Windows and POSIX (``os.access`` on Windows says a read-only file is
+    writable, which made the old chmod test skip on the production OS).
+    """
     before = cfg_file.read_bytes()
-    os.chmod(cfg_file, stat.S_IREAD)
-    try:
-        if os.access(cfg_file, os.W_OK):
-            pytest.skip("this platform/user can still write a read-only file")
-        r = client.post(
-            "/settings", data=_form(client, cfg_file, schedule__poll_interval_seconds=90)
-        )
-        assert r.status_code == 409, r.status_code
-        assert 'data-testid="settings-error"' in r.text
-        assert "could not be written" in r.text
-        assert cfg_file.read_bytes() == before
-        assert not (cfg_file.parent / ".config.yaml.candidate").exists()
-        assert not list(cfg_file.parent.glob("*.candidate"))
-        assert _audit_rows(cfg_file) == []
-    finally:
-        os.chmod(cfg_file, stat.S_IREAD | stat.S_IWRITE)
+    monkeypatch.setattr(
+        svc,
+        "_replace_with_retry",
+        lambda *a, **k: (_ for _ in ()).throw(PermissionError("read-only test file")),
+    )
+    r = client.post("/settings", data=_form(client, cfg_file, schedule__poll_interval_seconds=90))
+    assert r.status_code == 409, r.status_code
+    assert 'data-testid="settings-error"' in r.text
+    assert "could not be written" in r.text
+    assert cfg_file.read_bytes() == before
+    assert not (cfg_file.parent / ".config.yaml.candidate").exists()
+    assert not list(cfg_file.parent.glob("*.candidate"))
+    assert _audit_rows(cfg_file) == []
 
 
 # ------------------------------------------------------------------------ B-02
@@ -432,10 +433,13 @@ def test_b_10_every_setting_round_trips_on_the_real_example_file(newline):
 # ------------------------------------------------------------------------ B-11
 
 
-def test_b_11_the_repo_config_is_editable_if_it_exists():
-    path = REPO / "config.yaml"
-    if not path.exists():
-        pytest.skip("the repo has no config.yaml (it is gitignored)")
+def test_b_11_the_example_config_is_editable():
+    """The committed example must be editable by the settings editor.
+
+    This used to read the developer's gitignored ``config.yaml`` and skip on a
+    fresh clone. The example is the reproducible contract.
+    """
+    path = REPO / "config.example.yaml"
     text = path.read_text(encoding="utf-8")
     for newline in ("\n", "\r\n"):
         variant = text if newline == "\n" else text.replace("\r\n", "\n").replace("\n", "\r\n")

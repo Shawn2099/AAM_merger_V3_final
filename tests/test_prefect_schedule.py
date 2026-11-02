@@ -1,4 +1,4 @@
-"""The midnight sync must run at the office's midnight, not UTC's.
+"""The daily sync must run at the office's configured time, not UTC's.
 
 Prefect's cron schedule is UTC unless a timezone is given. The deployment is
 built from config so the installer can set it per site; unset defaults to the

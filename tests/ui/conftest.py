@@ -33,6 +33,7 @@ def pytest_collection_modifyitems(config, items):
             "\\", "/"
         ):
             item.add_marker(pytest.mark.e2e)
+            item.add_marker(pytest.mark.slow)
             if os.getenv("RUN_E2E") != "1":
                 item.add_marker(skip)
 
@@ -105,7 +106,10 @@ def empty_ui_env(tmp_path_factory):
                 con.execute(f'delete from "{table}"')
     finally:
         con.close()
-    return env
+    try:
+        yield env
+    finally:
+        _stop(env.proc)
 
 
 @pytest.fixture(scope="session")
@@ -132,11 +136,25 @@ def scan_env(tmp_path_factory):
 
 
 def _stop(proc) -> None:
-    proc.terminate()
+    """Stop the whole server tree, not just the venv launcher.
+
+    ``sys.executable`` in a uv-created venv on Windows is a trampoline; killing
+    it leaves the real uvicorn child listening. ``taskkill /T`` reaps the child
+    too. The fallbacks keep this safe on POSIX and on a broken Windows host.
+    """
+    if os.name == "nt" and proc.poll() is None:
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            capture_output=True,
+            timeout=15,
+        )
+    elif proc.poll() is None:
+        proc.terminate()
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:  # pragma: no cover
         proc.kill()
+        proc.wait(timeout=5)
     if proc.stdout is not None:
         proc.stdout.close()
 
@@ -147,8 +165,15 @@ def base_url(ui_env):
     return ui_env.base
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def manifest(ui_env):
+    """Function-scoped on purpose.
+
+    A session-scoped ``manifest`` is cached by fixture NAME. If a release test
+    (which overrides ``ui_env`` for its directory) requests it first, every
+    later parent test would receive the release environment's manifest while
+    its page/server belong to the parent environment.
+    """
     return ui_env.manifest
 
 

@@ -4,7 +4,9 @@ Living file. Any agent, model or session: read this first, then `CLAUDE.md`, `do
 `AAM_merger_V3_PRODUCT.md`. Update the "Status" and "Log" sections whenever you finish a chunk, and commit it.
 Older state: `SESSION_HANDOFF.md` (2026-10-22, delivery readiness; still valid for deploy facts).
 
-Last updated: 2026-10-24. Branch `fix/mvp-high-priority`, remote `origin` (push the branch; never force-push; never push main).
+Last updated: 2026-11-03. Current test-suite branch `test/suite-hardening-2026-11-03`;
+see [`docs/TEST_SUITE_HANDOVER_2026-11-03.md`](docs/TEST_SUITE_HANDOVER_2026-11-03.md).
+Remote `origin` (push the branch; never force-push; never push main).
 
 > **2026-10-25: the forward plan, the full decision log (D1-D13), open questions Q1-Q6 and the delegation packets (WS0-WS9) live in `docs/DEPLOYMENT_PLAN.md`. Operating model: Opus architects/reviews, DeepSeek via OpenCode does token-heavy work.**
 

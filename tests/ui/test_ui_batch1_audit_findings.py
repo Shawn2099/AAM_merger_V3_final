@@ -4,19 +4,16 @@ Run with::
 
     RUN_E2E=1 python -m pytest tests/ui/test_ui_batch1_audit_findings.py -o addopts= -p no:cacheprovider
 
-Known issues are ``xfail(strict=True)``: they must fail today, and a fix will
-make them XPASS (then flip the marker).  The new-feature checks are normal
-tests and must pass.
+These are normal browser tests: a failure is a real regression, not a parked
+known issue. (The file no longer carries xfail markers.)
 """
 
 from __future__ import annotations
 
 import re
-import sqlite3
 from pathlib import Path
 from urllib.parse import urlparse
 
-import pytest
 from playwright.sync_api import Page, expect
 
 
@@ -115,8 +112,12 @@ def test_ui_files_set_aside_lists_failed_only(page: Page, manifest):
 
     failed = manifest["held"]["held_set_aside_failed_target"]
     valid = manifest["held"]["held_set_aside_target"]
-    expect(card.locator(f'[data-testid="set-aside-row"][data-doc-id="{failed["id"]}"]')).to_have_count(1)
-    expect(card.locator(f'[data-testid="set-aside-row"][data-doc-id="{valid["id"]}"]')).to_have_count(0)
+    expect(
+        card.locator(f'[data-testid="set-aside-row"][data-doc-id="{failed["id"]}"]')
+    ).to_have_count(1)
+    expect(
+        card.locator(f'[data-testid="set-aside-row"][data-doc-id="{valid["id"]}"]')
+    ).to_have_count(0)
 
 
 def test_ui_set_aside_report_is_true(page: Page, manifest, db):
@@ -127,27 +128,30 @@ def test_ui_set_aside_report_is_true(page: Page, manifest, db):
     row.get_by_test_id("btn-set-aside").click()
     expect(page.get_by_test_id("set-aside-result")).to_be_visible()
 
-    stored = db.execute(
-        "select stored_path from documents where id=?", (held["id"],)
-    ).fetchone()["stored_path"]
+    stored = db.execute("select stored_path from documents where id=?", (held["id"],)).fetchone()[
+        "stored_path"
+    ]
     report = (
-        Path(manifest["root"])
-        / "quarantine"
-        / "_documents"
-        / Path(stored).stem
-        / "QUARANTINE.txt"
+        Path(manifest["root"]) / "quarantine" / "_documents" / Path(stored).stem / "QUARANTINE.txt"
     )
     text = report.read_text(encoding="utf-8")
     assert "Attempts: 0/3" not in text
     assert "cap reached" not in text
 
 
-def test_ui_set_aside_from_quarantine_stays(page: Page, manifest):
+def test_ui_set_aside_from_quarantine_stays(page: Page, manifest, db):
     held = manifest["held"]["held_set_aside_failed_target"]
     page.goto("/quarantine")
     row = page.locator(f'[data-testid="set-aside-row"][data-doc-id="{held["id"]}"]')
+    expect(row).to_be_visible()
     row.get_by_test_id("btn-set-aside-quarantine").click()
-    page.wait_for_load_state()
+    # The form is a normal POST (303 back to /quarantine), not an HTMX swap:
+    # the row must disappear from the list and the document must be archived.
+    expect(row).to_have_count(0)
+    archived = db.execute(
+        "select archived_at from documents where id = ?", (held["id"],)
+    ).fetchone()
+    assert archived is not None and archived["archived_at"] is not None
     assert urlparse(page.url).path == "/quarantine"
 
 
@@ -190,7 +194,7 @@ def test_ui_ist_display(page: Page, manifest):
     first = page.get_by_test_id("unclassified-row").first
     expect(first).to_contain_text("IST")
 
-    sc = _open(page, manifest, "merged_basic")
+    _open(page, manifest, "merged_basic")
     expect(page.locator("body")).to_contain_text("IST")
 
 
@@ -256,7 +260,9 @@ def test_ui_re_match_toast_is_human(page: Page, manifest):
 
 def test_ui_accessibility_labels(page: Page, manifest):
     page.goto("/dashboard")
-    expect(page.locator('input[aria-label="Search PO sets by PO number or status"]')).to_have_count(1)
+    expect(page.locator('input[aria-label="Search PO sets by PO number or status"]')).to_have_count(
+        1
+    )
     expect(page.locator('label[for="status-filter"]')).to_have_count(1)
 
     held = manifest["held"]["held_dn_no_po"]
@@ -269,7 +275,5 @@ def test_ui_accessibility_labels(page: Page, manifest):
 def test_ui_narrow_window_does_not_scroll_sideways(page: Page):
     page.set_viewport_size({"width": 800, "height": 600})
     page.goto("/dashboard")
-    overflow = page.evaluate(
-        "() => document.documentElement.scrollWidth - window.innerWidth"
-    )
+    overflow = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
     assert overflow <= 1, f"page scrolls sideways by {overflow}px at 800px"

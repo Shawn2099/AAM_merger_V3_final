@@ -118,11 +118,14 @@ that could not be read at all. Each row states the reason in plain language.
 PDF, and writes an audit entry.
 
 **Move to quarantine and remove set** is the one action that deletes rows. It is
-at the bottom of an open set's page. It copies every PDF of the set (and the
-input-folder copies) to `quarantine/_removed_sets/<PO>_<stamp>_<id>/`, writes a
-JSON export and REMOVED.txt, and only then deletes the set's rows. The folder path
-is shown on screen. Merged and archived sets cannot be removed this way. The set disappears from the quarantine and
-dashboard lists, but nothing is destroyed. If you need the documents again, they
+at the bottom of any non-archived set's page, including a merged set. It copies
+every PDF of the set (and the input-folder copies) to
+`quarantine/_removed_sets/<PO>_<stamp>_<id>/`, writes a JSON export and REMOVED.txt,
+and only then deletes the set's rows. The folder path is shown on screen. Archived
+sets cannot be removed this way. For a merged set the delivered packet is also
+copied to the removal folder and unlinked from `output/`, so the output folder no
+longer holds it. The set disappears from the quarantine and dashboard lists, but
+nothing is destroyed. If you need the documents again, they
 are still on disk — ask the server operator. The same PDF can be uploaded again
 after a set is archived; the new upload becomes a fresh active document.
 
@@ -205,8 +208,10 @@ PO set, not global.
   back in the input folder.
 - **Unsplit multi-document PDFs** (several documents in one file) go to **Files set aside** on the
   Quarantine page. Split them outside the app and put the parts in the input folder.
-- **Removing a set:** at the bottom of an open set's page, **Move to quarantine and remove set**.
-  The files are copied first to `quarantine/_removed_sets/`; the folder path is shown. Read
-  `REMOVED.txt` in that folder to restore. Merged and archived sets cannot be removed this way.
+- **Removing a set:** at the bottom of any non-archived set's page, including a merged one,
+  **Move to quarantine and remove set**. The files are copied first to
+  `quarantine/_removed_sets/`; the folder path is shown. Read `REMOVED.txt` in that folder
+  to restore. Archived sets cannot be removed this way. Removing a merged set also copies its
+  delivered packet to the removal folder and unlinks it from `output/`.
 - **While a scan is running** the actions on sets, moves and removals are paused. They resume
   when the scan finishes; a large batch can take an hour or more.

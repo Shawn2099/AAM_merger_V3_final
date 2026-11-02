@@ -105,7 +105,12 @@ def test_a_per_po_lock_timeout_shorter_than_one_extraction_is_raised_not_refused
         cfg = AppConfig.model_validate(data)
     finally:
         lg.removeHandler(h)
-    assert cfg.concurrency.po_set_lock_timeout_seconds == 742 + 60
+    expected_floor = (
+        cfg.vlm.request_timeout_seconds * (cfg.extraction.max_retries + 1)
+        + sum(cfg.extraction.retry_backoff_seconds)
+        + 60
+    )
+    assert cfg.concurrency.po_set_lock_timeout_seconds == expected_floor
     assert any("po_set_lock_timeout_seconds" in m for m in seen)
 
 

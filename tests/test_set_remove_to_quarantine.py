@@ -190,7 +190,7 @@ def test_a_merged_set_can_be_removed_to_quarantine(cfg):
     with Session(get_engine(cfg)) as s:
         s.get(POSet, set_id).merged_output_path = str(out_file)
         s.commit()
-    result = q.remove_set_to_quarantine(set_id, cfg)
+    _ = q.remove_set_to_quarantine(set_id, cfg)
     with Session(get_engine(cfg)) as s:
         assert s.get(POSet, set_id) is None
         assert len(s.scalars(select(Document).where(Document.id.in_(doc_ids))).all()) == 0

@@ -1,0 +1,62 @@
+name: tests
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  linux:
+    name: Linux / Python 3.11
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: uv sync --all-groups
+      - name: Lint
+        run: uv run ruff check src scripts tests
+      - name: Fast suite
+        run: uv run pytest -q -m "not slow"
+      - name: Full non-UI suite (coverage floor 85%)
+        run: uv run pytest -q --ignore=tests/ui --cov-fail-under=85
+
+  windows:
+    name: Windows / Python 3.11
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: uv sync --all-groups
+      - name: Fast suite
+        run: uv run pytest -q -m "not slow"
+      - name: Full non-UI suite
+        run: uv run pytest -q --ignore=tests/ui
+
+  ui:
+    name: UI release gate / Windows
+    runs-on: windows-latest
+    needs: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: uv sync --all-groups
+      - name: Install Chromium
+        run: uv run playwright install chromium
+      - name: Parent UI suite
+        env:
+          RUN_E2E: "1"
+        run: uv run pytest tests/ui --ignore=tests/ui/release -q
+      - name: Release UI gate
+        env:
+          RUN_E2E: "1"
+        run: uv run pytest tests/ui/release -q

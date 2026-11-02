@@ -1,11 +1,10 @@
-"""Batch 1 audit findings: tests that expose the issues found in the code review.
+# ruff: noqa: F811
+"""Batch 1 audit findings: regression tests for issues found in the code review.
 
-These are deliberately separate from the product's acceptance tests.  A test
-marked ``xfail(strict=True)`` encodes "the code does this wrong today; when it
-is fixed, flip the marker".  Run with ``--runxfail`` to see the real failures.
-
-The two accepted P1 risks are pinned as characterization tests (they pass today
-and fail if the accepted behaviour changes), so the decision is visible.
+These are deliberately separate from the product's acceptance tests. The
+accepted P1 risks are pinned as characterization tests: they pass today and
+fail if the accepted behaviour changes, so the decision stays visible. There
+are no ``xfail`` markers in this file.
 """
 
 from __future__ import annotations
@@ -13,16 +12,15 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from test_business_scenarios_ui import _doc, _set, cfg, client  # noqa: F401
+from test_holding_set_aside import _held_valid_si
 
 from app.core.database import get_engine
 from app.models import AuditAction, AuditLog, DocType, POSet
 from app.services.quarantine import SetRemovalRefused, remove_set_to_quarantine, set_aside_document
 from app.services.reconciliation import reconcile_po_set
-from test_business_scenarios_ui import _doc, _set, cfg, client  # noqa: F401
-from test_holding_set_aside import _held_valid_si
 
 NOTE = "wrong document in the set; replacing it with the corrected scan"
 
@@ -96,7 +94,7 @@ def test_report_write_failure_after_commit_does_not_raise(cfg, client, monkeypat
     try:
         remove_set_to_quarantine(pid, cfg, note=NOTE)
         raised = None
-    except Exception as exc:  # noqa: BLE001 - the point is to report what escaped
+    except Exception as exc:
         raised = exc
 
     assert raised is None, f"removal raised after commit: {raised!r}"
@@ -117,7 +115,7 @@ def test_mkdir_failure_is_a_friendly_refusal(cfg, client, monkeypatch):
         raised = None
     except SetRemovalRefused as exc:
         raised = exc
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raised = exc
 
     assert isinstance(raised, SetRemovalRefused), f"unfriendly failure: {raised!r}"

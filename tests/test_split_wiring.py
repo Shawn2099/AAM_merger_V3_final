@@ -16,6 +16,7 @@ from app.models import DocType, Document, ExtractionStatus
 
 def _cfg(tmp_path, name="w.db"):
     cfg = load_config("config.example.yaml")
+    cfg.extraction.split_combined = True  # these tests exercise the splitter
     cfg.paths.database_path = str(tmp_path / name)
     cfg.paths.input_folder = str(tmp_path / "input")
     cfg.paths.output_folder = str(tmp_path / "output")

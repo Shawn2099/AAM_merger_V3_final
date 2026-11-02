@@ -34,6 +34,7 @@ dev = [
     "pytest>=8.4.0",
     "pytest-asyncio>=1.1.0",
     "pytest-cov>=7.0.0",
+    "pytest-timeout>=2.4.0",
     "ruff>=0.13.0",
     "ty>=0.0.1a20",
     "pip-audit>=2.9.0",
@@ -86,7 +87,7 @@ known-first-party = ["src", "app", "release_helpers"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --tb=short --strict-markers --cov=src --cov-fail-under=0 --cov-report=term-missing"
+addopts = "-q --tb=short --strict-markers --strict-config --timeout=300 --cov=src --cov-fail-under=0 --cov-report=term-missing"
 markers = [
     "slow: marks tests as slow",
     "e2e: browser end-to-end tests (opt-in via RUN_E2E=1)",

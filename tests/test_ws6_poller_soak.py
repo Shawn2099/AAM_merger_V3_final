@@ -40,6 +40,8 @@ from app.services import ingestion
 from app.services.poller import SyncPoller
 from app.services.reconciliation import SETTLING_PREFIX
 
+pytestmark = pytest.mark.slow
+
 SOAK = os.getenv("RUN_SOAK") == "1"
 SETS = 100 if SOAK else 20
 BATCHES = 10

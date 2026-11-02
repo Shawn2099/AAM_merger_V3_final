@@ -6,8 +6,6 @@ Passing tests pin acceptable behaviour; `xfail(strict=True)` marks a defect.
 from __future__ import annotations
 
 import errno
-import os
-import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -27,7 +25,7 @@ from test_robustness_harness import (
 )
 
 from app.core.database import get_engine
-from app.models import AuditLog, Document, ExtractionStatus, POSet, POSetStatus
+from app.models import AuditLog, Document, ExtractionStatus, POSetStatus
 
 
 @pytest.fixture()
@@ -690,8 +688,3 @@ def test_file_over_the_size_cap_is_rejected_and_listed_as_failed(rcfg, monkeypat
     (row,) = all_docs(rcfg)
     assert row.extraction_status == ExtractionStatus.failed
     assert row.po_set_id is None and "upload cap" in (row.ingest_reject_reason or "")
-
-
-def test_unused_imports_guard():
-    # keep linters quiet about helpers imported for symmetry
-    assert os and time and POSet

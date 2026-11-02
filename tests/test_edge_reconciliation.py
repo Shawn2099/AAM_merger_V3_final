@@ -177,11 +177,12 @@ def test_over_delivery_across_many_dns_is_caught(harness):
 # ------------------------------------------------------------------ degenerate
 
 
-def test_po_with_no_lines_stays_pending(harness):
+def test_po_with_no_lines_quarantines(harness):
     build, eng, cfg = harness
     pid = build([("PO", [], {}), ("DN", [], {}), ("SI", [], {"si_no": "I", "invoice_no": "I"})])
     res = reconcile_po_set(pid, cfg)
-    assert res["status"] in ("pending", "quarantined")
+    assert res["status"] == "quarantined"
+    assert res["reason"] == "po_document_has_no_line_items"
     assert _status(eng, pid)[1] is None
 
 
@@ -191,12 +192,6 @@ def test_missing_si_stays_pending(harness):
     res = reconcile_po_set(pid, cfg)
     assert res["status"] == "pending"
 
-
-def test_unknown_line_type_falls_back_to_goods(harness):
-    """Removed: line_type no longer exists. Tax/freight/fee rows are excluded
-    by the extraction prompt (STEP 3 'EXCLUDE subtotal, VAT, tax, ...') rather
-    than by a stored row kind. See AAM_merger_V3_PRODUCT.md, Accepted
-    limitations â€” a tax row the VLM fails to exclude will be summed."""
 
 
 def test_unexcluded_tax_row_summed_and_mismatches(harness):
