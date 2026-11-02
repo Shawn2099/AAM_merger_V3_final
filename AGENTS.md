@@ -178,7 +178,7 @@ cp config.example.yaml config.yaml  # then edit paths/model/thresholds; set OPEN
 
 ## 9. Open Items (resolve before claiming done)
 
-Exact patch versions to pin; DB backup cadence (NFR-6); LAN IP/firewall for `server.host`/`port` (config-only, no code change).
+Exact patch versions to pin; LAN IP/firewall for `server.host`/`port` (config-only, no code change). DB backup cadence is now 13:00 daily (development snapshot 15:00) and was verified by a backup/restore drill.
 
 ---
 

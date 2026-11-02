@@ -40,7 +40,7 @@ Get-ChildItem -Recurse *.ps1 | Unblock-File
    pre-migration backup, stamps the proven revision, then upgrades.)
 5. **Prefect Deployment**: Registers the daily sync schedule (`0 11 * * *` at 11:00 AM).
 6. **Firewall**: Adds an inbound Windows Firewall rule for TCP port 8000 (if `-OpenFirewall` is passed).
-7. **Daily Backups**: Schedules a daily Windows Scheduled Task at 11:30 AM (if `-ScheduleBackup` is passed).
+7. **Daily Backups**: Schedules a daily Windows Scheduled Task at 13:00 (two hours after the 11:00 sync; if `-ScheduleBackup` is passed).
 8. **NSSM Services**: Automatically downloads NSSM (if missing) and installs `AAMMerger-Web` and `AAMMerger-Worker`.
 9. **Health Verification**: Performs an automated HTTP smoke check against `http://127.0.0.1:8000/health`.
 10. **First administrator**: NOT automated. After the install, create the named

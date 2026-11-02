@@ -97,9 +97,10 @@ What it does, in order:
 4. adds the inbound firewall rule for TCP 8000 (`-OpenFirewall`). The rule allows the Domain and
    Private network profiles only. If the network is Public the script prints the profile and a warning:
    set the network to Private (Settings > Network & Internet), or other PCs cannot connect;
-5. registers the daily 01:00 database backup (`-ScheduleBackup`, no pruning,
-   into `data\development\snapshots\db`) and the 01:30 copy-only development
-   snapshot task for logs and PDFs;
+5. registers the daily 13:00 database backup (`-ScheduleBackup`, no pruning,
+   into `data\development\snapshots\db`) and the 15:00 copy-only development
+   snapshot task for logs and PDFs (two hours after the sync, then two hours
+   after the backup, all inside the 10:00–16:00 working day);
 6. installs and starts three Windows services (NSSM log rotation is disabled;
    `PREFECT_HOME` is pinned to `data\prefect`):
    `AAMMerger-PrefectServer`, `AAMMerger-Worker`, `AAMMerger-Web`;
@@ -210,14 +211,14 @@ fine, pointing the app at a UNC path is not required and adds failure modes.
 ## 6. Daily operation
 
 - **Input poller** (inside the web service): `schedule.poll_enabled`, `poll_interval_seconds` (60), `merge_settle_minutes` (5). They are Live on the Settings page: a change applies within seconds, with no restart. A new file is read within about a minute; its set merges after the settle time.
-- **Nightly sync** runs at 00:00 (Prefect deployment `aam-midnight-sync`); switch off with `schedule.nightly_enabled: false` and re-run `scripts/deploy_prefect.py`.
+- **Daily sync** runs at 11:00 (Prefect deployment `aam-midnight-sync`; the deployment name is historical); switch off with `schedule.nightly_enabled: false` and re-run `scripts/deploy_prefect.py`.
   `config.example.yaml` sets `prefect.schedule_timezone: "Asia/Kolkata"`, so
-  this is **IST midnight**. Change it to the office's IANA zone if the client
+  this is **11:00 IST**. Change it to the office's IANA zone if the client
   is elsewhere, and re-run the installer to re-register the schedule.
-- **Backups** run at 01:00 via the `AAMMerger-DailyBackup` scheduled task with
+- **Backups** run at 13:00 via the `AAMMerger-DailyBackup` scheduled task with
   `-RetentionDays 0` and `-BackupDir data\development\snapshots\db`. Nothing is
   pruned.
-- **Development snapshot** runs at 01:30 via
+- **Development snapshot** runs at 15:00 via
   `AAMMerger-DevelopmentSnapshot`. It copies logs, raw JSON, `stored`,
   `quarantine`, `output` and `combined` into `data\development\snapshots` with
   `robocopy /E /XO` (copy-only; never deletes).

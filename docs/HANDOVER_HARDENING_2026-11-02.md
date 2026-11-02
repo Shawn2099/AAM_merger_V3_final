@@ -114,6 +114,11 @@ Safety properties:
   the CSRF header returned 403, and the same POST with `X-CSRF-Token` reached
   the route (404 for a missing set). This exercises the real ASGI server, not
   only `TestClient`.
+- NSSM installer `-DryRun`: all service install/environment/restart commands
+  printed for the web and worker services, nothing changed.
+- Backup/restore drill: created a WAL database, ran `scripts/backup_db.py`,
+  `PRAGMA integrity_check` returned `ok`, and the backup restored into a new
+  database with both rows intact.
 - Existing suites re-run: concurrency/409, extraction, WS6 crash/restart,
   robustness containment, quarantine, migration, best-case pipeline.
 - The full existing suite is run with `auth.enabled=false` (tests/conftest.py)
@@ -133,28 +138,37 @@ Safety properties:
 These are the items the code cannot prove or decide. They are ordered by
 handover risk.
 
-1. **TLS.** Passwords and session cookies cross the LAN in clear text on plain
-   HTTP. Terminate TLS (IIS/nginx reverse proxy, or Uvicorn certs) and set
-   `auth.cookie_secure: always`. This is the largest remaining security gap.
-2. **PyMuPDF licence.** `pymupdf` is AGPL/commercial dual-licensed. The client
-   must choose in writing: commercial licence, replace the renderer, or accept
-   AGPL. Deferred in earlier plans; it is a legal handover blocker.
-3. **Real install, reboot and restore drill.** The existing verification report
-   records that the real NSSM install, service dependency order, firewall and
-   restore were never exercised on the target Server 2016 host. Run WS9:
-   install, reboot, one real set, restore a backup into a scratch folder, and
-   record the result.
-4. **One installer.** `deploy.bat` (`deploy_production.ps1`) and
-   `setup_test_rig.ps1` still differ (backup folder/retention, firewall scope,
-   Prefect registration failure handling). Pick one for handover and delete or
-   mark the other. `DEPLOY.md` currently points at `setup_test_rig.ps1`.
-5. **Backup timing.** The sync starts at 11:00 and can run past 11:30 on a large
-   batch; the daily backup is scheduled at 11:30. The SQLite backup API is safe
-   online, but a long checkpoint can contend. Move the backup to 13:30 (and the
-   development snapshot later) on the target, or add a "sync running" wait.
-6. **Firewall scope.** `deploy_production.ps1` opens all profiles/any remote;
-   `setup_test_rig.ps1` scopes to Domain/Private/LocalSubnet. Use the scoped
-   rule on the office PC.
+1. **TLS — accepted LAN risk.** The handover target is a private LAN, so the
+   plain-HTTP service is the agreed deployment. Authentication protects access,
+   not confidentiality; if the service is ever exposed beyond the LAN (or the
+   client wants encryption on the LAN), put IIS/nginx TLS in front and set
+   `auth.cookie_secure: always`.
+2. **PyMuPDF version/licence.** PyMuPDF 2.1 is the current release and its
+   `open(stream=..., filetype="pdf")` / `get_pixmap(dpi=...).tobytes("png")`
+   calls work unchanged (checked in an isolated environment). Upgrading does
+   **not** change the licence: 2.1 is still AGPL-3.0 or Artifex commercial.
+   The licence choice therefore remains: buy a commercial licence, accept
+   AGPL, or replace the renderer. `pypdfium2` 5.14 (BSD-3/Apache-2.0) is the
+   viable replacement, but its raster output must be compared against the
+   real STS/IRE/Ensign samples before switching; a blind swap could change
+   what the VLM reads.
+3. **Real install, reboot and restore drill.** A full NSSM install requires an
+   elevated shell; this workstation session is not elevated, so the service
+   install and reboot were **not** run here. What was run: the NSSM installer
+   in `-DryRun` mode (all service commands printed, nothing changed) and a real
+   backup → integrity-check → restore drill into a scratch database (rows
+   verified). Still run WS9 on the target Server 2016 host: install, reboot,
+   one real set, and a restore into a scratch folder.
+4. **One installer — decided.** `deploy.bat` and `Install.cmd` now both run
+   `scripts/setup_test_rig.ps1` (firewall, 13:00 backup, local Prefect). The
+   older `scripts/deploy_production.ps1` is marked legacy and is no longer
+   referenced by the handover path.
+5. **Backup timing — decided.** Sync 11:00, backup 13:00, development snapshot
+   15:00, all inside the 10:00–16:00 working day. The SQLite online backup is
+   still verified by its own integrity check; a long sync no longer overlaps
+   the backup by 30 minutes.
+6. **Firewall scope — decided.** The chosen installer scopes the rule to
+   Domain/Private/LocalSubnet. The legacy script's any-profile rule is not used.
 7. **Log and data growth.** NSSM rotation is off by design; `logging.backup_count:
    0` keeps one growing log. There is no disk-space alert and no retention for
    output/stored/quarantine/archive. Decide a retention policy before go-live.

@@ -74,7 +74,7 @@ AAM Merger runs as three dedicated Windows Services configured to start automati
 
 ## 4. Automated Daily Database Backups (NFR-6)
 
-- **Schedule:** Runs every day at **11:30 AM** automatically via Windows Task Scheduler task named `AAMMerger-DailyBackup`.
+- **Schedule:** Runs every day at **13:00** automatically via Windows Task Scheduler task named `AAMMerger-DailyBackup` (two hours after the 11:00 sync).
 - **Target Folder:** `data/backup/`
 - **Mechanism:** Uses SQLite online streaming backup API (`VACUUM INTO` / `sqlite3_backup`). Never locks the live database; runs safely while the web dashboard and worker are active.
 - **Verification:** Runs `PRAGMA integrity_check` on the backup copy before finalizing.
@@ -127,4 +127,4 @@ This tool checks:
 | Dashboard says *"Service Offline"* | `AAMMerger-Web` service is stopped | Double-click `restart_services.bat` or run `.\scripts\manage_services.ps1 -Action restart`. |
 | LAN clients cannot connect | Firewall blocking port 8000 or IP changed | Run `verify_deployment.ps1` to check firewall status. Ensure `server.allowed_hosts` in `config.yaml` contains the new IP. |
 | Files in `data/input` are not being read | `AAMMerger-Worker` is stopped or API key is invalid | Run `status.bat`. Check `data/logs/nssm-worker-stderr.log` and verify `OPENROUTER_API_KEY` in `.env`. |
-| Port 8000 already in use | Another application is bound to 8000 | In `config.yaml` and `deploy_production.ps1`, change port to `8080` or any available port. |
+| Port 8000 already in use | Another application is bound to 8000 | In `config.yaml` change the port, and pass the same `-Port` to `deploy.bat` / `scripts\setup_test_rig.ps1`; then set `server.port` to the same value. |

@@ -18,7 +18,7 @@ uv sync
 uv run python scripts/migrate_db.py
 
 # 3. Master Production Deployment (Services + Firewall + Backup Task)
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_production.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup_test_rig.ps1 -OpenFirewall -ScheduleBackup -WithPrefectServer
 
 # 4. Verification Check
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify_deployment.ps1

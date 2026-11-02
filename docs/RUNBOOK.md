@@ -55,7 +55,7 @@ counts that you recognise, and yesterday's new files either merged or held with 
 1. Open the **Quarantined** and **Needs Review** tabs. Each row should have a reason you understand.
 2. Open each **Awaiting Customs** set. Is anyone still sending the customs or shipping file?
 3. Check the **Merged** tab: every row you merged today should have a packet you have checked (section 6).
-4. Check that today's backup file exists: `data\development\snapshots\db` (the scheduled backup runs at 11:30). If the machine was installed with `deploy.bat` instead of `setup_test_rig.ps1`, the backup is in `data\backup`.
+4. Check that today's backup file exists: `data\development\snapshots\db` (the scheduled backup runs at 13:00, two hours after the 11:00 sync). The 15:00 development snapshot copies logs and PDF folders into `data\development\snapshots`.
 5. Write the day's notes (section 6, "What to record").
 
 **Bad looks like:** a set is "Pending" for days with no reason, a merged set has no packet

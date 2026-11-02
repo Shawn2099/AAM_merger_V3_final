@@ -1,3 +1,5 @@
+# LEGACY: deploy.bat and Install.cmd now run scripts/setup_test_rig.ps1 (one installer).
+# This file is kept for reference/rollback only; do not use it for a new handover.
 <#
 .SYNOPSIS
     scripts/deploy_production.ps1 - Master one-click installation and deployment script for AAM Merger V3.
@@ -15,7 +17,7 @@
            - AAMMerger-Worker (Prefect background sync worker)
            - AAMMerger-Web (FastAPI / Uvicorn dashboard)
       9. Deploys the Prefect midnight sync schedule (scripts/deploy_prefect.py).
-     10. Registers the automated daily database backup task in Windows Task Scheduler (11:30 AM daily).
+     10. Registers the automated daily database backup task in Windows Task Scheduler (13:00 daily; two hours after the 11:00 sync).
      11. Adds a Windows Firewall rule to allow LAN traffic on port 8000.
      12. Starts all services and verifies live health check (/health & /dashboard).
 
@@ -371,7 +373,7 @@ if (-not $DryRun) {
 # ---------------------------------------------------------------------------
 # 9. Register Automated Daily Backup Task
 # ---------------------------------------------------------------------------
-Write-Host "[8/9] Configuring daily automated database backup (11:30 AM)..." -ForegroundColor Cyan
+Write-Host "[8/9] Configuring daily automated database backup (13:00)..." -ForegroundColor Cyan
 if (-not $SkipBackupTask) {
     $taskName = "AAMMerger-DailyBackup"
     $backupScript = Join-Path $ProjectRoot "scripts\backup_db.ps1"
@@ -379,10 +381,10 @@ if (-not $SkipBackupTask) {
 
     if (-not $DryRun) {
         try {
-            # Use schtasks.exe to create a reliable daily task at 11:30 AM (staggered after 11:00 AM sync)
-            $schOutput = & schtasks.exe /create /tn $taskName /tr $taskAction /sc daily /st 11:30 /ru "SYSTEM" /f 2>&1
+            # Use schtasks.exe to create a reliable daily task at 13:00 (two hours after the 11:00 sync)
+            $schOutput = & schtasks.exe /create /tn $taskName /tr $taskAction /sc daily /st 13:00 /ru "SYSTEM" /f 2>&1
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "  Windows Scheduled Task '$taskName' created (Runs daily at 11:30 AM under SYSTEM)." -ForegroundColor Green
+                Write-Host "  Windows Scheduled Task '$taskName' created (Runs daily at 13:00 under SYSTEM)." -ForegroundColor Green
             } else {
                 Write-Host "  Notice on Scheduled Task: $schOutput" -ForegroundColor Yellow
             }
@@ -390,7 +392,7 @@ if (-not $SkipBackupTask) {
             Write-Host "  Warning: Could not schedule backup task automatically: $($_.Exception.Message)" -ForegroundColor Yellow
         }
     } else {
-        Write-Host "[DRY-RUN] Would schedule task '$taskName' to run scripts/backup_db.ps1 daily at 11:30 AM" -ForegroundColor Magenta
+        Write-Host "[DRY-RUN] Would schedule task '$taskName' to run scripts/backup_db.ps1 daily at 13:00" -ForegroundColor Magenta
     }
 } else {
     Write-Host "  Skipping backup task registration (-SkipBackupTask)." -ForegroundColor Gray
