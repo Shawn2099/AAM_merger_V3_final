@@ -207,6 +207,16 @@ def test_login_failure_is_generic_and_unknown_user_matches(auth_app):
     assert "nobody" not in unknown.text
 
 
+def test_remember_me_sets_a_persistent_cookie(auth_app):
+    client, cfg = auth_app
+    _make_user(cfg)
+    plain = _login(client)
+    assert "max-age" not in plain.headers["set-cookie"].casefold()
+    client.cookies.clear()
+    remembered = _login(client, remember=True)
+    assert "max-age=" in remembered.headers["set-cookie"].casefold()
+
+
 def test_login_rejects_open_redirect(auth_app):
     client, cfg = auth_app
     _make_user(cfg)
