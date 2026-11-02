@@ -71,7 +71,7 @@ uv run pytest tests/ui --ignore=tests/ui/release -q
 uv run pytest tests/ui/release -q
 ```
 
-`pytest-timeout` is set to 300 s per test. `--strict-config` and `--strict-markers` are on. The CI workflow runs Windows non-UI and Windows UI; the Linux job is a fast smoke only.
+`pytest-timeout` is set to 300 s per test. `--strict-config` and `--strict-markers` are on. CI is **Windows-only**: one Windows job for lint + non-UI (85% coverage floor) and one Windows UI release job. There is no Linux job.
 
 ---
 

@@ -350,7 +350,7 @@ Implemented in this pass (test/docs only; the merged-set removal behavior is unt
 | Ingestion safety | Delete test uses a real SHA-256 and adds a same-name/different-bytes survival test. |
 | Settings | Unwritable-config failure is forced (no Windows skip); B-11 uses the committed example, not the developer config. |
 | Installer safety | The real NSSM installer test is skipped with a disposable-VM reason. |
-| Gate hygiene | `pytest-timeout` added; `slow` markers on WS6/soak/UI; `test-fast`/`test-ui`/`test-release` Make targets; CI workflow added (Linux + Windows + UI release). |
+| Gate hygiene | `pytest-timeout` added; `slow` markers on WS6/soak/UI; `test-fast`/`test-ui`/`test-release` Make targets; Windows-only CI workflow added (non-UI + UI release). |
 
 Still open / deferred (product decision or environment):
 
