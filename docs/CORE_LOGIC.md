@@ -127,9 +127,9 @@ belonging to another set is never overwritten — that set quarantines as
 ## 6b. How a document is read (FR-6.1, amended 2026-10-23)
 
 The reading step is one VLM request per document. Every page is rasterised
-(PyMuPDF, 150 DPI, PNG) and sent as an image, in real PDF page order, in a
-single request with reasoning effort `high`. This replaces the earlier
-"native PDF, no rasterisation" transport. The prompt returns identifiers
+(pypdfium2/PDFium, 150 DPI, RGB PNG) and sent as an image, in real PDF page
+order, in a single request with reasoning effort `high`. This replaces the
+earlier "native PDF, no rasterisation" transport. The prompt returns identifiers
 (PO number, document number, line number) **exactly as printed** and `null`
 when unreadable; `normalize_po_no` and the sanitizer make the keys. Two or more
 different PO numbers on one document come back as `po_reference_ambiguous=true`
@@ -146,6 +146,12 @@ with `po_reference=null`; the document is held unattached for a person.
   `reasoning_effort` (`minimal|low|medium|high`, default `high`), `max_pages`
   (default 30). A bad value is a configuration fault: the document stays
   pending. Pinned by `tests/test_extraction_raster.py`.
+- The renderer is **pypdfium2 (PDFium)**, BSD-3/Apache-2.0, no VC++ runtime.
+  PDFium is process-globally thread-unsafe, so `_rasterize_pdf` serialises every
+  open/render/close with one module-level lock. A malformed page box (an array
+  that is not four numbers) is repaired in memory only, after pypdf confirms the
+  array: inherited boxes and deliberate CropBoxes are left alone. Pinned by the
+  same test module.
 
 ## 7. What this contract does **not** claim
 

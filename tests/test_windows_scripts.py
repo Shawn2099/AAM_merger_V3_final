@@ -211,7 +211,10 @@ def test_setup_test_rig_declares_allow_any_host() -> None:
 
 def test_setup_test_rig_install_checks_are_in_place() -> None:
     text = (SCRIPTS / "setup_test_rig.ps1").read_text(encoding="utf-8")
-    assert '-c "import pymupdf"' in text and "vc_redist.x64.exe" in text
+    assert '-c "import pypdfium2, PIL"' in text
+    # PDFium bundles its own DLL: the old PyMuPDF VC++ requirement must be gone.
+    assert "vc_redist.x64.exe" not in text
+    assert "pymupdf" not in text.lower()
     assert "Microsoft Store placeholder" in text
     assert "Get-NetConnectionProfile" in text
     assert "for ($i = 1; $i -le 120; $i++)" in text

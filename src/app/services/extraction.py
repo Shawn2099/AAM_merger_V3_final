@@ -12,7 +12,10 @@ extracted, stored, or matched on.
 from __future__ import annotations
 
 import base64
+import contextlib
+import io
 import logging
+import math
 import os
 import threading
 from datetime import UTC, datetime, timedelta
@@ -20,9 +23,12 @@ from pathlib import Path
 from typing import Literal
 
 import instructor
+import pypdfium2 as pdfium
 from openai import OpenAI
 from openai.types.chat import ChatCompletionContentPartParam
+from PIL import Image
 from pydantic import BaseModel, Field, field_validator
+from pypdf import PdfReader
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
@@ -230,6 +236,16 @@ _MAX_PAGE_PIXELS = 40_000_000
 #: request-size limit so an oversized upload fails here, loudly, rather than as a 413.
 _MAX_IMAGE_BYTES = 40 * 1024 * 1024
 
+#: PDFium keeps process-global state and is not thread-safe. Concurrent calls can
+#: fail with "Data format error" or corrupt the heap and terminate the process.
+#: Every open/render/close is therefore serialised by this one lock (pypdfium2
+#: does not add locking of its own). Separate processes are independent, so the
+#: NSSM web/worker services and Prefect process workers do not contend.
+_PDFIUM_GLOBAL_LOCK = threading.Lock()
+
+#: `PdfiumError.err_code` for a document that needs a user password.
+_PDFIUM_ERR_PASSWORD = 4
+
 
 class PdfRasterError(ValueError):
     """The PDF cannot be turned into page images: corrupt, truncated, encrypted, empty
@@ -262,52 +278,214 @@ def _vlm_settings(cfg) -> tuple[int, str, int]:
     return dpi, effort, max_pages
 
 
+def _box_dimensions(box) -> tuple[float, float] | None:
+    """(width, height) of a PDF box, or None when the value is not a four-number box."""
+    try:
+        left, bottom, right, top = (float(value) for value in box[:4])
+    except (TypeError, ValueError):
+        return None
+    return (round(abs(right - left), 1), round(abs(top - bottom), 1))
+
+
+def _page_size_matches(page_size, box) -> bool:
+    """Whether a rendered page size (already rotated) has the shape of `box`."""
+    dimensions = _box_dimensions(box)
+    if dimensions is None:
+        return False
+    return sorted(round(float(value), 1) for value in page_size) == sorted(dimensions)
+
+
+def _page_box_looks_wrong(page) -> bool:
+    """True when PDFium's page size matches neither declared box.
+
+    Cheap pre-filter only: PDFium also falls back to ANSI A for a box it inherited
+    from the page tree (which it renders correctly), so the malformed array itself
+    is confirmed by pypdf in `_repair_page_box` before anything is changed.
+    """
+    size = page.get_size()
+    return not (
+        _page_size_matches(size, page.get_mediabox())
+        or _page_size_matches(size, page.get_cropbox())
+    )
+
+
+def _raw_page_box(page, key: str):
+    box = page.get(key)
+    return box.get_object() if hasattr(box, "get_object") else box
+
+
+def _four_numbers(box) -> list[float] | None:
+    try:
+        values = [float(value) for value in box[:4]]
+    except (TypeError, ValueError):
+        return None
+    return values if len(values) == 4 else None
+
+
+def _is_malformed_box(box) -> bool:
+    """A declared box that is not the four numbers the PDF spec requires."""
+    try:
+        if box is None or len(box) == 4:
+            return False
+        return _four_numbers(box) is not None
+    except TypeError:
+        return False
+
+
+def _repair_page_box(page, reader, page_index: int) -> None:
+    """Undo PDFium's ANSI-A fallback for a malformed /MediaBox or /CropBox array.
+
+    `SIV-RHO-26-234B.pdf` declares `[0 0 595 841 0 0 595 841]`; PDFium renders it
+    as Letter and clips the A4 page. The repair is in memory only (the stored PDF
+    is never modified) and only happens when pypdf confirms the array itself is
+    malformed. An inherited box or a deliberate smaller CropBox is legal and
+    already rendered correctly, so both are left untouched.
+    """
+    if reader is None:
+        return
+    try:
+        raw_page = reader.pages[page_index]
+        raw_media = _raw_page_box(raw_page, "/MediaBox")
+        raw_crop = _raw_page_box(raw_page, "/CropBox")
+    except Exception:
+        return
+
+    if _is_malformed_box(raw_media):
+        values = _four_numbers(raw_media)
+        if values is not None:
+            page.set_mediabox(*values)
+    if _is_malformed_box(raw_crop):
+        values = _four_numbers(raw_crop)
+        if values is not None:
+            page.set_cropbox(*values)
+
+
+def _pypdf_page_count(pdf_bytes: bytes) -> int | None:
+    """Page count per pypdf, or None when pypdf cannot read the file.
+
+    Used only on the error path: PDFium refuses a zero-page PDF at load, and its
+    err_code does not reliably distinguish that from a corrupt file.
+    """
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+    except Exception:
+        return None
+    try:
+        return len(reader.pages)
+    except Exception:
+        return None
+    finally:
+        with contextlib.suppress(Exception):
+            reader.close()
+
+
 def _rasterize_pdf(pdf_bytes: bytes, dpi: int, max_pages: int, name: str = "pdf") -> list[bytes]:
     """Render every page to PNG, in real PDF page order (index 0 = page 1).
 
     Raises PdfRasterError (corrupt/encrypted/empty) or PdfTooLargeError (limits). Never
     returns a partial list: a page that fails to render fails the whole document.
-    """
-    import pymupdf
 
-    try:
-        pdf = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-    except Exception as e:
-        raise PdfRasterError(f"{name}: cannot open PDF ({type(e).__name__}: {e})") from e
-    with pdf:
-        if pdf.needs_pass:
-            raise PdfRasterError(f"{name}: PDF is password-protected; cannot be read")
-        count = pdf.page_count
-        if count < 1:
-            raise PdfRasterError(f"{name}: PDF has no pages")
-        if count > max_pages:
-            raise PdfTooLargeError(
-                f"{name}: {count} pages exceeds the {max_pages}-page limit (vlm.max_pages)"
-            )
-        zoom = dpi / 72
-        images: list[bytes] = []
-        total = 0
-        for index in range(count):
-            try:
-                page = pdf.load_page(index)
-                if page.rect.width * page.rect.height * zoom * zoom > _MAX_PAGE_PIXELS:
-                    raise PdfTooLargeError(
-                        f"{name}: page {index + 1} is too large to render at {dpi} DPI"
-                    )
-                png = page.get_pixmap(dpi=dpi).tobytes("png")
-            except PdfRasterError:
-                raise
-            except Exception as e:
+    PDFium is process-globally thread-unsafe, so the whole document is rendered
+    under `_PDFIUM_GLOBAL_LOCK`. The bytes are read in memory; nothing is written.
+    """
+    with _PDFIUM_GLOBAL_LOCK:
+        try:
+            pdf = pdfium.PdfDocument(pdf_bytes)
+        except pdfium.PdfiumError as exc:
+            if getattr(exc, "err_code", None) == _PDFIUM_ERR_PASSWORD:
                 raise PdfRasterError(
-                    f"{name}: cannot render page {index + 1} ({type(e).__name__}: {e})"
-                ) from e
-            total += len(png)
-            if total > _MAX_IMAGE_BYTES:
+                    f"{name}: PDF is password-protected; cannot be read"
+                ) from exc
+            # PDFium reports a zero-page document as a load failure; pypdf tells the
+            # two apart so the operator gets the right message.
+            if _pypdf_page_count(pdf_bytes) == 0:
+                raise PdfRasterError(f"{name}: PDF has no pages") from exc
+            raise PdfRasterError(
+                f"{name}: cannot open PDF ({type(exc).__name__}: {exc})"
+            ) from exc
+        except Exception as exc:
+            raise PdfRasterError(
+                f"{name}: cannot open PDF ({type(exc).__name__}: {exc})"
+            ) from exc
+
+        # Widget values only render once a form environment exists, and it must be
+        # created before any page is retrieved. A file without forms is not an
+        # error; the page still renders normally.
+        try:
+            pdf.init_forms()
+        except Exception:
+            logger.debug("%s: no form environment", name, exc_info=True)
+
+        reader = None
+        reader_failed = False
+        try:
+            count = len(pdf)
+            if count < 1:
+                raise PdfRasterError(f"{name}: PDF has no pages")
+            if count > max_pages:
                 raise PdfTooLargeError(
-                    f"{name}: rendered pages exceed {_MAX_IMAGE_BYTES // (1024 * 1024)} MB"
+                    f"{name}: {count} pages exceeds the {max_pages}-page limit (vlm.max_pages)"
                 )
-            images.append(png)
-    return images
+
+            scale = dpi / 72
+            images: list[bytes] = []
+            total = 0
+            for index in range(count):
+                try:
+                    page = pdf[index]
+                    if _page_box_looks_wrong(page):
+                        if reader is None and not reader_failed:
+                            try:
+                                reader = PdfReader(io.BytesIO(pdf_bytes))
+                            except Exception:
+                                reader_failed = True
+                                logger.debug(
+                                    "%s: pypdf could not inspect the page boxes",
+                                    name,
+                                    exc_info=True,
+                                )
+                        _repair_page_box(page, reader, index)
+
+                    width, height = page.get_size()
+                    pixel_width = math.ceil(width * scale)
+                    pixel_height = math.ceil(height * scale)
+                    if pixel_width * pixel_height > _MAX_PAGE_PIXELS:
+                        raise PdfTooLargeError(
+                            f"{name}: page {index + 1} is too large to render at {dpi} DPI"
+                        )
+                    bitmap = page.render(
+                        scale=scale,
+                        # White, never transparent: the provider must not receive a
+                        # black or alpha page where the PDF has no background.
+                        fill_color=(255, 255, 255, 255),
+                        may_draw_forms=True,
+                    )
+                    try:
+                        image: Image.Image = bitmap.to_pil()  # RGB
+                    finally:
+                        bitmap.close()
+                    buffer = io.BytesIO()
+                    image.save(buffer, format="PNG", optimize=False)
+                    png = buffer.getvalue()
+                except PdfRasterError:
+                    raise
+                except Exception as exc:
+                    raise PdfRasterError(
+                        f"{name}: cannot render page {index + 1} ({type(exc).__name__}: {exc})"
+                    ) from exc
+                total += len(png)
+                if total > _MAX_IMAGE_BYTES:
+                    raise PdfTooLargeError(
+                        f"{name}: rendered pages exceed {_MAX_IMAGE_BYTES // (1024 * 1024)} MB"
+                    )
+                images.append(png)
+            return images
+        finally:
+            if reader is not None:
+                with contextlib.suppress(Exception):
+                    reader.close()
+            with contextlib.suppress(Exception):
+                pdf.close()
 
 
 def _call_vlm(stored_path: str, doc_type: str, cfg) -> dict:

@@ -30,7 +30,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-import fitz  # PyMuPDF
+import pypdfium2 as pdfium
 
 EVAL_DIR = Path(__file__).resolve().parent
 REPO = EVAL_DIR.parents[1]
@@ -63,8 +63,19 @@ def doc_paths(ids: list[int]) -> dict[int, Path]:
 
 def page_text(path: Path) -> str:
     try:
-        with fitz.open(path) as d:
-            return "\n".join(pg.get_text() for pg in d)
+        with pdfium.PdfDocument(str(path)) as pdf_doc:
+            texts = []
+            for index in range(len(pdf_doc)):
+                page = pdf_doc[index]
+                try:
+                    textpage = page.get_textpage()
+                    try:
+                        texts.append(textpage.get_text_range())
+                    finally:
+                        textpage.close()
+                finally:
+                    page.close()
+            return "\n".join(texts)
     except Exception as e:  # noqa: BLE001 - a missing/corrupt file is reported, not fatal
         return f"<<ERROR {type(e).__name__}>>"
 

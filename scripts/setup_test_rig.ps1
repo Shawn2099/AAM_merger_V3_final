@@ -90,19 +90,8 @@ if ($isAdmin) {
     }
 }
 
-# The PDF reader (PyMuPDF) needs the Visual C++ runtime.
-try {
-    $vcRuntimeKey = "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
-    $vcInstalled = $null
-    if (Test-Path $vcRuntimeKey) {
-        $vcInstalled = (Get-ItemProperty -Path $vcRuntimeKey -Name Installed -ErrorAction Stop).Installed
-    }
-    if ($vcInstalled -ne 1) {
-        Write-Host "Microsoft Visual C++ 2015-2022 x64 runtime not found; PDF reading (PyMuPDF) may fail. Install it from https://aka.ms/vs/17/release/vc_redist.x64.exe and re-run." -ForegroundColor Yellow
-    }
-} catch {
-    Write-Host "Microsoft Visual C++ 2015-2022 x64 runtime not found; PDF reading (PyMuPDF) may fail. Install it from https://aka.ms/vs/17/release/vc_redist.x64.exe and re-run." -ForegroundColor Yellow
-}
+# The PDF renderer (pypdfium2) bundles PDFium and imports only the Windows system
+# DLLs (KERNEL32/USER32/GDI32/ADVAPI32): no Visual C++ redistributable is needed.
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..")).Path
@@ -183,15 +172,16 @@ if (-not (Test-Path $venvPython)) {
     Write-Error "Python environment missing at $venvPython."
     exit 1
 }
-# PyMuPDF is a compiled wheel that loads the Visual C++ runtime. Fail here, with the fix,
-# rather than on the first PDF. Native stderr is kept out of the terminating-error path.
+# pypdfium2 is the PDF renderer and Pillow encodes its RGB output. Fail here,
+# with the fix, rather than on the first PDF. Native stderr is kept out of the
+# terminating-error path. No VC++ redist is required: the wheel bundles pdfium.dll.
 $prevEap = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
-& $venvPython -c "import pymupdf" > $null 2>&1
-$pymupdfWorks = ($LASTEXITCODE -eq 0)
+& $venvPython -c "import pypdfium2, PIL" > $null 2>&1
+$pdfStackWorks = ($LASTEXITCODE -eq 0)
 $ErrorActionPreference = $prevEap
-if (-not $pymupdfWorks) {
-    Write-Error "PyMuPDF will not load (the PDF reader). Install the Microsoft Visual C++ 2015-2022 x64 runtime from https://aka.ms/vs/17/release/vc_redist.x64.exe, then re-run."
+if (-not $pdfStackWorks) {
+    Write-Error "pypdfium2/Pillow will not load (the PDF renderer). Re-run this installer so 'uv sync' installs the pinned wheels; if it still fails, check that the wheel matches this Windows architecture (x64)."
     exit 1
 }
 & $venvPython -c "import sys; sys.exit(0 if sys.version_info >= (3,12) else 1)"

@@ -5,7 +5,7 @@ _PAGE_PROMPT from app.services.extraction at call time and returns a dict like t
 plus "_usage": {prompt_tokens, completion_tokens, reasoning_tokens, cost, latency_s}.
 
 Variant spec grammar:  transport[+param...]
-  transport: default | native | ocr | img150 | img200   (img<N> = PyMuPDF PNG at N DPI)
+  transport: default | native | ocr | img150 | img200   (img<N> = PDFium PNG at N DPI)
   params   : eff=<x>   extra_body {"reasoning": {"effort": x}}
              reff=<x>  extra_body {"reasoning_effort": x}
              seed=<n>  top-level seed
@@ -18,7 +18,6 @@ import os
 import time
 from pathlib import Path
 
-import fitz  # PyMuPDF
 import instructor
 from openai import OpenAI
 
@@ -62,9 +61,9 @@ def _content(v: dict, pdf_path: Path, pdf_bytes: bytes) -> tuple[list, dict]:
             extra["plugins"] = [{"id": "file-parser", "pdf": {"engine": "mistral-ocr"}}]
     elif t.startswith("img"):
         dpi = int(t[3:])
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        for page in doc:
-            png = page.get_pixmap(dpi=dpi).tobytes("png")
+        # Use the production rasteriser so the variant measures the real renderer
+        # (PDFium global lock, page caps and malformed-box repair included).
+        for png in ex._rasterize_pdf(pdf_bytes, dpi, ex.DEFAULT_MAX_PAGES, pdf_path.name):
             parts.append(
                 {
                     "type": "image_url",

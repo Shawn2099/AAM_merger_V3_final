@@ -32,6 +32,7 @@
 | Orchestration | Prefect 3.x `process` pool (`aam-merger-process-pool`) | Already running — midnight cron is Prefect schedule, not Task Scheduler |
 | DB | SQLAlchemy 2.x **sync** + Alembic + SQLite WAL | Single-writer; `def` handlers run in threadpool — **no `aiosqlite`** |
 | Matching/PDF | `rapidfuzz` 3.x + `pypdf` (not `PyPDF2`) | 85% token-sort threshold from `config.yaml` |
+| Rasterising | `pypdfium2` 5.14 (PDFium) + `Pillow` | RGB PNG for the VLM; one process-wide PDFium lock; BSD-3/Apache-2.0, no VC++ redist |
 | Testing | `pytest` + `pytest-asyncio` (latest) | Standard per SPEC §5.2 — TDD-first workflow (§7) |
 | Config | YAML `config.yaml` validated by `pydantic-settings` | + `config.example.yaml` (committed), real `config.yaml` gitignored; secrets only via `OPENROUTER_API_KEY` env/`.env` |
 | Frontend | Jinja2 + HTMX + Alpine.js (server-rendered) | No React SPA / Node build |
