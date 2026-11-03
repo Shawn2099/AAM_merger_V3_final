@@ -16,7 +16,10 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 _CSP = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline'; "
+    # Alpine.js evaluates its x-* expressions with the Function constructor, so
+    # 'unsafe-eval' is required. It is still restricted to same-origin scripts:
+    # there is no external script/style origin in this offline LAN UI.
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data:; "
     "font-src 'self'; "
