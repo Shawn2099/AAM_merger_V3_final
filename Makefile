@@ -1,4 +1,4 @@
-.PHONY: dev lint format test business-logic
+.PHONY: dev lint format test test-fast test-ui test-release business-logic
 
 dev:
 	UV_CACHE_DIR=/tmp/uv-cache uv sync --all-groups
@@ -12,6 +12,19 @@ format:
 
 test:
 	UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q
+
+# Fast developer loop: unit/route tests, no soak/WS6/UI.
+test-fast:
+	UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q -m "not slow"
+
+# Browser suites are opt-in and must run in separate processes: the parent and
+# release directories build different databases/servers and do not share a
+# pytest-playwright session context.
+test-ui:
+	RUN_E2E=1 UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ui --ignore=tests/ui/release -q
+
+test-release:
+	RUN_E2E=1 UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ui/release -q
 
 # Engine verdict + what the operator sees, for every verdict the product can
 # produce (merge, needs review, all quarantine reasons, customs, holding area).

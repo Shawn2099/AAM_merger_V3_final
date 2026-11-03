@@ -29,7 +29,10 @@ def test_browser_back_returns_to_the_previous_tab(page: Page):
     page.go_back()
     page.wait_for_url(re.compile(r"status=mismatched"))
     expect(page.get_by_test_id("tab-mismatched")).to_have_class(re.compile(r"\bactive\b"))
-    assert page.get_by_test_id("po-row").count() >= 0
+    rows = page.get_by_test_id("po-row")
+    assert rows.count() >= 1, "the seeded environment should show a mismatched row"
+    for index in range(rows.count()):
+        assert rows.nth(index).get_attribute("data-status") == "mismatched"
 
 
 def test_refresh_keeps_the_status_filter(page: Page):

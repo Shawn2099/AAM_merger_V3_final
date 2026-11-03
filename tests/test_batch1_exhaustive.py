@@ -1,3 +1,4 @@
+# ruff: noqa: F811
 """Exhaustive negative/edge coverage for the Batch 1 surface.
 
 This file deliberately probes what the happy-path tests do not: guards, bad
@@ -19,14 +20,14 @@ import pytest
 from pypdf import PdfWriter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from test_business_scenarios_ui import _doc, _set, cfg, client  # noqa: F401
+from test_holding_set_aside import _held_valid_si
 
 from app.api.templating import ist
 from app.core.database import get_engine
 from app.models import AuditAction, AuditLog, DocType, Document, POSet, POSetStatus
 from app.services.quarantine import set_aside_document
 from app.services.reconciliation import reconcile_po_set
-from test_business_scenarios_ui import _doc, _set, cfg, client  # noqa: F401
-from test_holding_set_aside import _held_valid_si
 
 
 def _pdf_bytes() -> bytes:

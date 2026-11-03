@@ -511,8 +511,9 @@ Full list with commits: `docs/BATCH1_CHANGES_2026-10-25.md`.
   set is refused while a CUSTOMS or SHIPPING file is attached; delete the file first. Merged
   sets keep the switch rule (D5, D18). Per-file Delete is offered before merge only (D1).
 - **Merging:** press Merge Now. Force Merge merges without the checks and needs a reason.
-- **Removing a set:** "Move to quarantine and remove set" at the bottom of an open set (see
-  section 8, N). Archive is the softer action for quarantined sets; it keeps every row.
+- **Removing a set:** "Move to quarantine and remove set" at the bottom of any non-archived
+  set, including a merged one (see section 8, N). Archive is the softer action for quarantined
+  sets; it keeps every row.
 
 ## 8. Accepted limitations
 
@@ -522,8 +523,11 @@ them on a live document.
 ### N — removing a set deletes its rows; the files and audit trail are kept (2026-10-25)
 
 "Move to quarantine and remove set" (decision 2026-10-25) is the one operator action
-that deletes rows. It applies to pending, mismatched, quarantined and blocked-customs
-sets, never to merged or archived ones. It copies and verifies every stored PDF into
+that deletes rows. It applies to pending, mismatched, quarantined, blocked-customs and
+merged sets, never to archived ones. For a merged set it also copies the delivered
+packet into the removal folder and, after the database transaction commits, unlinks
+the packet from `output/` so the delivered file leaves the output folder (the copy in
+the removal folder is kept). It copies and verifies every stored PDF into
 `quarantine/_removed_sets/<PO>_<UTC stamp>_<id>/`, moves the input-folder copies there,
 writes a JSON export and REMOVED.txt, and only then deletes the set's rows in one
 transaction. The audit row keeps the old set id and PO number. A missing stored PDF

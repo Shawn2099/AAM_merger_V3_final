@@ -24,7 +24,7 @@ Product rules are in `AAM_merger_V3_PRODUCT.md` (sections 3.1.1, 8 entries L, N,
 | Customs files | Per-file Delete before merge only; the packet is never changed by the Delete button after merge | D1 | 7dad937 |
 | Customs toggle | Turning it OFF on an unmerged set is refused while CUSTOMS or SHIPPING files are attached | decision 2026-10-25 | 7dad937 |
 | How to merge | The set page says: press Merge Now; Force Merge needs a reason | D-B2a | 7dad937 |
-| Remove a set | "Move to quarantine and remove set" at the bottom of an open set | decision 2026-10-25 | 552fef7 |
+| Remove a set | "Move to quarantine and remove set" at the bottom of any non-archived set, including a merged one | decision 2026-10-25 | 552fef7 |
 | Audit page | Removal rows read "Set Removed" and name the folder | step 13 | 552fef7 |
 
 ## 2. Removal of a set (the two-step delete, approved)
@@ -37,7 +37,9 @@ Product rules are in `AAM_merger_V3_PRODUCT.md` (sections 3.1.1, 8 entries L, N,
 
 Failure at any step: nothing is deleted, moved input files are put back, the folder is kept
 with `REMOVAL_FAILED.txt`, and the operator gets a 500 that names the folder.
-Refused: merged sets (D1), archived sets, and any time a sync is reading documents.
+Refused: archived sets, and any time a sync is reading documents. Merged sets are allowed;
+for a merged set the delivered packet is copied to the removal folder and then unlinked from
+`output/` (the quarantine copy is kept).
 Stored PDFs in `data/stored` are never deleted. Missing stored PDFs are listed and do not
 stop the removal (decision 10). Unreadable input-folder files stop it.
 

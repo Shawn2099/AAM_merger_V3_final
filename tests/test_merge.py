@@ -263,7 +263,8 @@ def test_merged_immutable_first_completed_wins(tmp_path):
     )
     out1 = merge_po_set(po_set_id, cfg)
     assert out1 is not None
-    _mtime = Path(out1).stat().st_mtime
+    before_bytes = Path(out1).read_bytes()
+    before_mtime = Path(out1).stat().st_mtime
     reader1 = PdfReader(str(out1))
     assert len(reader1.pages) == 2
 
@@ -271,6 +272,8 @@ def test_merged_immutable_first_completed_wins(tmp_path):
     out2 = merge_po_set(po_set_id, cfg)
     assert Path(out2) == Path(out1)
     assert Path(out2).exists()
+    assert Path(out2).read_bytes() == before_bytes, "merged packet was rewritten"
+    assert Path(out2).stat().st_mtime == before_mtime, "merged packet was touched"
     # merged_at/status immutable check in DB
     eng = get_engine(cfg)
     with Session(eng) as s:
@@ -300,12 +303,14 @@ def test_merged_immutable_first_completed_wins(tmp_path):
         s.commit()
     out3 = merge_po_set(po_set_id, cfg)
     assert Path(out3) == Path(out1)
+    assert Path(out3).read_bytes() == before_bytes, "merged packet was rewritten"
+    assert Path(out3).stat().st_mtime == before_mtime, "merged packet was touched"
     reader3 = PdfReader(str(out3))
     assert len(reader3.pages) == 2, "immutable: should not grow to 3 pages"
 
 
-def test_force_merge_bypasses_and_writes_audit(tmp_path):
-    """Force merge bypasses mismatched/blocked and writes audit if implemented."""
+def test_force_merge_bypasses_status_gates(tmp_path):
+    """Force merge bypasses mismatched/blocked status gates (audit is separate)."""
     from sqlalchemy.orm import Session
 
     from app.core.database import get_engine
@@ -483,22 +488,35 @@ def test_merge_now_route_merges_when_eligible_and_never_forces(tmp_path):
 def test_merge_now_releases_its_lock(tmp_path):
     """A second Merge Now immediately after must not 409 on our own lock."""
     from fastapi.testclient import TestClient
+    from sqlalchemy.orm import Session
 
     import app.api.routes.po_sets as po_routes
+    from app.core.database import get_engine
     from app.main import app
+    from app.models import POSet
 
     cfg = _cfg_with_tmp(tmp_path)
     po_set_id = _create_poset_with_docs(
         tmp_path,
         cfg,
-        docs_info=[{"doc_type": "SI", "si_no": "INV-LOCK", "width": 200}],
+        docs_info=[
+            {"doc_type": "SI", "si_no": "INV-LOCK", "width": 200},
+            {"doc_type": "DN", "width": 200},
+            {"doc_type": "PO", "width": 200},
+        ],
     )
     original = po_routes.load_config
     po_routes.load_config = lambda: cfg
     try:
         client = TestClient(app)
-        assert client.post(f"/po_sets/{po_set_id}/merge").status_code == 200
-        assert client.post(f"/po_sets/{po_set_id}/merge").status_code == 200
+        first = client.post(f"/po_sets/{po_set_id}/merge")
+        assert first.status_code == 200, first.text
+        with Session(get_engine(cfg)) as s:
+            ps = s.get(POSet, po_set_id)
+            assert ps.status.value == "merged"
+            assert ps.locked_by_action is None, "Merge Now left its own lock behind"
+        second = client.post(f"/po_sets/{po_set_id}/merge")
+        assert second.status_code != 409, second.text
     finally:
         po_routes.load_config = original
 

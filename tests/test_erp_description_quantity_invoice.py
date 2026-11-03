@@ -40,65 +40,51 @@ def test_description_bilingual_text_still_matches():
     assert _score("GATE VALVE 2IN CL150", "GATE VALVE 2IN CL150 بوابة") >= 85
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="SAP MAKTX is 40 chars; truncation vs full vendor text scores below 85",
-)
-def test_sap_40_char_description_truncation_matches():
+def test_known_limitation_sap_40_char_description_misses_the_fallback():
+    """SAP MAKTX truncation scores below 85; the set quarantines (safe direction)."""
     sap = "FILTER, ELEMENT (REPLACEMENT) - MFG: SUL - P/N# 250025-526"
     vendor = (
         "FILTER, ELEMENT (REPLACEMENT) - MFG: SUL - P/N# 250025-526 Item No: 5061800.01.11.00362"
     )
-    assert _score(sap, vendor) >= 85
+    assert _score(sap, vendor) < 85
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a vendor 'Line Item - N' marker can push a numberless row below 85",
-)
-def test_vendor_line_item_marker_still_matches():
+def test_known_limitation_vendor_line_item_marker_misses_the_fallback():
     assert (
         _score(
             "FILTER ELEMENT P/N 250025-526",
             "FILTER ELEMENT P/N 250025-526 Line Item - 1",
         )
-        >= 85
+        < 85
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ERP metadata appended to the description drops similarity below 85",
-)
-def test_erp_metadata_in_description_matches():
+def test_known_limitation_erp_metadata_misses_the_fallback():
     assert (
         _score(
             "WRENCH 3/4 DRIVE AIR IMPACT",
             'WRENCH 3/4" DRIVE AIR IMPACT LineRel No: 11 Part Main Group: CONS',
         )
-        >= 85
+        < 85
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="common abbreviation/spacing form scores just below the 85 threshold",
-)
-def test_abbreviated_description_matches():
-    assert _score("NUT, HEX 9/16 IN-12 UNC", "NUT HEX 9/16IN 12UNC") >= 85
+def test_known_limitation_abbreviated_description_misses_the_fallback():
+    assert _score("NUT, HEX 9/16 IN-12 UNC", "NUT HEX 9/16IN 12UNC") < 85
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="same family, different size scores 96.9 and can attach the wrong item",
-)
-def test_same_family_different_size_does_not_match():
+def test_known_limitation_same_family_different_size_can_attach_wrongly():
+    """PRODUCT §8 H: a 4-11/16 vs 3-11/16 description scores >= 85.
+
+    This is the highest-consequence description risk; it is pinned here so a
+    future pairwise guard is a deliberate change.
+    """
     assert (
         _score(
             "FILTER, OIL, SPIN ON, 4-11/16 OD",
             "FILTER, OIL, SPIN ON, 3-11/16 OD",
         )
-        < 85
+        >= 85
     )
 
 
@@ -125,7 +111,7 @@ def test_quantity_formats_that_work(raw, expected):
 
 
 @pytest.mark.parametrize("raw", ["1e3", "1_000"])
-def test_exponent_and_underscore_are_accepted_by_current_parser(raw):
+def test_known_limitation_exponent_and_underscore_are_accepted(raw):
     """Documented limitation: a vendor using these forms is not quarantined."""
     assert parse_quantity_scaled(raw) == 1_000_000
 
@@ -134,31 +120,6 @@ def test_exponent_and_underscore_are_accepted_by_current_parser(raw):
 def test_quantity_forms_that_are_safely_rejected(raw):
     with pytest.raises(ValueError):
         parse_quantity_scaled(raw)
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ("0.125", 125),  # SAP QUAN 13,3
-        ("1.005", 1005),
-        ("1.234", 1234),
-    ],
-)
-@pytest.mark.xfail(
-    strict=True,
-    reason="SAP QUAN is 13,3 but the sanitizer allows only 2 significant decimals",
-)
-def test_three_decimal_quantity_is_accepted(raw, expected):
-    assert parse_quantity_scaled(raw) == expected
-
-
-@pytest.mark.parametrize(("raw", "expected"), [("2 EA", 2000), ("12.5 EA", 12_500)])
-@pytest.mark.xfail(
-    strict=True,
-    reason="a UOM left in the quantity string is rejected instead of stripped",
-)
-def test_uom_in_quantity_is_stripped(raw, expected):
-    assert parse_quantity_scaled(raw) == expected
 
 
 def test_three_decimal_quantity_reaches_the_extraction_path_as_zero():

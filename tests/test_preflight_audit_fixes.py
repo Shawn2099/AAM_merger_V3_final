@@ -28,6 +28,8 @@ def test_unc_database_path_rejected(tmp_path):
         "output_folder": tmp_path / "output",
         "quarantine_folder": tmp_path / "quarantine",
         "stored_documents_folder": tmp_path / "stored",
+        "combined_folder": tmp_path / "combined",
+        "archive_folder": tmp_path / "archive",
         "log_folder": tmp_path / "logs",
         "database_path": r"\\server\share\aam_merger.db",
     }

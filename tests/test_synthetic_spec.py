@@ -159,6 +159,11 @@ INVARIANT_SETS = {
 }
 
 
+#: These invariant sets are expected to merge; a false quarantine is a
+#: regression, not an acceptable fail-safe.
+EXPECTED_MERGED = {"molykote_a", "molykote_wrong", "two_lines", "uom_box_vs_each"}
+
+
 @pytest.mark.parametrize("name", sorted(INVARIANT_SETS), ids=sorted(INVARIANT_SETS))
 def test_spec_6_3_no_silent_wrong_merge(tmp_path, name):
     """§6.3: a silent wrong merge is P0. Recompute the math independently.
@@ -170,6 +175,8 @@ def test_spec_6_3_no_silent_wrong_merge(tmp_path, name):
     spec = INVARIANT_SETS[name]
     status, reason, _merged, eng, ps_id = run(tmp_path, name, spec)
     if status != "merged":
+        if name in EXPECTED_MERGED:
+            pytest.fail(f"{name}: expected merged, got {status} ({reason})")
         pytest.skip(f"quarantined, not a wrong merge (acceptable per §6.3) — {reason}")
 
     with Session(eng) as s:
@@ -606,7 +613,7 @@ def test_product_doc_lists_every_per_line_flag_type():
     assert "`naming`" in doc, "the naming flag is not documented in PRODUCT 3.2"
 
 
-def test_multiple_po_documents_are_pending_and_configurable():
+def test_multiple_po_documents_are_pending_and_configurable(tmp_path):
     """PRODUCT 3.1.1: two POs in one set are held pending, not summed.
 
     Summing them could double the baseline; guessing which document is the
@@ -695,13 +702,10 @@ def test_multiple_po_documents_are_pending_and_configurable():
                 s.commit()
         return pid
 
-    import pathlib
-    import tempfile
-
     from app.core.config import load_config
     from app.models.base import Base
 
-    tmp = pathlib.Path(tempfile.mkdtemp())
+    tmp = tmp_path
     base = tmp.as_posix()
     for sub in ("out", "stored", "q"):
         (tmp / sub).mkdir(parents=True, exist_ok=True)

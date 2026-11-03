@@ -34,8 +34,12 @@ def _load_backup_module():
 
 
 @pytest.fixture()
-def project(tmp_path):
+def project(tmp_path, monkeypatch):
     """A fake project root with a config.yaml and a small WAL-mode database."""
+    # The suite installs a session AAM_CONFIG_PATH; backup_db gives that env
+    # var precedence over project_root/config.yaml. This fixture tests the
+    # project-root resolution, so it must own the environment.
+    monkeypatch.delenv("AAM_CONFIG_PATH", raising=False)
     (tmp_path / "data").mkdir()
     db = tmp_path / "data" / "aam_merger.db"
     con = sqlite3.connect(db)

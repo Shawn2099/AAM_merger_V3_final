@@ -17,12 +17,12 @@ def _l(no, qty):
     return {"line_item_no": str(no), "description": "W", "quantity": qty * 1000}
 
 
-def test_negative_quarantine():
+def test_negative_quarantine(tmp_path):
     """A zero or negative quantity quarantines the whole set, it is never
     evaluated as a normal reconciliation case."""
-    assert _reconcile_with_quantities(0, 0, 0) == "quarantined"
-    assert _reconcile_with_quantities(100, -10, 100) == "quarantined"
-    assert _reconcile_with_quantities(100, 100, 0) == "quarantined"
+    assert _reconcile_with_quantities(tmp_path, 0, 0, 0) == "quarantined"
+    assert _reconcile_with_quantities(tmp_path, 100, -10, 100) == "quarantined"
+    assert _reconcile_with_quantities(tmp_path, 100, 100, 0) == "quarantined"
 
 
 def test_price_check_removed():
@@ -35,11 +35,8 @@ def test_price_check_removed():
     assert not hasattr(rec, "reconcile")
 
 
-def _reconcile_with_quantities(po_q, dn_q, si_q):
+def _reconcile_with_quantities(tmp_path, po_q, dn_q, si_q):
     """Build a throwaway PO Set with one line per document and reconcile it."""
-    import tempfile
-    from pathlib import Path
-
     from pypdf import PdfWriter
     from sqlalchemy.orm import Session
 
@@ -49,9 +46,13 @@ def _reconcile_with_quantities(po_q, dn_q, si_q):
     from app.models.base import Base
     from app.services.reconciliation import reconcile_po_set
 
-    tmp = Path(tempfile.mkdtemp())
+    # Each call gets its own database/set: the three cases share tmp_path and a
+    # fixed PO number would violate the open-PO unique index.
+    tag = f"{po_q}_{dn_q}_{si_q}"
+    tmp = tmp_path / f"neg_{tag}"
+    tmp.mkdir(parents=True, exist_ok=True)
     cfg = load_config("config.example.yaml")
-    cfg.paths.database_path = str(tmp / "neg.db")
+    cfg.paths.database_path = str(tmp / f"neg_{tag}.db")
     cfg.paths.output_folder = str(tmp / "output")
     cfg.paths.stored_documents_folder = str(tmp / "stored")
     (tmp / "output").mkdir(parents=True, exist_ok=True)

@@ -32,6 +32,8 @@ from app.models import Document, POSet, POSetStatus
 from app.services import grouping, ingestion, reconciliation
 from app.services.poller import SyncPoller
 
+pytestmark = pytest.mark.slow
+
 SOAK = os.getenv("RUN_SOAK") == "1"
 NO_DN_REASON = (
     "No delivery note attached to this set yet "

@@ -70,6 +70,9 @@ def env(tmp_path, monkeypatch):
     cfg.paths.log_folder = f"{base}/logs"
     cfg.ingestion.stability_poll_interval_seconds = 0
     cfg.ingestion.stability_poll_count = 1
+    # The failed DN is retried with the Prefect envelope; do not spend 22 real
+    # seconds on [2, 5, 15] in a unit test.
+    cfg.extraction.retry_backoff_seconds = [0, 0, 0]
     for sub in ("input", "output", "quarantine", "stored", "unclassified", "logs"):
         (tmp_path / sub).mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(get_engine(cfg))

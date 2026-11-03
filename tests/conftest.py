@@ -35,11 +35,15 @@ A test that needs a specific path still sets it: `cfg.paths.output_folder
 
 from __future__ import annotations
 
+import atexit
 import contextlib
+import gc
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import dotenv
@@ -79,7 +83,6 @@ def _guarded_load_dotenv(dotenv_path=None, *args, **kwargs):
 
 
 dotenv.load_dotenv = _guarded_load_dotenv
-dotenv.dotenv_values = lambda *a, **kw: {}
 
 #: The loader as it was before this file replaced it.
 _original_load_config = config_module.load_config
@@ -130,15 +133,18 @@ def _redirect_paths(cfg):
 
 
 def _load_config(path=None):
-    """The real loader, with every path redirected into the session dir."""
+    """The real loader, with every path redirected into the session dir.
+
+    The no-argument load is the one the app performs at import/lifespan. It must
+    never take the developer's ``config.yaml`` (and must never start the real
+    poller). Tests that pass an explicit config keep that config's values.
+    """
     cfg = _redirect_paths(_original_load_config(path))
     if path is None:
-        # The app's own `load_config()` (lifespan). A developer config copied from the example
-        # has poll_enabled: true, and every TestClient(app) would start a real poller thread.
         cfg.schedule.poll_enabled = False
-    # Production quarantines combined PDFs unsplit; the splitter tests need it on.
-    # Tests of the default set `cfg.extraction.split_combined = False` themselves.
-    cfg.extraction.split_combined = True
+        # A developer/production config may name real LAN hosts. The test client
+        # speaks to ``testserver`` and must not be refused by TrustedHostMiddleware.
+        cfg.server.allowed_hosts = ["*"]
     # The suite's thousands of existing route tests predate authentication and
     # exercise business logic, not login. Auth has its own dedicated tests that
     # build the app with `auth_enabled=True`. Never let a test run inherit a live
@@ -180,21 +186,21 @@ def _no_minimum_file_age_per_test(monkeypatch):
 
 
 def _ensure_a_config_file() -> None:
-    """Make sure `load_config()` (no argument) has a file to read.
+    """Install a session config for every no-argument ``load_config()`` call.
 
-    The app refuses to start without a config (SPEC 13.1) and the loader
-    reads the working directory. A developer's own `config.yaml` wins; if
-    there is none — a fresh clone — the session writes a temporary one
-    whose paths point into the session directory.
+    The suite must not depend on a developer's ``config.yaml`` (it may name
+    production paths, a real model, or a non-wildcard ``allowed_hosts`` list).
+    This session config is built from the committed example, with every path
+    under the session directory and the background poller off. Tests that need
+    their own config set ``AAM_CONFIG_PATH`` (or pass a path explicitly).
     """
-    if os.getenv("AAM_CONFIG_PATH"):
-        return
-    if (_REPO_ROOT / "config.yaml").exists():
-        return
     data = yaml.safe_load((_REPO_ROOT / "config.example.yaml").read_text(encoding="utf-8"))
     data["paths"] = _session_paths()
-    # Tests start the app many times; none may start the background poller.
     data.setdefault("schedule", {})["poll_enabled"] = False
+    data.setdefault("server", {})["allowed_hosts"] = ["*"]
+    data.setdefault("extraction", {})["split_combined"] = False
+    manual = data.setdefault("manual_merge", {})
+    manual["temp_folder"] = str(_SESSION_DIR / "manual_merge_tmp")
     target = _SESSION_DIR / "config.yaml"
     target.write_text(yaml.safe_dump(data), encoding="utf-8")
     os.environ["AAM_CONFIG_PATH"] = str(target)
@@ -214,30 +220,68 @@ def pytest_sessionfinish(session, exitstatus) -> None:
     then let Prefect's own ``stop()`` reset the singleton. Only servers that
     this session actually started are touched.
     """
-    if os.name != "nt":
-        # POSIX virtualenvs run the interpreter directly, so Prefect's own
-        # atexit stop() already reaps the server. Do not touch other processes.
-        return
-    module = sys.modules.get("prefect.server.api.server")
-    if module is None:
-        return  # no Prefect server was started in this session
-    server_cls = getattr(module, "SubprocessASGIServer", None)
-    if server_cls is None:  # pragma: no cover - Prefect internals changed
-        return
-    seen: set[int] = set()
-    for server in list(getattr(server_cls, "_instances", {}).values()):
-        process = getattr(server, "server_process", None)
-        pid = getattr(process, "pid", None)
-        if pid is not None and pid not in seen:
-            seen.add(pid)
-            with contextlib.suppress(Exception):
-                subprocess.run(
-                    ["taskkill", "/F", "/T", "/PID", str(pid)],
-                    capture_output=True,
-                    timeout=15,
-                )
+    if os.name == "nt":
+        module = sys.modules.get("prefect.server.api.server")
+        server_cls = getattr(module, "SubprocessASGIServer", None) if module else None
+        if server_cls is not None:
+            seen: set[int] = set()
+            for server in list(getattr(server_cls, "_instances", {}).values()):
+                process = getattr(server, "server_process", None)
+                pid = getattr(process, "pid", None)
+                if pid is not None and pid not in seen:
+                    seen.add(pid)
+                    with contextlib.suppress(Exception):
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(pid)],
+                            capture_output=True,
+                            timeout=15,
+                        )
+                # The process is already dead. Neutralise the server object so
+                # Prefect's own atexit ``stop()`` cannot wait on the dead API
+                # (observed at ~2 minutes on Windows). A second ``stop()`` after
+                # this is a no-op.
+                with contextlib.suppress(Exception):
+                    # Prefect registered ``server.stop`` with atexit; if it is
+                    # left registered, the interpreter blocks in it after this
+                    # hook returns, waiting on the API of the process we killed.
+                    atexit.unregister(server.stop)
+                    server.server_process = None
+                    server.running = False
+                    instance_key = getattr(server, "_instance_key", server.port)
+                    server_cls._instances.pop(instance_key, None)
+
+    # The session directory holds the test DB, stored PDFs and config. Dispose
+    # the cached SQLAlchemy engines first: on Windows an open SQLite handle makes
+    # rmtree fail, and ignore_errors would silently leave the directory behind.
+    with contextlib.suppress(Exception):
+        from app.core import database as database_module
+
+        for engine in list(database_module._engine_cache.values()):
+            engine.dispose()
+        database_module._engine_cache.clear()
+    gc.collect()
+    # Windows releases a SQLite handle only after the Session/engine is gone;
+    # retry briefly instead of silently leaving the whole session directory.
+    for _ in range(10):
+        shutil.rmtree(_SESSION_DIR, ignore_errors=True)
+        if not _SESSION_DIR.exists():
+            return
+        time.sleep(0.2)
+    # A daemon/Prefect child can still hold a handle when this hook returns.
+    # Delete after this interpreter exits, when Windows has released it.
+    if os.name == "nt":
         with contextlib.suppress(Exception):
-            server.stop()
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "import shutil, sys, time; time.sleep(2); "
+                    "shutil.rmtree(sys.argv[1], ignore_errors=True)",
+                    str(_SESSION_DIR),
+                ],
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
+                close_fds=True,
+            )
 
 
 _ensure_a_config_file()

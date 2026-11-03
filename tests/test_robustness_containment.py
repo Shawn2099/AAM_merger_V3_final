@@ -6,8 +6,6 @@ Passing tests pin acceptable behaviour; `xfail(strict=True)` marks a defect.
 from __future__ import annotations
 
 import errno
-import os
-import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -27,7 +25,7 @@ from test_robustness_harness import (
 )
 
 from app.core.database import get_engine
-from app.models import AuditLog, Document, ExtractionStatus, POSet, POSetStatus
+from app.models import AuditLog, Document, ExtractionStatus, POSetStatus
 
 
 @pytest.fixture()
@@ -205,9 +203,19 @@ def test_402_mid_sync_then_key_restored_merges_on_the_next_sync(rcfg, monkeypatc
     rcfg.prefect.max_concurrent_extraction_tasks = 1
     responses = _good()
     good_dn = responses[W_DN]
-    responses[W_DN] = ("status", 402, {"error": {"message": "Key limit exceeded", "code": 402}})
     HttpVLM(monkeypatch, responses)
-    _drop(rcfg)
+
+    # Seed the PO Set first. If PO/DN/SI are dropped together, the input order
+    # is filesystem-dependent; a 402 on the DN can halt the pass before the PO
+    # has minted its set. The product behavior under test is the 402 on a
+    # document inside an existing set, not the input order.
+    _drop(rcfg, "PO")
+    assert run_sync()["errors"] == 0
+    (ps,) = sets(rcfg)
+    assert ps.status == POSetStatus.pending and ps.merged_output_path is None
+
+    responses[W_DN] = ("status", 402, {"error": {"message": "Key limit exceeded", "code": 402}})
+    _drop(rcfg, "DN", "SI")
     first = run_sync()
     assert first["errors"] >= 1
     (ps,) = sets(rcfg)
@@ -700,8 +708,3 @@ def test_file_over_the_size_cap_is_rejected_and_listed_as_failed(rcfg, monkeypat
     (row,) = all_docs(rcfg)
     assert row.extraction_status == ExtractionStatus.failed
     assert row.po_set_id is None and "upload cap" in (row.ingest_reject_reason or "")
-
-
-def test_unused_imports_guard():
-    # keep linters quiet about helpers imported for symmetry
-    assert os and time and POSet

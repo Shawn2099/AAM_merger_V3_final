@@ -40,6 +40,8 @@ from app.services import sync_lock
 from app.services.poller import SyncPoller
 from app.services.reconciliation import REASON_TEXT, reconcile_po_set
 
+pytestmark = pytest.mark.slow
+
 JUST = "WS6: operator accepts 7 of 10 delivered."
 
 

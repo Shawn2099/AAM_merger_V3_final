@@ -39,6 +39,8 @@ from app.models import AuditAction, AuditLog, ExtractionStatus, POSet, POSetStat
 from app.services import sync_lock
 from app.services.poller import SyncPoller
 
+pytestmark = pytest.mark.slow
+
 JUST = "WS6: operator accepts 7 of 10 delivered."
 PO = "4500011111"
 

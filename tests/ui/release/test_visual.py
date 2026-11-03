@@ -11,7 +11,18 @@ environment would make a pixel baseline depend on test order.
 
 from __future__ import annotations
 
+import sys
+
+import pytest
 from playwright.sync_api import Page
+
+# Fonts/anti-aliasing differ by OS. The checked-in baselines are the Windows
+# reference (the production host); a Linux run must use its own set before
+# these are treated as a cross-platform gate.
+pytestmark = pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="visual baselines are captured on the Windows release reference",
+)
 
 
 def _goto(page: Page, base: str, path: str, width: int = 1440, height: int = 900) -> None:

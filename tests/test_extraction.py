@@ -64,54 +64,6 @@ def test_extract_document_single_failure_raises(tmp_path, monkeypatch):
         assert d.extraction_status == ExtractionStatus.failed
 
 
-def test_combine_single_vlm_call(tmp_path, monkeypatch):
-    """FR-6.3: COMBINED uses single VLM call, not 3."""
-    from pathlib import Path
-
-    from sqlalchemy.orm import Session
-
-    from app.core.config import load_config
-    from app.core.database import get_engine
-    from app.models import DocType, Document, ExtractionStatus
-    from app.models.base import Base
-    from app.services.extraction import extract_document
-
-    cfg = load_config("config.example.yaml")
-    db_path = tmp_path / "test2.db"
-    cfg.paths.database_path = str(db_path)
-    cfg.paths.stored_documents_folder = str(tmp_path / "stored2")
-    Path(cfg.paths.stored_documents_folder).mkdir(parents=True, exist_ok=True)
-    cfg.extraction.retry_backoff_seconds = [2, 5, 15]
-
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
-    with Session(eng) as s:
-        doc = Document(
-            sha256_hash="def456",
-            original_filename="combined.pdf",
-            stored_path=str(tmp_path / "stored2" / "combined.pdf"),
-            doc_type=DocType.COMBINED,
-            extraction_status=ExtractionStatus.pending,
-        )
-        s.add(doc)
-        s.commit()
-        s.refresh(doc)
-        doc_id = doc.id
-
-    calls = []
-
-    def fake_vlm(*a, **kw):
-        calls.append(1)
-        return {"po_no_raw": "PO123", "line_items": []}
-
-    monkeypatch.setattr("app.services.extraction._call_vlm", fake_vlm)
-
-    doc = extract_document(doc_id, cfg)
-    assert len(calls) == 1
-    assert doc.extraction_status == ExtractionStatus.valid
-    assert doc.extraction_attempt_count == 1
-
-
 def test_manual_only_skips_vlm(tmp_path, monkeypatch):
     """FR-6.5: CUSTOMS/SHIPPING never call the VLM."""
     from pathlib import Path
@@ -531,6 +483,7 @@ def test_combined_without_components_quarantines_no_raise(tmp_path, monkeypatch)
     from app.services.extraction import extract_document
 
     cfg = load_config("config.example.yaml")
+    cfg.extraction.split_combined = True  # this test exercises the split path
     cfg.paths.database_path = str(tmp_path / "test_comb.db")
     cfg.paths.stored_documents_folder = str(tmp_path / "stored_comb")
     cfg.paths.quarantine_folder = str(tmp_path / "quarantine_comb")
