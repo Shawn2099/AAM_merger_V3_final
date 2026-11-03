@@ -8,11 +8,13 @@ what is asserted.
 from __future__ import annotations
 
 import base64
+import io
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
-import pymupdf
 import pytest
+from PIL import Image
 from pypdf import PdfWriter
 from sqlalchemy.orm import Session
 
@@ -62,14 +64,16 @@ def seen(monkeypatch):
     return captured
 
 
-def _images(captured) -> list[pymupdf.Pixmap]:
+def _images(captured) -> list[Image.Image]:
     parts = captured["messages"][1]["content"]
     out = []
     for part in parts[1:]:
         assert part["type"] == "image_url"
         url = part["image_url"]["url"]
         assert url.startswith(_PNG_PREFIX)
-        out.append(pymupdf.Pixmap(base64.b64decode(url[len(_PNG_PREFIX) :])))
+        image = Image.open(io.BytesIO(base64.b64decode(url[len(_PNG_PREFIX) :])))
+        image.load()
+        out.append(image)
     return out
 
 
@@ -83,8 +87,10 @@ def test_pages_are_sent_as_images_in_real_page_order(tmp_path, seen):
     assert parts[0] == {"type": "text", "text": ext._PAGE_PROMPT}
     assert len(parts) == 4, "one text part plus one image per page"
     assert not any(p["type"] == "file" for p in parts), "no native-PDF part any more"
-    widths = [pix.width for pix in _images(seen)]
+    images = _images(seen)
+    widths = [image.width for image in images]
     assert widths == sorted(widths) and len(set(widths)) == 3
+    assert {image.mode for image in images} == {"RGB"}, "the provider gets RGB, never RGBA"
     assert seen["messages"][0] == {"role": "system", "content": ext._SYSTEM_PROMPT}
     assert seen["max_retries"] == 0
 
@@ -194,17 +200,196 @@ def test_corrupt_truncated_and_non_pdf_raise_a_clear_error(tmp_path, monkeypatch
 
 
 def test_encrypted_pdf_raises_a_clear_error(tmp_path):
-    src = _pdf(tmp_path / "plain.pdf")
+    # AES-256 with a non-empty user password: the case a vendor may actually send.
+    # pypdf writes it (cryptography is a test dependency); the renderer must refuse
+    # it instead of returning blank pages.
+    src = _pdf(tmp_path / "plain.pdf", widths=(100, 200))
     locked = tmp_path / "locked.pdf"
-    with pymupdf.open(str(src)) as doc:
-        doc.save(
-            str(locked),
-            encryption=pymupdf.PDF_ENCRYPT_AES_256,
-            user_pw="secret",
-            owner_pw="owner",
-        )
+    writer = PdfWriter(clone_from=str(src))
+    writer.encrypt(user_password="secret", owner_password="owner", algorithm="AES-256")
+    with open(locked, "wb") as f:
+        writer.write(f)
+
     with pytest.raises(ext.PdfRasterError, match="password-protected"):
         ext._rasterize_pdf(locked.read_bytes(), 150, 30, "locked.pdf")
+
+
+def test_owner_only_encrypted_pdf_still_renders(tmp_path):
+    """An empty user password opens normally (PDFium only needs the user password)."""
+    src = _pdf(tmp_path / "plain.pdf", widths=(100,))
+    owner_only = tmp_path / "owner_only.pdf"
+    writer = PdfWriter(clone_from=str(src))
+    writer.encrypt(user_password="", owner_password="owner", algorithm="AES-256")
+    with open(owner_only, "wb") as f:
+        writer.write(f)
+
+    images = ext._rasterize_pdf(owner_only.read_bytes(), 72, 30, "owner_only.pdf")
+    assert Image.open(io.BytesIO(images[0])).size == (100, 100)
+
+
+# ---------------------------------------------------------------------------
+# Page-box fidelity: a renderer must not silently crop a page.
+# ---------------------------------------------------------------------------
+
+
+def _handbuilt_pdf(
+    path: Path,
+    *,
+    media: str | None = None,
+    crop: str | None = None,
+    inherited_media: str | None = None,
+    rotate: int = 0,
+) -> Path:
+    """A minimal one-page PDF whose boxes are written verbatim (no library repair).
+
+    `inherited_media` puts /MediaBox on the /Pages node instead of the page, which
+    is legal PDF and common in the wild.
+    """
+    pages_dict = "<< /Type /Pages /Kids [3 0 R] /Count 1"
+    if inherited_media is not None:
+        pages_dict += f" /MediaBox {inherited_media}"
+    pages_dict += " >>"
+
+    page_dict = "<< /Type /Page /Parent 2 0 R /Contents 4 0 R"
+    if media is not None:
+        page_dict += f" /MediaBox {media}"
+    if crop is not None:
+        page_dict += f" /CropBox {crop}"
+    if rotate:
+        page_dict += f" /Rotate {rotate}"
+    page_dict += " >>"
+
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        pages_dict.encode(),
+        page_dict.encode(),
+        b"<< /Length 0 >>\nstream\n\nendstream",
+    ]
+
+    out = bytearray(b"%PDF-1.7\n")
+    offsets = [0]
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{number} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n".encode()
+    out += b"0000000000 65535 f \n"
+    for offset in offsets[1:]:
+        out += f"{offset:010d} 00000 n \n".encode()
+    out += (
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+    ).encode()
+    path.write_bytes(bytes(out))
+    return path
+
+
+def _size(pdf_bytes: bytes, name: str) -> tuple[int, int]:
+    (png,) = ext._rasterize_pdf(pdf_bytes, 72, 5, name)
+    image = Image.open(io.BytesIO(png))
+    image.load()
+    assert image.mode == "RGB"
+    return image.size
+
+
+def test_eight_number_mediabox_is_repaired_not_cropped(tmp_path):
+    """SIV-RHO-26-234B: `[0 0 595 841 0 0 595 841]`. PDFium falls back to Letter
+    and clips the A4 page unless the box is repaired in memory."""
+    pdf = _handbuilt_pdf(
+        tmp_path / "eight_numbers.pdf",
+        media="[0 0 300 400 0 0 300 400]",
+        crop="[0 0 300 400 0 0 300 400]",
+    )
+    assert _size(pdf.read_bytes(), "eight_numbers.pdf") == (300, 400)
+
+
+def test_inherited_mediabox_is_not_rewritten_to_letter(tmp_path):
+    """A /MediaBox on the /Pages node is legal. The repair must not mistake PDFium's
+    Letter fallback in get_mediabox() for a malformed array and shrink the page."""
+    pdf = _handbuilt_pdf(
+        tmp_path / "inherited.pdf",
+        inherited_media="[0 0 300 400]",
+    )
+    assert _size(pdf.read_bytes(), "inherited.pdf") == (300, 400)
+
+
+def test_cropbox_smaller_than_mediabox_is_honoured(tmp_path):
+    """A deliberate trim (crop marks removed) must render the crop, not the media."""
+    pdf = _handbuilt_pdf(
+        tmp_path / "cropped.pdf",
+        media="[0 0 400 500]",
+        crop="[50 50 350 450]",
+    )
+    assert _size(pdf.read_bytes(), "cropped.pdf") == (300, 400)
+
+
+def test_rotated_page_keeps_its_rotation_and_is_not_repaired(tmp_path):
+    pdf = _handbuilt_pdf(
+        tmp_path / "rotated.pdf",
+        media="[0 0 300 400]",
+        rotate=90,
+    )
+    assert _size(pdf.read_bytes(), "rotated.pdf") == (400, 300)
+
+
+def test_pdf_with_no_pages_raises_a_clear_error(tmp_path):
+    no_pages = tmp_path / "no_pages.pdf"
+    writer = PdfWriter()
+    with open(no_pages, "wb") as f:
+        writer.write(f)
+
+    with pytest.raises(ext.PdfRasterError, match="no pages"):
+        ext._rasterize_pdf(no_pages.read_bytes(), 72, 30, "no_pages.pdf")
+
+
+# ---------------------------------------------------------------------------
+# PDFium is process-globally thread-unsafe: every call must be serialised.
+# ---------------------------------------------------------------------------
+
+
+class _DetectingLock:
+    """A lock that records how many callers are inside the critical section."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.inside = 0
+        self.max_inside = 0
+        self.entries = 0
+
+    def __enter__(self):
+        self._lock.acquire()
+        self.entries += 1
+        self.inside += 1
+        self.max_inside = max(self.max_inside, self.inside)
+        return self
+
+    def __exit__(self, *exc_info):
+        self.inside -= 1
+        self._lock.release()
+        return False
+
+
+def test_pdfium_calls_are_serialized_across_threads(tmp_path, monkeypatch):
+    lock = _DetectingLock()
+    monkeypatch.setattr(ext, "_PDFIUM_GLOBAL_LOCK", lock)
+    pdf = _pdf(tmp_path / "two.pdf", widths=(100, 200)).read_bytes()
+    errors: list[BaseException] = []
+
+    def render() -> None:
+        try:
+            for _ in range(5):
+                assert len(ext._rasterize_pdf(pdf, 72, 5, "two.pdf")) == 2
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=render) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    assert lock.entries >= 4, "the rasteriser did not take the process-wide lock"
+    assert lock.max_inside == 1, "two threads entered PDFium at the same time"
 
 
 def test_raster_errors_are_content_errors_not_infrastructure():

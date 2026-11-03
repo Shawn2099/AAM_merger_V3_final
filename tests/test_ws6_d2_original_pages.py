@@ -16,9 +16,9 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-import pymupdf
 import pytest
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from test_robustness_harness import HttpVLM, extraction, line, make_cfg, run_sync, sets
 
 PO_NO = "4500060001"
@@ -27,14 +27,33 @@ LINES = [line("1", "10", "BOLT"), line("2", "5", "NUT")]
 
 
 def text_pdf(path: Path, width: float, texts: list[str], height: float = 842) -> Path:
-    """One page per entry in `texts`, all `width` points wide (the fake's dispatch key)."""
-    doc = pymupdf.open()
-    for t in texts:
-        page = doc.new_page(width=width, height=height)
-        page.insert_text((40, 60), t, fontsize=12)
+    """One page per entry in `texts`, all `width` points wide (the fake's dispatch key).
+
+    pypdf writes a real text stream with a Base-14 font, so the assertions below —
+    text layer present, no image XObject — are meaningful without PyMuPDF.
+    """
+    writer = PdfWriter()
+    for text in texts:
+        page = writer.add_blank_page(width=width, height=height)
+        font = DictionaryObject(
+            {
+                NameObject("/Type"): NameObject("/Font"),
+                NameObject("/Subtype"): NameObject("/Type1"),
+                NameObject("/BaseFont"): NameObject("/Helvetica"),
+                NameObject("/Encoding"): NameObject("/WinAnsiEncoding"),
+            }
+        )
+        page[NameObject("/Resources")] = DictionaryObject(
+            {NameObject("/Font"): DictionaryObject({NameObject("/F1"): writer._add_object(font)})}
+        )
+        stream = DecodedStreamObject()
+        stream.set_data(
+            f"BT /F1 12 Tf 40 {height - 60} Td ({text}) Tj ET".encode("latin-1")
+        )
+        page[NameObject("/Contents")] = writer._add_object(stream)
     path.parent.mkdir(parents=True, exist_ok=True)
-    doc.save(str(path))
-    doc.close()
+    with open(path, "wb") as f:
+        writer.write(f)
     return path
 
 
