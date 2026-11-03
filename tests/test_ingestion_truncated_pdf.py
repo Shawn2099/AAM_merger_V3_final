@@ -48,6 +48,18 @@ def no_sleep(monkeypatch):
     monkeypatch.setattr(ingestion.time, "sleep", lambda _s: None)
 
 
+@pytest.fixture
+def age_ok(monkeypatch):
+    """Skip the 30 s copy-safety age in this module.
+
+    These two tests exercise the size/mtime poll, not the age rule; the age rule
+    has its own tests in `tests/test_s2_copy_safety.py`. Patch the function's own
+    globals so a reloaded app module cannot leave a stale 30 s value behind (the
+    full-suite failure seen on CI).
+    """
+    monkeypatch.setitem(is_file_stable.__globals__, "_old_enough", lambda _p: True)
+
+
 def test_complete_pdf_ingests(tmp_path):
     cfg = _cfg(tmp_path)
     p = tmp_path / "po.pdf"
@@ -107,13 +119,13 @@ def test_recent_incomplete_file_stays_in_input_for_a_retry(tmp_path):
     assert not (tmp_path / "quarantine" / "_documents").exists()
 
 
-def test_is_file_stable_rejects_zero_byte_file(tmp_path, no_sleep):
+def test_is_file_stable_rejects_zero_byte_file(tmp_path, no_sleep, age_ok):
     p = tmp_path / "empty.pdf"
     p.write_bytes(b"")
     assert is_file_stable(p, interval=1, count=3) is False
 
 
-def test_is_file_stable_accepts_steady_nonempty_file(tmp_path, no_sleep):
+def test_is_file_stable_accepts_steady_nonempty_file(tmp_path, no_sleep, age_ok):
     p = tmp_path / "steady.pdf"
     p.write_bytes(b"%PDF-1.4 steady")
     assert is_file_stable(p, interval=1, count=3) is True

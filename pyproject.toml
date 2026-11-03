@@ -18,7 +18,12 @@ dependencies = [
     "alembic>=1.16.0",
     "rapidfuzz>=3.14.0",
     "pypdf>=6.21.4",
-    "pymupdf==1.28.2",
+    # PDF -> PNG rasteriser for the VLM. BSD-3/Apache-2.0, bundles PDFium, no
+    # Visual C++ redistributable. Pinned: rendering is version-specific and the
+    # page-box repair was verified against 5.14.0 (PDFium 156.0.8076.0).
+    "pypdfium2==5.14.0",
+    # Required by PdfBitmap.to_pil() and the PNG encoder in the rasteriser.
+    "pillow>=13.0.0",
     "jinja2>=3.1.6",
     "python-multipart>=0.0.20",
     "python-dotenv>=1.1.0",
@@ -45,7 +50,8 @@ dev = [
     "axe-playwright-python>=0.1.8",
     "pytest-playwright-visual-snapshot>=0.5.1",
     "pytest-html>=4.2.0",
-    "pillow>=13.0.0",
+    # Test-only: pypdf writes the AES-256 encrypted fixture (pdfium must refuse it).
+    "cryptography>=42.0",
 ]
 # keep sync with [tool.*] below
 

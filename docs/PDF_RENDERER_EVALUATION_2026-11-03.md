@@ -1,10 +1,26 @@
 # PDF renderer evaluation — 2026-11-03 (UTC)
 
-**Status:** discovery/benchmark complete; **no production code changed**.
-**Branch:** `feat/handover-hardening` @ `80a9bb7` (4 commits ahead of `origin/main`).
+**Status:** discovery/benchmark complete; **implemented on `feat/pdfium-rasterizer`** (2026-11-03), branched from `main` `e716903`.
+**Branch:** `feat/pdfium-rasterizer` (from latest `main`).
 **Scope:** replace PyMuPDF 1.28.2 (AGPL/commercial) as the PDF→PNG rasteriser used by the VLM extraction path, with a permissively licensed, maintainable renderer for a proprietary internal Windows tool.
 **Primary question:** is PDF Oxide 0.3.78 mature/safe enough for handover?
 **Short answer:** **No.** PDF Oxide 0.3.78 is promising but too new and currently loses real vendor documents. **Recommend pypdfium2 5.14.0 as primary**, with a small, tested malformed-MediaBox repair and a process-wide PDFium lock. PyMuPDF remains the technical fallback only if the owner buys an Artifex commercial licence.
+
+> **Implementation note (2026-11-03).** The port is in `src/app/services/extraction.py`
+> (`_rasterize_pdf`, `_PDFIUM_GLOBAL_LOCK`, `_repair_page_box`), with tests in
+> `tests/test_extraction_raster.py` and an integration test in
+> `tests/test_manual_merge_matrix.py`. Two details in §7.2/§7.5 below were corrected
+> during implementation: the original repair rule false-fires on inherited MediaBoxes
+> and on a deliberate CropBox smaller than the MediaBox, so the shipped rule confirms
+> the malformed array with pypdf first; and the branch this landed on (`main` `e716903`)
+> has no `vlm.rasterize_concurrency` / raster semaphore, so only the global lock is
+> present. The acceptance scan after the port: 693/695 real files render (the same two
+> corrupt files fail), 0 page-count mismatches, 234B renders 1240×1753, and the repair
+> fires only on 234B across all 695 files.
+>
+> Gate-by-gate evidence (Win11 runtime install, live HTTP smoke, 695-file scan,
+> 234B repair, 20-document VLM check, licence audit and sign-off) is in
+> [`PDFIUM_PORT_VERIFICATION_2026-11-03.md`](PDFIUM_PORT_VERIFICATION_2026-11-03.md).
 
 ---
 
@@ -360,6 +376,24 @@ if ss != cc and ss != mm:              # 234B is the only real_samples hit
 
 After the fix: render **1240×1753**, MAD **6.31** vs PyMuPDF (normal anti-aliasing), ink 0.1176 vs 0.1101 (no crop). Across all 693 valid `real_samples`, this rule fires **only** on `SIV-RHO-26-234B.pdf` (M). It is an in-memory page-box override; the stored PDF is never modified. This removes the only known content-loss case from the prior round.
 
+> **Correction (2026-11-03, found during the port).** The comparison above is **not safe as
+> written** and is *not* what shipped. It uses the boxes' upper-right coordinates rather than
+> their dimensions, and it treats "PDFium's size matches neither box" as proof of a malformed
+> array. Two legal page shapes also match that condition and were measured on synthetic fixtures:
+>
+> - a `/MediaBox` inherited from the `/Pages` node: `get_mediabox()` returns PDFium's ANSI-A
+>   fallback, not the inherited box, so a 300×400 page would be "repaired" to 612×792;
+> - a deliberate `/CropBox` smaller than the `/MediaBox` (a trimmed scan): the rendered size is
+>   the crop, which matches neither the media box nor PDFium's fallback.
+>
+> The shipped rule keeps the cheap check as a pre-filter, then **confirms the array itself with
+> pypdf**: repair only when `page.get("/MediaBox")` or `page.get("/CropBox")` is a non-four-number
+> array. It compares `(width, height)` (rotation-safe), and repairs both boxes from their first
+> four numbers. Re-measured after the port: the repair fires on exactly one page in all 695 real
+> files (`SIV-RHO-26-234B.pdf`), and the synthetic inherited/cropped/rotated cases render at
+> their true sizes. Pinned by `test_inherited_mediabox_is_not_rewritten_to_letter`,
+> `test_cropbox_smaller_than_mediabox_is_honoured` and `test_rotated_page_keeps_its_rotation_and_is_not_repaired`.
+
 ### 7.3 One-pixel dimension variance (M)
 
 PDFium uses ceiling for the raster size; PyMuPDF rounds. Example: 612×792 pt at 150 DPI → PDFium 1275×1651, PyMuPDF 1275×1650. In the 28-doc set, 26/65 pages differed by exactly 1 px (height or width); no true size differences after the 234B fix. A `scale = (dpi - 1e-6)/72` trick fixes the integer cases but causes other 1 px differences; there is no single epsilon that matches PyMuPDF on every fractional page size. **Treat ±1 px as acceptable** and assert `abs(w-w_ref) <= 1` in tests; the vision model is insensitive to this. If exact parity is required, crop/resize after render, but that is unnecessary work.
@@ -679,12 +713,14 @@ No project files were modified; `git status` on `aam_merger-handover` must remai
 - [x] 234B malformed MediaBox; PDFium `set_mediabox` fix verified; only one real hit.
 - [x] Non-embedded font prevalence scan (115/208 docs).
 - [x] Full library landscape table.
+- [x] Win11 runtime-only install + live HTTP smoke (health, manual merge); no VC++ redist.
+- [x] 234B end-to-end VLM pass (the repaired page extracts its PO and lines).
 - [ ] WS2016 clean-image import/render (PDFium and, if retried, PDF Oxide).
 - [ ] 2-core timing and memory on WS2016.
-- [ ] VLM A/B on 20–30 real documents.
-- [ ] Implement pypdfium2 branch + tests.
-- [ ] Update installer/docs/tests and remove PyMuPDF runtime dependency.
-- [ ] Legal sign-off on PDFium notices / PyMuPDF commercial (if fallback).
+- [x] VLM check on 20 real documents (17/20 gold; cached PyMuPDF baseline 16/20). Not a clean renderer-only A/B because the prompt changed; the 3 first-run misses are model sampling variance, each passing on a repeat.
+- [x] Implement pypdfium2 branch + tests.
+- [x] Update installer/docs/tests and remove the PyMuPDF runtime dependency.
+- [x] Licence audit + owner sign-off on the PDFium/Pillow/pypdf notices; no Artifex fallback needed.
 - [ ] Re-evaluate PDF Oxide 0.3.79+ only if owner wants.
 
 ---
@@ -704,4 +740,4 @@ No project files were modified; `git status` on `aam_merger-handover` must remai
 
 ---
 
-*End of evaluation. The recommendation is pypdfium2 5.14.0; PDF Oxide 0.3.78 is not handover-ready. No production files were changed; only this document was added.*
+*End of evaluation. The recommendation is pypdfium2 5.14.0; PDF Oxide 0.3.78 is not handover-ready. The implementation landed on `feat/pdfium-rasterizer` (2026-11-03); the measured results in this document are the pre-port benchmark, and the post-port acceptance scan is recorded in the implementation note at the top.*

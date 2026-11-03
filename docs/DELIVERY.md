@@ -78,11 +78,11 @@ Get-ChildItem -Recurse *.ps1 | Unblock-File
 
 What it does, in order:
 
-1. syncs the Python environment (`uv sync --no-dev`, or `pip install -e .`); this installs PyMuPDF
-   (`pymupdf==1.28.2`, a binary wheel used to rasterise PDF pages for the VLM; it needs the
-   Microsoft Visual C++ 2015-2022 x64 redistributable, which a fresh Windows Server 2016 may lack).
-   The script then checks that `import pymupdf` works and stops with the download link
-   (https://aka.ms/vs/17/release/vc_redist.x64.exe) and exit code 1 if it does not. Python must be
+1. syncs the Python environment (`uv sync --no-dev`, or `pip install -e .`); this installs
+   `pypdfium2==5.14.0` (a binary wheel that bundles PDFium and rasterises PDF pages for the VLM)
+   and Pillow (PNG encoding). No Visual C++ redistributable is required: `pdfium.dll` imports only
+   the Windows system DLLs. The script then checks that `import pypdfium2` works and stops with
+   exit code 1 if it does not. Python must be
    a real install: the Microsoft Store `python` alias is refused with a message (install Python 3.11+
    from python.org, or install uv);
 2. creates `config.yaml` if missing and the data folders;
@@ -116,17 +116,22 @@ they exist), so a re-run never migrates a live database; the installer starts th
 It prints the dashboard URL by PC name and by this machine's LAN IP. Services start on boot. If this PC
 gets a new IP address (DHCP), open it by name, or add the new address to `allowed_hosts` in `config.yaml`.
 
-> **Licence check: PyMuPDF (2026-10-24).** `pymupdf==1.28.2` is dual-licensed
-> **GNU AGPL-3.0 or an Artifex commercial licence** (installed package metadata
-> and PyPI: "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial
-> License"). This product is proprietary (`pyproject.toml`: "Proprietary -
-> internal CA tool") and the dashboard is served to the office over the LAN,
-> so AGPL section 13 (network use) is the clause that matters. Before
-> hand-over the client must choose one, in writing: (a) buy the Artifex
-> commercial licence, (b) replace the rasteriser (`extraction._rasterize_pdf`)
-> with a permissively licensed renderer, or (c) accept AGPL and offer the
-> corresponding source to the dashboard's users. Nothing in the installer
-> resolves this; it is a commercial/legal decision, not a code default.
+> **Licence: PDF renderer (decided 2026-11-03).** The VLM rasteriser is
+> `pypdfium2==5.14.0`, which bundles PDFium. pypdfium2 is **BSD-3-Clause +
+> Apache-2.0** and PDFium is **BSD-3-Clause**; both are compatible with this
+> proprietary internal tool. This replaces `pymupdf==1.28.2` (AGPL-3.0 or an
+> Artifex commercial licence), which was removed from the runtime and the
+> repository. Keep the upstream licence notices in the distribution
+> (`pypdfium2`'s package metadata and `BUILD_LICENSES/` in the wheel); the
+> components and the exact paths are listed in
+> [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). The full
+> comparison and the reasons PDF Oxide 0.3.78 was rejected are in
+> [`docs/PDF_RENDERER_EVALUATION_2026-11-03.md`](PDF_RENDERER_EVALUATION_2026-11-03.md).
+> PDFium is process-globally thread-unsafe; the application serialises it with
+> one process-wide lock, so no installer or service setting is involved.
+> Gate-by-gate evidence (runtime install, live HTTP smoke, 695-file scan, 234B
+> repair, VLM check, licence audit and sign-off) is in
+> [`PDFIUM_PORT_VERIFICATION_2026-11-03.md`](PDFIUM_PORT_VERIFICATION_2026-11-03.md).
 
 **Installer switches** (`scripts\install_nssm_services.ps1`; `setup_test_rig.ps1` calls it and passes
 `-AllowAnyHost` through):

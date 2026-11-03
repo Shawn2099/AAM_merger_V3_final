@@ -76,7 +76,7 @@ Note: use **forward slashes** in `config.yaml` paths. A double-quoted
 
 FastAPI · Uvicorn (NSSM on Windows, never Gunicorn) · Pydantic v2 ·
 instructor + OpenRouter · Prefect 3 · SQLAlchemy 2 sync · SQLite WAL ·
-rapidfuzz · pypdf · PyMuPDF (page rasterising) · Jinja2 + HTMX + Alpine.js · pytest.
+rapidfuzz · pypdf · pypdfium2/PDFium (page rasterising) · Pillow · Jinja2 + HTMX + Alpine.js · pytest.
 
 ## Where things live
 

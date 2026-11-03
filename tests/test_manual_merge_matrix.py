@@ -9,9 +9,12 @@ This complements the existing manual-merger suite with:
 
 from __future__ import annotations
 
+import io
+
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from PIL import Image
 from pydantic import ValidationError
 from pypdf import PdfReader, PdfWriter
 
@@ -274,3 +277,23 @@ def test_every_page_is_kept(tmp_path):
     out = tmp_path / "out.pdf"
     manual_merge([source], [0], out)
     assert len(PdfReader(str(out)).pages) == 3
+
+
+def test_merged_output_renders_with_the_production_rasteriser(tmp_path):
+    """Cross-feature contract: the manual merger writes with pypdf, and the packet
+    must stay readable by the PDFium rasteriser used for extraction — same page
+    count, same order, RGB PNGs. A renderer swap must not break this path."""
+    from app.services.extraction import _rasterize_pdf
+
+    a = _pdf(tmp_path / "a.pdf", width=100, pages=2)
+    b = _pdf(tmp_path / "b.pdf", width=200, pages=1)
+    out = tmp_path / "out.pdf"
+    manual_merge([a, b], [0, 1], out)
+
+    images = [
+        Image.open(io.BytesIO(png)) for png in _rasterize_pdf(out.read_bytes(), 72, 10, "out.pdf")
+    ]
+    for image in images:
+        image.load()
+    assert [image.size for image in images] == [(100, 200), (100, 200), (200, 200)]
+    assert {image.mode for image in images} == {"RGB"}

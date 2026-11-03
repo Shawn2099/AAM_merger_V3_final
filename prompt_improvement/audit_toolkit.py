@@ -43,10 +43,7 @@ Usage:
 """
 
 import argparse
-import glob
-import io
 import json
-import os
 import re
 import sqlite3
 import sys
@@ -81,17 +78,11 @@ ORDERED_AUDIT_DOCS_PATH = WORKSPACE_ROOT / "ordered_audit_docs.json"
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-# Attempt importing PyMuPDF with fallback to temp directory
+# pypdfium2 (PDFium) is the same renderer the application uses.
 try:
-    import pymupdf
+    import pypdfium2 as pdfium
 except ImportError:
-    temp_pdflibs = os.path.join(os.environ.get("TEMP", ""), "opencode", "pdflibs")
-    if os.path.exists(temp_pdflibs) and temp_pdflibs not in sys.path:
-        sys.path.insert(0, temp_pdflibs)
-    try:
-        import pymupdf
-    except ImportError:
-        pymupdf = None
+    pdfium = None
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +157,8 @@ def fetch_doc_details(conn: sqlite3.Connection, doc_id: int) -> dict:
 # ---------------------------------------------------------------------------
 def render_pdf_to_images(stored_path: str, doc_id: int, zoom: float = 2.0) -> list[Path]:
     """Renders all pages of a PDF to high-resolution PNG images (144 DPI at zoom=2.0)."""
-    if pymupdf is None:
-        print("Warning: PyMuPDF is not available. Automatic PDF rendering disabled.")
+    if pdfium is None:
+        print("Warning: pypdfium2 is not available. Automatic PDF rendering disabled.")
         return []
 
     RENDER_DIR.mkdir(parents=True, exist_ok=True)
@@ -181,13 +172,21 @@ def render_pdf_to_images(stored_path: str, doc_id: int, zoom: float = 2.0) -> li
 
     rendered = []
     try:
-        pdf_doc = pymupdf.open(str(pdf_file))
-        for p in range(pdf_doc.page_count):
-            pix = pdf_doc[p].get_pixmap(matrix=pymupdf.Matrix(zoom, zoom))
-            out_path = RENDER_DIR / f"doc{doc_id:03d}_p{p + 1}.png"
-            pix.save(str(out_path))
-            rendered.append(out_path)
-        pdf_doc.close()
+        pdf_doc = pdfium.PdfDocument(str(pdf_file))
+        try:
+            for p in range(len(pdf_doc)):
+                bitmap = pdf_doc[p].render(
+                    scale=zoom, fill_color=(255, 255, 255, 255)
+                )
+                try:
+                    image = bitmap.to_pil()
+                finally:
+                    bitmap.close()
+                out_path = RENDER_DIR / f"doc{doc_id:03d}_p{p + 1}.png"
+                image.save(str(out_path), format="PNG")
+                rendered.append(out_path)
+        finally:
+            pdf_doc.close()
     except Exception as e:
         print(f"Error rendering doc {doc_id} ({stored_path}): {e}")
 
@@ -292,7 +291,7 @@ def handle_status(args):
     for status, count in sorted(set_status_counts.items()):
         print(f"  - {status:<15}: {count} set(s)")
 
-    print("\n• PyMuPDF Status:            " + ("Available (High-Res 144 DPI active)" if pymupdf else "Unavailable (Install pymupdf for auto-render)"))
+    print("\n• PDFium Status:             " + ("Available (High-Res 144 DPI active)" if pdfium else "Unavailable (install pypdfium2 for auto-render)"))
     print("=====================================================================")
 
 
