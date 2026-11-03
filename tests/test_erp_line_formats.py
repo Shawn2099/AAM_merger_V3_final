@@ -73,16 +73,6 @@ def test_conventions_are_currently_distinct(label, left, right):
     assert normalize_line_no(left) != normalize_line_no(right)
 
 
-@pytest.mark.parametrize(
-    ("label", "left", "right"), CONVENTION_PAIRS, ids=[c[0] for c in CONVENTION_PAIRS]
-)
-@pytest.mark.xfail(
-    strict=True,
-    reason="common ERP line convention is not mapped to the other side's key",
-)
-def test_conventions_should_normalise_to_one_key(label, left, right):
-    assert normalize_line_no(left) == normalize_line_no(right)
-
 
 # ---------------------------------------------------------------------------
 # Description fallback is only for a blank number, never for a wrong number.

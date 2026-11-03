@@ -145,9 +145,8 @@ def test_dashboard_table_fragment_htmx(tmp_cfg, client):
     r = client.get("/dashboard/table")
     assert r.status_code == 200, r.text
     html = r.text
-    assert "hx-get" in html or "hx-swap" in html or "po_no" in html.lower() or "PO" in html
-    # fragment should be HTMX partial (not full html) or at least contain table/div
-    assert "table" in html.lower() or "div" in html.lower()
+    assert 'data-testid="po-row"' in html
+    assert "POHTMXFRAG" in html
 
 
 def test_dashboard_filter_by_status(tmp_cfg, client):
@@ -304,18 +303,23 @@ def test_force_merge_modal_and_audit(tmp_cfg, client):
     # a named field and the button must include it in the request
     assert 'name="justification"' in html
     assert 'hx-include="#force-merge-justification"' in html
-    # execute force merge
-    r2 = client.post(f"/po_sets/{pid}/force_merge")
+    # execute force merge with the reason the modal would submit
+    note = "Operator approved after phone call with the supplier."
+    r2 = client.post(f"/po_sets/{pid}/force_merge", data={"justification": note})
     assert r2.status_code == 200
-    # audit entry created
+    # audit entry created for THIS set, carrying the reason
     eng = get_engine(tmp_cfg)
     with Session(eng) as s:
-        entries = s.query(AuditLog).filter_by(action=AuditAction.force_merge).all()
-        assert len(entries) >= 1
-        assert (
-            any(str(e.po_set_id) == str(pid) or e.po_set_id == pid for e in entries)
-            or len(entries) >= 1
+        entries = (
+            s.query(AuditLog)
+            .filter(
+                AuditLog.action == AuditAction.force_merge,
+                AuditLog.po_set_id == pid,
+            )
+            .all()
         )
+        assert len(entries) == 1, [e.detail for e in entries]
+        assert entries[0].justification == note
 
 
 # ---------------------------------------------------------------------------
@@ -356,20 +360,20 @@ def test_htmx_partial_refresh_attributes(tmp_cfg, client):
     assert "hx-get" in rf.text or "POHTMX1" in rf.text
 
 
-def test_sync_button_htmx_and_disabled_when_running(client):
+def test_sync_button_htmx_and_disabled_when_running(client, monkeypatch):
     # dashboard must have Sync button with hx-post to /sync
     r = client.get("/dashboard")
     assert r.status_code == 200
-    assert 'hx-post="/sync"' in r.text or "hx-post='/sync'" in r.text or "/sync" in r.text
-    # trigger sync then check status endpoint
-    client.post("/sync")
+    assert 'hx-post="/sync"' in r.text
+    # Do not start a real sync thread here: another test's config could be read.
+    monkeypatch.setattr("app.api.routes.sync._is_sync_running", lambda: True)
     r2 = client.get("/sync/status")
     assert r2.status_code == 200
-    assert "running" in r2.text.lower()
-    # dashboard while running should show disabled or "Sync already running"
+    assert r2.json()["running"] is True
+    # dashboard while running renders the disabled button, not just the word "sync"
     r3 = client.get("/dashboard")
-    # at least contains sync button text; when running, may show disabled attribute
-    assert "sync" in r3.text.lower()
+    assert 'data-testid="btn-scan-input"' in r3.text
+    assert "disabled" in r3.text
 
 
 def test_cross_platform_paths_no_hardcoded_separators(tmp_cfg, client):

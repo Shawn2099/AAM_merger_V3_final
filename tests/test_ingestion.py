@@ -4,7 +4,7 @@ from pathlib import Path
 from pypdf import PdfWriter
 
 from app.core.config import load_config
-from app.services.ingestion import ingest_file, is_file_stable
+from app.services.ingestion import ingest_file
 
 
 def _pdf_bytes() -> bytes:
@@ -17,15 +17,21 @@ def _pdf_bytes() -> bytes:
 
 
 def test_is_file_stable(tmp_path, monkeypatch):
+    """Two identical samples pass the stability loop.
+
+    The real file/age behavior lives in `test_s2_copy_safety.py` and
+    `test_ingestion_truncated_pdf.py`. This unit test pins the loop itself
+    without depending on the host's mtime/anti-virus timing (CI touched the
+    file between samples and made the old version flaky).
+    """
+    import importlib
+
+    ingestion = importlib.import_module("app.services.ingestion")
     p = tmp_path / "a.pdf"
     p.write_bytes(b"x")
-    # Patch the function's OWN module globals. A test that reloads
-    # app.services.ingestion can leave this imported function bound to the old
-    # module, while the autouse fixture patches the new one; the 30 s age then
-    # makes this test fail only in a full-suite order.
-    monkeypatch.setitem(is_file_stable.__globals__, "MIN_FILE_AGE_SECONDS", 0)
-    # 2sx2 stable if not growing
-    assert is_file_stable(p, interval=0, count=2) is True  # 0 for fast test, real 2s
+    monkeypatch.setattr(ingestion, "file_signature", lambda _p: (1, 0))
+    monkeypatch.setattr(ingestion, "_old_enough", lambda _p: True)
+    assert ingestion.is_file_stable(p, interval=0, count=2) is True
 
 
 def test_dedup_sha256(tmp_path):
@@ -56,22 +62,25 @@ def test_stored_path_never_deleted(tmp_path):
 
 
 def test_delete_input_files_when_merged_and_valid(tmp_path):
+    import hashlib
+
     from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus
     from app.services.ingestion import delete_input_files
 
+    payload = b"pdf data"
     input_dir = tmp_path / "input"
     input_dir.mkdir(parents=True, exist_ok=True)
     in_file = input_dir / "invoice.pdf"
-    in_file.write_bytes(b"pdf data")
+    in_file.write_bytes(payload)
 
     stored_dir = tmp_path / "stored"
     stored_dir.mkdir(parents=True, exist_ok=True)
     stored_file = stored_dir / "stored_invoice.pdf"
-    stored_file.write_bytes(b"pdf data")
+    stored_file.write_bytes(payload)
 
     doc = Document(
         id=1,
-        sha256_hash="h1",
+        sha256_hash=hashlib.sha256(payload).hexdigest(),
         original_filename="invoice.pdf",
         stored_path=str(stored_file),
         doc_type=DocType.SI,
@@ -89,6 +98,43 @@ def test_delete_input_files_when_merged_and_valid(tmp_path):
     assert "invoice.pdf" in deleted
     assert not in_file.exists()
     assert stored_file.exists()  # stored_path permanently kept (FR-4.8)
+
+
+def test_delete_input_files_keeps_a_same_named_file_with_different_bytes(tmp_path):
+    """The content hash is the second line of defence after the filename."""
+    import hashlib
+
+    from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus
+    from app.services.ingestion import delete_input_files
+
+    payload = b"pdf data"
+    input_dir = tmp_path / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    in_file = input_dir / "invoice.pdf"
+    in_file.write_bytes(b"a different document with the same name")
+
+    stored_file = tmp_path / "stored_invoice.pdf"
+    stored_file.write_bytes(payload)
+
+    doc = Document(
+        id=1,
+        sha256_hash=hashlib.sha256(payload).hexdigest(),
+        original_filename="invoice.pdf",
+        stored_path=str(stored_file),
+        doc_type=DocType.SI,
+        extraction_status=ExtractionStatus.valid,
+    )
+    ps = POSet(
+        id=1,
+        po_no_normalized="PO1",
+        status=POSetStatus.merged,
+        merged_output_path=str(tmp_path / "out.pdf"),
+        documents=[doc],
+    )
+
+    deleted = delete_input_files(ps, input_dir)
+    assert deleted == []
+    assert in_file.exists(), "a same-named file with different bytes must survive"
 
 
 def test_delete_input_files_skipped_if_not_merged(tmp_path):

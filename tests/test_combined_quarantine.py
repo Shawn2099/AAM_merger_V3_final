@@ -77,9 +77,10 @@ def _setup(tmp_path, monkeypatch):
 
 
 def test_splitting_is_off_by_default_in_config():
-    from app.core.config import ExtractionConfig
+    from app.core.config import ExtractionConfig, load_config
 
     assert ExtractionConfig().split_combined is False
+    assert load_config("config.example.yaml").extraction.split_combined is False
 
 
 def test_a_combined_pdf_is_quarantined_whole_and_never_split(tmp_path, monkeypatch):

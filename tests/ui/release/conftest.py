@@ -36,6 +36,12 @@ REPO = Path(__file__).resolve().parents[3]
 ARTIFACTS = Path(__file__).parent / "artifacts"
 
 
+def pytest_collection_modifyitems(config, items):
+    """Make the release gate selectable as ``-m release``."""
+    for item in items:
+        item.add_marker(pytest.mark.release)
+
+
 def _ui_test_env_module():
     spec = importlib.util.spec_from_file_location(
         "ui_test_env_release", REPO / "scripts" / "ui_test_env.py"
@@ -81,14 +87,47 @@ def ui_env(tmp_path_factory):
 
 
 def _stop_env(env) -> None:
+    """Stop the whole server tree (see the parent ``tests/ui/conftest.py``)."""
     proc = env.proc
-    proc.terminate()
+    if os.name == "nt" and proc.poll() is None:
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            capture_output=True,
+            timeout=15,
+        )
+    elif proc.poll() is None:
+        proc.terminate()
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:  # pragma: no cover
         proc.kill()
+        proc.wait(timeout=5)
     if proc.stdout is not None:
         proc.stdout.close()
+
+
+@pytest.fixture(scope="session")
+def base_url(ui_env) -> str:
+    """The release directory must never inherit the parent environment's URL.
+
+    pytest-playwright caches ``browser_context_args`` once per session. If a
+    parent test instantiates it first, every later relative ``page.goto`` keeps
+    the parent's base URL while this directory's ``ui_env``/``db`` point at the
+    release database. Overriding the context (and therefore the page) for this
+    directory keeps the two environments separate even in one pytest process.
+    """
+    return ui_env.base
+
+
+@pytest.fixture(scope="session")
+def context(browser, ui_env):
+    context = browser.new_context(
+        base_url=ui_env.base,
+        accept_downloads=True,
+        viewport={"width": 1440, "height": 900},
+    )
+    yield context
+    context.close()
 
 
 @pytest.fixture(scope="session")
@@ -172,15 +211,9 @@ class Evidence:
             for c in self.console
             if not permitted(f"{c['text']} {(c.get('location') or {}).get('url', '')}")
         ]
-        failed = [
-            text
-            for f in self.failed
-            if not permitted(text := f"{f['url']} {f['failure']}")
-        ]
+        failed = [text for f in self.failed if not permitted(text := f"{f['url']} {f['failure']}")]
         responses = [
-            f"{r['status']} {r['url']}"
-            for r in self.bad_responses
-            if not permitted(r["url"])
+            f"{r['status']} {r['url']}" for r in self.bad_responses if not permitted(r["url"])
         ]
         assert not errors, f"uncaught JavaScript errors: {errors}"
         assert not console, f"console errors: {console}"
@@ -218,8 +251,7 @@ def evidence(page: Page, context: BrowserContext, artifacts: Path):
     ev = Evidence(page=page, context=context, directory=artifacts)
     page.on(
         "console",
-        lambda m: m.type == "error"
-        and ev.console.append({"text": m.text, "location": m.location}),
+        lambda m: m.type == "error" and ev.console.append({"text": m.text, "location": m.location}),
     )
     page.on("pageerror", lambda exc: ev.errors.append(str(exc)))
     page.on(
@@ -228,8 +260,7 @@ def evidence(page: Page, context: BrowserContext, artifacts: Path):
     )
     page.on(
         "response",
-        lambda r: r.status >= 400
-        and ev.bad_responses.append({"status": r.status, "url": r.url}),
+        lambda r: r.status >= 400 and ev.bad_responses.append({"status": r.status, "url": r.url}),
     )
     try:
         context.tracing.start(screenshots=True, snapshots=True, sources=True)

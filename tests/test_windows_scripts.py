@@ -177,6 +177,12 @@ def test_installer_allow_any_host_warns_and_continues(tmp_path: Path) -> None:
     assert "WARNING" in out and "-AllowAnyHost" in out
 
 
+@pytest.mark.skip(
+    reason=(
+        "runs the real NSSM installer without -DryRun; a guard regression could "
+        "stop/replace AAMMerger services on the test host. Run only on a disposable VM."
+    )
+)
 @needs_ps
 def test_installer_real_run_refuses_foreign_config_path(tmp_path: Path) -> None:
     r = _installer(tmp_path, '["pc.local"]', dry=False)

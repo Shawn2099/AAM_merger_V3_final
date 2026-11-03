@@ -18,6 +18,7 @@ artifact carries a per-example tag (unique DB, hashes, invoice names).
 
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
 
 from hypothesis import HealthCheck, given, settings
@@ -32,7 +33,11 @@ from app.models.base import Base
 from app.services.matching import normalize_line_no
 from app.services.reconciliation import reconcile_po_set
 
-SETTINGS = settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+SETTINGS = settings(
+    max_examples=40,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture],
+)
 
 MODES = [
     "exact_single",
@@ -58,12 +63,16 @@ def _pdf(path: Path):
         w.write(f)
 
 
-@SETTINGS
-@given(st.data())
-def test_prop_reconcile_verdict_is_sound(data):
-    import tempfile
+_EXAMPLE_SEQ = itertools.count()
 
-    base = Path(tempfile.mkdtemp(prefix="sndprop_"))
+
+@SETTINGS
+@given(data=st.data())
+def test_prop_reconcile_verdict_is_sound(tmp_path, data):
+    # One directory per Hypothesis example: tmp_path itself is reused, and the
+    # generated PO number/database name can repeat across examples.
+    base = tmp_path / f"ex{next(_EXAMPLE_SEQ)}"
+    base.mkdir()
     tag = data.draw(st.integers(min_value=0, max_value=10**9))
     mode = data.draw(st.sampled_from(MODES))
     n_lines = data.draw(st.integers(min_value=1, max_value=3))

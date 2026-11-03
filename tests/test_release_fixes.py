@@ -37,6 +37,7 @@ from app.services.splitting import SplitError, split_combined
 @pytest.fixture()
 def cfg(tmp_path):
     c = load_config("config.example.yaml")
+    c.extraction.split_combined = True  # these regressions cover the splitter
     c.paths.database_path = tmp_path / "release.db"
     c.paths.input_folder = tmp_path / "input"
     c.paths.output_folder = tmp_path / "output"

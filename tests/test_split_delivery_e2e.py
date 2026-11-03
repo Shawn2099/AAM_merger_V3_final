@@ -2,8 +2,8 @@
 
 This file OVERTURNED the hypothesis it was written to confirm. The matching
 layer cannot distinguish an undelivered line from a short one, but
-`reconcile_po_set` can — so the defect claimed in
-`test_split_delivery_defect.py` does not reach the reviewer.
+`reconcile_po_set` can — so the matching-layer defect does not reach the
+reviewer.
 
 The mechanism is at reconciliation.py:445-455: if every quantity flag has
 `vendor_quantity == 0`, the vendor reported nothing for those lines, so the set
@@ -194,8 +194,8 @@ def test_e2e_not_yet_delivered_and_genuinely_short_are_distinguished(tmp_path):
     Case B: it WAS sent and arrived short                 -> `mismatched`
             (a genuine disagreement the reviewer must act on).
 
-    This is the corrected result. The matching layer cannot tell them apart
-    (see test_split_delivery_defect.py), but the reconciliation layer can, by
+    This is the corrected result. The matching layer cannot tell them apart,
+    but the reconciliation layer can, by
     checking whether any vendor quantity was reported at all. The distinction
     a reviewer sees is therefore sound today.
 

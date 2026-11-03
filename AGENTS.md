@@ -145,6 +145,20 @@ NPM_CONFIG_CACHE=/tmp/npm-cache npx --yes skills add <owner/repo@skill> -y
 5. **Ask don't guess** on any ambiguity; after 2 failed fix attempts, stop and
    report.
 
+### 7.1 Current test-suite state (2026-11-03)
+
+The suite was hardened on branch `test/suite-hardening-2026-11-03` (from
+`main` `d6b905a`). Read:
+
+- [`docs/TEST_SUITE_HANDOVER_2026-11-03.md`](docs/TEST_SUITE_HANDOVER_2026-11-03.md)
+- [`docs/TEST_SUITE_AUDIT_FINDINGS_2026-11-02.md`](docs/TEST_SUITE_AUDIT_FINDINGS_2026-11-02.md)
+- [`docs/TEST_SUITE_REMEDIATION_PLAN_2026-11-02.md`](docs/TEST_SUITE_REMEDIATION_PLAN_2026-11-02.md)
+
+The suite is hermetic (session config, no developer `config.yaml`), the combined
+UI command passes, Prefect teardown no longer hangs, and CI enforces 85% coverage.
+The merged-set removal behavior is untouched by this branch; its documentation
+already matches the code by explicit owner decision.
+
 ---
 
 ## 8. Quick Commands

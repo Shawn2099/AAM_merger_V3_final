@@ -186,26 +186,29 @@ def test_no_route_exposes_a_path_or_file_parameter():
 
 
 def test_po_lock_409(client, tmp_db):
-    # lock PO Set with force_merge, second action -> 409
-    po_id = _create_po_set(tmp_db, po_no="PO1001")
-    r1 = client.post(f"/po_sets/{po_id}/force_merge")
-    if r1.status_code == 200:
-        # simulate long-running by re-locking directly with locked_at
-        eng = get_engine(tmp_db)
-        from sqlalchemy.orm import Session
+    """A set already locked by another action refuses Force Merge with 409; releasing it allows 200."""
+    from sqlalchemy.orm import Session
 
-        with Session(eng) as s:
-            ps = s.get(POSet, po_id)
-            ps.locked_by_action = "force_merge"
-            ps.locked_at = datetime.now(UTC)
-            s.commit()
-        r2 = client.post(f"/po_sets/{po_id}/force_merge")
-        assert r2.status_code == 409, r2.text
-        assert "already in progress" in r2.text.lower()
-    else:
-        assert r1.status_code in (200, 409)
-        r2 = client.post(f"/po_sets/{po_id}/force_merge")
-        assert r2.status_code == 409
+    po_id = _create_po_set(tmp_db, po_no="PO1001")
+    eng = get_engine(tmp_db)
+    with Session(eng) as s:
+        ps = s.get(POSet, po_id)
+        ps.locked_by_action = "force_merge"
+        ps.locked_at = datetime.now(UTC)
+        s.commit()
+
+    blocked = client.post(f"/po_sets/{po_id}/force_merge")
+    assert blocked.status_code == 409, blocked.text
+    assert "already in progress" in blocked.text.lower()
+
+    with Session(eng) as s:
+        ps = s.get(POSet, po_id)
+        ps.locked_by_action = None
+        ps.locked_at = None
+        s.commit()
+
+    allowed = client.post(f"/po_sets/{po_id}/force_merge")
+    assert allowed.status_code == 200, allowed.text
 
 
 def test_po_lock_timeout_releases(tmp_db, client):
@@ -222,10 +225,13 @@ def test_po_lock_timeout_releases(tmp_db, client):
             seconds=tmp_db.concurrency.po_set_lock_timeout_seconds + 100
         )
         s.commit()
-    # now second action should NOT 409 because lock is stale and auto-released
+    # now the action should NOT 409 because the stale lock is auto-cleared
     r = client.post(f"/po_sets/{po_id}/force_merge")
-    # should succeed (200) because stale lock is auto-cleared
     assert r.status_code == 200, r.text
+    with Session(eng) as s:
+        ps = s.get(POSet, po_id)
+        assert ps.locked_by_action is None
+        assert ps.locked_at is None
 
 
 def test_sync_tasks_have_retry_backoff():

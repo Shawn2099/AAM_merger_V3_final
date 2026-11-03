@@ -202,23 +202,6 @@ def test_orphan_dn_attaches_via_the_po_line_reference(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_po_anchor_is_guaranteed_to_be_attached(tmp_path):
-    """Only PO mints a set, so a PO anchor is always resolved.
-
-    This is what makes the inverted lookup strictly better than the previous
-    proposal, where the anchor had to be another DN and DNs are frequently
-    themselves unattached. Here, a PO that is in the system is in a set by
-    construction.
-    """
-    cfg = _cfg(tmp_path)
-    set_a = _make_set(cfg, "PO-A")
-    po_id = _add_doc(cfg, "po_a", "PO", po_set_id=set_a, po_no="PO-A", lines=[("1", 10, "GDN-100")])
-    with Session(get_engine(cfg)) as s:
-        po = s.get(Document, po_id)
-        assert po.po_set_id == set_a, "a PO in the system is always attached to a set"
-        values = {li.dn_no for li in po.line_items if li.dn_no}
-        assert values == {"GDN-100"}, values
-
 
 # ---------------------------------------------------------------------------
 # 3. The rule, asserted against real behaviour

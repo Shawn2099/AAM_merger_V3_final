@@ -27,7 +27,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from sqlalchemy.orm import Session
 
-from app.core.config import load_config
+from app.core.config import LineNumberFallbackConfig, load_config
 from app.core.database import get_engine
 from app.models import Base, DocType, Document, ExtractionStatus, LineItem, POSet, POSetStatus
 from app.services.grouping import letters_compatible, normalize_po_no, po_letters
@@ -117,7 +117,15 @@ def simulate(documents: list[dict], threshold: int = 85) -> dict:
     if any(int(line.get("quantity") or 0) <= 0 for line in all_lines):
         return _verdict("quarantined", "non_positive_quantity", [])
 
-    comparison = compare_po_set_lines(po_lines, dn_lines, si_lines, threshold)
+    # The engine applies the configured per-pool fallback (x10 / -1 suffix);
+    # the simulator must use it too or it will disagree on common ERP shapes.
+    comparison = compare_po_set_lines(
+        po_lines,
+        dn_lines,
+        si_lines,
+        threshold,
+        line_fallback=LineNumberFallbackConfig(),
+    )
     flags = comparison["flags"]
     if comparison["po_fail"]:
         return _verdict("quarantined", comparison["po_fail"], flags)
@@ -416,8 +424,8 @@ def _base_documents() -> list[dict]:
                 else d
                 for d in docs
             ],
-            "quarantined",
-            "unmatched_vendor_line",
+            "matched",
+            None,
         ),
         (
             "short delivery",

@@ -471,6 +471,7 @@ def test_a_second_read_preserves_an_operator_set_po(cfg):
 def test_an_all_skip_split_fails_and_quarantines_the_parent(cfg, monkeypatch):
     from app.services import extraction as ext
 
+    cfg.extraction.split_combined = True  # this test exercises the split path
     stored = _pdf(Path(cfg.paths.stored_documents_folder) / "combined.pdf", pages=2)
     doc_id = _add_doc(
         cfg,
