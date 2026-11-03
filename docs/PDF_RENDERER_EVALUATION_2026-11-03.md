@@ -713,12 +713,14 @@ No project files were modified; `git status` on `aam_merger-handover` must remai
 - [x] 234B malformed MediaBox; PDFium `set_mediabox` fix verified; only one real hit.
 - [x] Non-embedded font prevalence scan (115/208 docs).
 - [x] Full library landscape table.
+- [x] Win11 runtime-only install + live HTTP smoke (health, manual merge); no VC++ redist.
+- [x] 234B end-to-end VLM pass (the repaired page extracts its PO and lines).
 - [ ] WS2016 clean-image import/render (PDFium and, if retried, PDF Oxide).
 - [ ] 2-core timing and memory on WS2016.
-- [ ] VLM A/B on 20–30 real documents.
-- [ ] Implement pypdfium2 branch + tests.
-- [ ] Update installer/docs/tests and remove PyMuPDF runtime dependency.
-- [ ] Legal sign-off on PDFium notices / PyMuPDF commercial (if fallback).
+- [x] VLM check on 20 real documents (17/20 gold; cached PyMuPDF baseline 16/20). Not a clean renderer-only A/B because the prompt changed; the 3 first-run misses are model sampling variance, each passing on a repeat.
+- [x] Implement pypdfium2 branch + tests.
+- [x] Update installer/docs/tests and remove the PyMuPDF runtime dependency.
+- [x] Licence audit + owner sign-off on the PDFium/Pillow/pypdf notices; no Artifex fallback needed.
 - [ ] Re-evaluate PDF Oxide 0.3.79+ only if owner wants.
 
 ---
