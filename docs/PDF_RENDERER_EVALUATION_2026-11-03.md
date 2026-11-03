@@ -17,6 +17,10 @@
 > present. The acceptance scan after the port: 693/695 real files render (the same two
 > corrupt files fail), 0 page-count mismatches, 234B renders 1240×1753, and the repair
 > fires only on 234B across all 695 files.
+>
+> Gate-by-gate evidence (Win11 runtime install, live HTTP smoke, 695-file scan,
+> 234B repair, 20-document VLM check, licence audit and sign-off) is in
+> [`PDFIUM_PORT_VERIFICATION_2026-11-03.md`](PDFIUM_PORT_VERIFICATION_2026-11-03.md).
 
 ---
 
