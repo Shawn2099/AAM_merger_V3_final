@@ -121,6 +121,9 @@ gets a new IP address (DHCP), open it by name, or add the new address to `allowe
 > [`docs/PDF_RENDERER_EVALUATION_2026-11-03.md`](PDF_RENDERER_EVALUATION_2026-11-03.md).
 > PDFium is process-globally thread-unsafe; the application serialises it with
 > one process-wide lock, so no installer or service setting is involved.
+> Gate-by-gate evidence (runtime install, live HTTP smoke, 695-file scan, 234B
+> repair, VLM check, licence audit and sign-off) is in
+> [`PDFIUM_PORT_VERIFICATION_2026-11-03.md`](PDFIUM_PORT_VERIFICATION_2026-11-03.md).
 
 **Installer switches** (`scripts\install_nssm_services.ps1`; `setup_test_rig.ps1` calls it and passes
 `-AllowAnyHost` through):

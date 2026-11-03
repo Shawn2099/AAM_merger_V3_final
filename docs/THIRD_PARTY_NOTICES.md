@@ -15,6 +15,28 @@ a stored PDF into the PNG pages sent to the VLM.
 removed on 2026-11-03 because it is AGPL-3.0 or Artifex commercial; see
 [`PDF_RENDERER_EVALUATION_2026-11-03.md`](PDF_RENDERER_EVALUATION_2026-11-03.md).
 
+## Runtime audit (2026-11-03)
+
+The production install (`uv export --no-dev`, Python 3.11) has **127 packages**.
+Audited with `pip-licenses` and the installed package metadata:
+
+| Licence family | Count | Position |
+|---|---:|---|
+| MIT / MIT-CMU / BSD-2 / BSD-3 / Apache-2.0 / ISC / PSF | 122 | permissive; notices retained |
+| MPL-2.0 | 4 (`certifi`, `orjson`, `pathspec`, `tqdm`) | file-level copyleft; packages used unmodified |
+| Artistic **or** GPL (dual) | 1 (`text-unidecode` 1.3, via Prefect → `python-slugify`) | **Artistic License elected** |
+| AGPL | **0** | no AGPL anywhere in the runtime |
+
+`text-unidecode` ships its own `LICENSE.txt` stating "either GPL or Artistic
+License"; this project uses the Artistic option. No GPL-only component is present.
+MPL-2.0 components are consumed as unmodified wheels, so their file-level
+obligations are satisfied by retaining their notices.
+
+The gate-by-gate evidence (Win11 runtime install, live HTTP smoke, 695-file render
+scan, 234B repair, 20-document VLM check) is in
+[`PDFIUM_PORT_VERIFICATION_2026-11-03.md`](PDFIUM_PORT_VERIFICATION_2026-11-03.md).
+The owner sign-off for internal handover is recorded there.
+
 ## Where the full licence texts are
 
 The wheel carries the complete texts and the PDFium build licences. With the normal
