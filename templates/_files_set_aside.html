@@ -56,6 +56,7 @@
                 <span>👁️ Preview</span>
               </button>
               <form method="post" action="/unclassified/{{ doc.id }}/set_aside" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token|default('') }}">
                 <button type="submit" class="btn btn-secondary btn-sm" data-testid="btn-set-aside-quarantine">
                   Move to Quarantine Folder
                 </button>

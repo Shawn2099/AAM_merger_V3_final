@@ -62,6 +62,9 @@ def test_relative_database_path_resolves_against_project_root(
 ):
     """Run from a different cwd: the backup still finds the project's DB."""
     module = _load_backup_module()
+    # The suite sets AAM_CONFIG_PATH for the app's own load_config(); this test
+    # is about the script's explicit project_root and must not inherit it.
+    monkeypatch.delenv("AAM_CONFIG_PATH", raising=False)
     elsewhere = tmp_path_factory.mktemp("elsewhere")
     monkeypatch.chdir(elsewhere)
 
@@ -78,6 +81,7 @@ def test_relative_database_path_resolves_against_project_root(
 def test_missing_config_is_an_error_not_a_silent_default(project, tmp_path_factory, monkeypatch):
     """A project with no config.yaml must fail loudly, not back up a guessed path."""
     module = _load_backup_module()
+    monkeypatch.delenv("AAM_CONFIG_PATH", raising=False)
     (project / "config.yaml").unlink()
     elsewhere = tmp_path_factory.mktemp("elsewhere")
     monkeypatch.chdir(elsewhere)

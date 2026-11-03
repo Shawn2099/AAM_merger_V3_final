@@ -350,7 +350,7 @@ def test_a_database_at_the_previous_head_gains_line_mapping_rule_and_keeps_rows(
     report = migrate_db.migrate(backup=False)
     migrate_db.verify(report)
 
-    assert report["revision"] == migrate_db.HEAD_REVISION == "e8f9a0b1c2d3"
+    assert report["revision"] == migrate_db.HEAD_REVISION == "f1a2b3c4d5e6"
     conn = sqlite3.connect(str(db))
     try:
         assert "line_mapping_rule" in {r[1] for r in conn.execute("pragma table_info(po_sets)")}

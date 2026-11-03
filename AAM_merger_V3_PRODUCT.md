@@ -751,12 +751,13 @@ read PO is repaired with the manual merger. Revisit only if real use shows it ha
   extraction (742 s with the defaults); the app refuses to start with a shorter value.
 - **Data folders may not sit inside the input folder** (config is refused), and a
   merged set's cleanup never deletes a stored copy.
-- **Unused config keys:** `server.host` and `prefect.max_concurrent_extraction_tasks` are
-  validated but read by nothing (the service is started by NSSM with the installer's own host
-  and port; extraction is sequential). `server.port` is read ONLY by `scripts/reset_data.ps1`
-  to check that the port is free, so it must equal the installer's `-Port` or the reset checks
-  the wrong port. The keys are kept because the config model rejects unknown keys: removing
-  one would stop an existing `config.yaml` from loading.
+- **Unused config keys:** `server.host` is validated but read by nothing (the service is
+  started by NSSM with the installer's own host and port). `server.port` is read ONLY by
+  `scripts/reset_data.ps1` to check that the port is free, so it must equal the installer's
+  `-Port` or the reset checks the wrong port. The key is kept because the config model
+  rejects unknown keys: removing it would stop an existing `config.yaml` from loading.
+  `prefect.max_concurrent_extraction_tasks` IS read: it is the parallel extraction cap
+  (see §10).
 - **The set page's upload (`POST /po_sets/<id>/upload`) is size-limited before the body is
   parsed** (H1-4): 100 MB per file plus 2 MiB of form overhead, by `Content-Length` and by
   counting a chunked body. Over the cap is a 413 (a themed page for a browser). FastAPI turns
@@ -1246,7 +1247,9 @@ a page on an attacker's name that resolves to the server's LAN address sends bot
 `Host` and `Origin` as that name, so the Origin check (which compares the host
 name and port) lets Force Merge, archive and upload through. Listing the PC's real name or
 address in `server.allowed_hosts` is therefore a required install step, not hardening
-(DELIVERY step 6). The Origin check compares the host name and the port (H1-1; the scheme is not compared
+(DELIVERY step 6). Authentication (2026-11-02) means such a page still needs a valid
+session cookie, so DNS rebinding alone no longer grants the writes; the host list
+remains defence in depth. The Origin check compares the host name and the port (H1-1; the scheme is not compared
 because the service has no TLS and may sit behind a TLS-terminating proxy), so another web
 app on the same machine on a different port can no longer forge requests. A proxy that
 strips the port from `Host` on a non-default port is not supported. Pinned by
@@ -1279,18 +1282,42 @@ date, and the badge is the only sign of it. Pinned by
 
 ## 9. Non-goals
 
-Not built, by decision: authentication and roles (accepted risk, LAN-only
-tool); multi-server deployment; post-merge distribution, email drafting,
-company lookup; a UI mode for editing extracted line items; per-document locale
-detection; UOM conversion; price reconciliation.
+Not built, by decision: multi-tenant SaaS isolation, SSO/OIDC, self-service
+password reset by email, multi-server deployment; post-merge distribution, email
+drafting, company lookup; a UI mode for editing extracted line items;
+per-document locale detection; UOM conversion; price reconciliation.
+
+Authentication and a two-role model (`admin` / `operator`) were added on
+2026-11-02, before handover; they are no longer non-goals. See §10.
 
 ---
 
 ## 10. Operating notes
 
-**No authentication.** Anyone with LAN access can force-merge, archive or remove a set (the removal copies the files to the quarantine folder first). This is
-a documented accepted risk, not an oversight. The audit log is the
-accountability record, not access control.
+**Authentication is required (2026-11-02).** Every route except `/health`,
+`/login` and `/static` needs a signed-in account. Accounts are named and stored
+in `users` (Argon2id password hashes). Sessions are opaque random tokens; only
+their SHA-256 is stored in `auth_sessions`, so logout, password change and
+disabling an account take effect immediately and the same design works with
+multiple uvicorn workers and, later, Postgres. Create the first administrator
+on the server, before or after install:
+
+```
+python -m app.auth.cli create-user --username admin --role admin
+```
+
+Roles: `operator` does the daily work (Scan, upload, Merge Now, Force Merge,
+Re-Extract, customs, set-aside, manual PDF merger); `admin` also changes
+Settings and may remove/archive a set. Every operator action is written to
+`audit_log.source` as `operator:<username>`. Login failures are throttled per
+username and per client IP, and recorded in `auth_events`. CSRF uses a
+per-session synchronizer token (HTMX sends it as `X-CSRF-Token`; native forms
+carry a hidden field). Disable `auth.enabled` only for a loopback-only lab.
+
+**Authentication does not encrypt the LAN.** The service still speaks plain
+HTTP unless it is put behind a TLS-terminating proxy. Passwords and session
+cookies are access control, not confidentiality; use TLS (and
+`auth.cookie_secure: always`) for a real handover. See `docs/HANDOVER_HARDENING_2026-11-02.md`.
 
 **`cfg_path` is not a parameter.** `POST /sync` and `GET /sync/status` once
 accepted a caller-supplied config path, which let any LAN host redirect the
@@ -1305,9 +1332,17 @@ start.
 (`DEPLOY.md`), not code. `make backup` is Linux-only and unusable on the WS2016
 target — do a SQLite `.backup` from a Windows host instead.
 
-**`max_concurrent_extraction_tasks` is not enforced.** Extraction is
-sequential, so the cap is satisfied trivially. Do not treat the setting as a
-concurrency control.
+**`max_concurrent_extraction_tasks` is enforced (2026-11-02).** One sync reads
+up to this many documents at once with a bounded thread pool; the default of 3
+is the SPEC value and is sized for the two-core host. PDF rasterisation has its
+own cap (`vlm.rasterize_concurrency`, default 2) because PyMuPDF is CPU-bound.
+Ingestion, grouping, quarantine, reconciliation and merging stay on the flow
+thread; only the network-bound VLM call runs in parallel. Each worker claims a
+document with the existing compare-and-swap and holds no database session
+across the call. A provider fault (401/402/403, missing key/config) or the
+HTTP-400 breaker stops new work, lets in-flight calls finish and refunds the
+whole run, exactly as the sequential path did. Raising the cap is a capacity
+decision, not a tuning knob.
 
 **A run summary is only as honest as its worst document.** The sync summary
 (`processed` / `extracted` / `errors`) must be computed from the *persisted

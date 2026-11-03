@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ request.state.csrf_token|default('') }}">
   <title>{% block title %}AAM Merger V3 — Smart Document Reconciler{% endblock %}</title>
   
   <!-- No external font/script requests: the client LAN has no internet.
@@ -53,9 +54,11 @@
         <span>🧩 Quick PDF Merger</span>
       </a>
 
+      {% if request.state.user is not defined or request.state.user.is_admin %}
       <a href="/settings" data-testid="nav-settings" class="nav-link {% if request.url.path.startswith('/settings') %}active{% endif %}" title="Review and change how the service runs">
         <span>⚙️ Settings</span>
       </a>
+      {% endif %}
     </div>
 
     <div class="nav-right">
@@ -63,6 +66,21 @@
         <span class="spinner" style="width:10px; height:10px; border-width:2px; border-color:#4f46e5; border-top-color:transparent;"></span>
         <span id="nav-sync-text">Sync: 0%</span>
       </a>
+
+      {% if request.state.user is defined and request.state.user %}
+      <span class="nav-link" data-testid="nav-user" title="Signed-in operator"
+            style="font-size:0.82rem; color:#94a3b8;">
+        {{ request.state.user.display_name or request.state.user.username }}
+        <small style="opacity:0.75;">({{ request.state.user.role }})</small>
+      </span>
+      <form method="post" action="/logout" style="display:inline; margin:0;">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token|default('') }}">
+        <button type="submit" class="nav-link" data-testid="nav-logout"
+                style="background:none; border:0; cursor:pointer; font:inherit; font-size:0.82rem;">
+          Sign out
+        </button>
+      </form>
+      {% endif %}
 
       <a href="/health" id="nav-health-link" class="nav-link" title="System Health Status (Click to inspect)" style="font-size:0.82rem; display:inline-flex; align-items:center; gap:6px;">
         <span id="health-dot" class="health-dot"></span>

@@ -270,7 +270,7 @@ def test_the_new_column_exists_in_a_migrated_database(tmp_path, monkeypatch):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     assert ("po_sets.po_no_letters", "a9b0c1d2e3f4") in mod._MARKERS
-    assert mod.HEAD_REVISION == "e8f9a0b1c2d3"
+    assert mod.HEAD_REVISION == "f1a2b3c4d5e6"
     assert ("unit_price_dropped", "d5e6f7a8b9c0") in mod._MARKERS
     assert ("po_sets.line_mapping_rule", "e8f9a0b1c2d3") in mod._MARKERS
 

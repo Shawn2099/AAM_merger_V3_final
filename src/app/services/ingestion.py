@@ -16,7 +16,7 @@ from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
 from app.core.config import AppConfig
-from app.core.database import get_engine
+from app.core.database import ensure_schema
 from app.models import DocType, Document, ExtractionStatus, POSet, POSetStatus
 
 logger = logging.getLogger(__name__)
@@ -184,10 +184,7 @@ def _record_rejected_document(original_name: str, dest: Path, reason: str, cfg: 
             for chunk in iter(lambda: fh.read(1024 * 1024), b""):
                 digest.update(chunk)
         sha = digest.hexdigest()
-        eng = get_engine(cfg)
-        from app.models.base import Base
-
-        Base.metadata.create_all(eng)
+        eng = ensure_schema(cfg)
         with Session(eng) as s:
             exists = (
                 s.query(Document.id)
@@ -270,10 +267,7 @@ def ingest_file(src: Path, cfg: AppConfig) -> Document:
     if problem is not None:
         _reject_incomplete_pdf(src, cfg, problem)
     h = hashlib.sha256(data).hexdigest()
-    eng = get_engine(cfg)
-    from app.models.base import Base
-
-    Base.metadata.create_all(eng)
+    eng = ensure_schema(cfg)
     with Session(eng) as s:
         existing = (
             s.query(Document)

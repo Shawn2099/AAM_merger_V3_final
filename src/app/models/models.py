@@ -277,3 +277,116 @@ class AuditLog(Base):
     source: Mapped[str] = mapped_column(Text, default="system", nullable=False)
 
     __table_args__ = (Index("ix_audit_log_po_set_id", "po_set_id"),)
+
+
+class UserRole(enum.StrEnum):
+    """Two named roles are enough for a single-operator CA tool.
+
+    `admin` may change settings and archive/remove sets. `operator` does the
+    daily work. Every account sees the same documents; tenant isolation is a
+    separate product decision, deliberately not faked with roles.
+    """
+
+    admin = "admin"
+    operator = "operator"
+
+
+class User(Base):
+    """A named operator account.
+
+    Named accounts exist so the audit log can say *who* forced a merge or
+    archived a set. Shared logins defeat that purpose and are discouraged.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Stored normalized (NFKC, casefolded, stripped). The unique index is the
+    # authority; `service.normalize_username` is the only writer.
+    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole), default=UserRole.operator, nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1", nullable=False
+    )
+    # Set by a CLI password reset or the environment bootstrap. The middleware
+    # sends the user to the password page before anything else.
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
+    password_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+
+class AuthSession(Base):
+    """Server-side session; only the SHA-256 of the cookie token is stored.
+
+    A stolen database cannot be replayed as a login. Rows are per session, so
+    logout, "log out everywhere" and disabling a user take effect immediately.
+    """
+
+    __tablename__ = "auth_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    #: Synchronizer token for this session (CSRF). Rotated on login/password change.
+    csrf_token: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    absolute_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_auth_sessions_user_id", "user_id"),
+        Index("ix_auth_sessions_expires_at", "expires_at"),
+    )
+
+
+class AuthEvent(Base):
+    """Security event log (login success/failure/throttle, logout, password change).
+
+    Kept separate from `audit_log`: `AuditAction` is the business record an
+    operator reviews, while these are authentication events used for
+    brute-force throttling and incident review. Never stores a password or a
+    session token.
+    """
+
+    __tablename__ = "auth_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    #: The attempted username on a failure (the user row may not exist).
+    username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    event: Mapped[str] = mapped_column(String(32), nullable=False)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_auth_events_created_at", "created_at"),
+        Index("ix_auth_events_username_event", "username", "event"),
+        Index("ix_auth_events_ip_event", "ip_address", "event"),
+    )

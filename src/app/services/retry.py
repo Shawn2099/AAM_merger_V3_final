@@ -36,6 +36,7 @@ def with_backoff_retry(
     backoff_seconds: list[float],
     *,
     label: str = "",
+    retry_if: Callable[[BaseException], bool] | None = None,
 ) -> T:
     """Call fn(), retrying on exception up to max_retries times with configurable backoff.
 
@@ -68,6 +69,8 @@ def with_backoff_retry(
             return fn()
         except Exception as exc:
             last_exc = exc
+            if retry_if is not None and not retry_if(exc):
+                raise
             if attempt < max_retries:
                 delay = float(
                     backoff_seconds[min(attempt, len(backoff_seconds) - 1)]

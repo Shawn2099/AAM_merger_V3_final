@@ -40,9 +40,13 @@ Get-ChildItem -Recurse *.ps1 | Unblock-File
    pre-migration backup, stamps the proven revision, then upgrades.)
 5. **Prefect Deployment**: Registers the daily sync schedule (`0 11 * * *` at 11:00 AM).
 6. **Firewall**: Adds an inbound Windows Firewall rule for TCP port 8000 (if `-OpenFirewall` is passed).
-7. **Daily Backups**: Schedules a daily Windows Scheduled Task at 11:30 AM (if `-ScheduleBackup` is passed).
+7. **Daily Backups**: Schedules a daily Windows Scheduled Task at 13:00 (two hours after the 11:00 sync; if `-ScheduleBackup` is passed).
 8. **NSSM Services**: Automatically downloads NSSM (if missing) and installs `AAMMerger-Web` and `AAMMerger-Worker`.
 9. **Health Verification**: Performs an automated HTTP smoke check against `http://127.0.0.1:8000/health`.
+10. **First administrator**: NOT automated. After the install, create the named
+    account before handing the machine to an operator (see §2C). With no
+    accounts the app starts fail-closed: every page redirects to `/login` and
+    the login page explains that no accounts exist.
 
 > **Note on Prefect Server:** If you are running a self-hosted Prefect server on the test rig rather than Prefect Cloud, pass `-WithPrefectServer` to also run the orchestration server as a Windows Service.
 
@@ -79,10 +83,38 @@ paths:
 server:
   host: "0.0.0.0"
   port: 8000
-  # Optional Host-header allow-list (DNS-rebinding hardening). ["*"] accepts
-  # any host; list stable names/IPs to close rebinding, e.g. ["aam.local"].
-  allowed_hosts: ["*"]
+  # Required install step: list this PC's real name and static IP. ["*"]
+  # accepts any Host header (DNS rebinding); the installer refuses it unless
+  # -AllowAnyHost is given for a lab.
+  allowed_hosts: ["aam-server", "10.0.0.5"]
+
+auth:
+  enabled: true
+  cookie_secure: "auto"   # "always" behind a TLS-terminating proxy
 ```
+
+### C. First administrator (required)
+Authentication is ON by default. Create one named account per operator; do not
+share a login, because the audit log records the username.
+
+```powershell
+cd C:\AAM
+$env:PYTHONPATH = "src"
+.\.venv\Scripts\python.exe -m app.auth.cli create-user --username admin --role admin
+.\.venv\Scripts\python.exe -m app.auth.cli create-user --username <operator> --role operator
+```
+
+The CLI prompts for the password twice (minimum 12 characters). It never writes
+the password to a file or the log. `--password-stdin` is available for an
+unattended installer. Reset a forgotten password with
+`reset-password --username <name>` (revokes that account's sessions); disable a
+leaver with `disable-user`; list accounts with `list-users`.
+
+> **TLS:** authentication over plain HTTP stops casual LAN access but does not
+> protect the password or session cookie from someone who can sniff the LAN.
+> Terminate TLS at IIS/nginx in front of port 8000 and set
+> `auth.cookie_secure: always`, or use a Uvicorn certificate configuration.
+> See `docs/HANDOVER_HARDENING_2026-11-02.md`.
 > **CRITICAL SQLite Rule:** The SQLite database file must reside on a **local drive** (e.g., `C:` or `D:`). SQLite WAL mode requires POSIX/shared memory locks that are **incompatible with network SMB shares**.
 
 ---

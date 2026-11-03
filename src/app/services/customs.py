@@ -6,6 +6,7 @@ import json
 
 from sqlalchemy.orm import Session
 
+from app.auth.context import actor_source
 from app.core.database import get_engine
 from app.models import AuditAction, AuditLog, DocType, POSet, POSetStatus
 from app.models.base import Base
@@ -124,7 +125,7 @@ def toggle_customs(po_set_id: int, cfg) -> POSet:
                         "customs_check": ps.has_customs_toggle,
                     }
                 ),
-                source="operator",
+                source=actor_source(),
             )
         )
         s.commit()

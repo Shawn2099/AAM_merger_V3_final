@@ -323,9 +323,8 @@ def get_or_create_po_set(po_no: str, cfg, create: bool = True):
     from sqlalchemy.exc import IntegrityError
     from sqlalchemy.orm import Session
 
-    from app.core.database import get_engine
+    from app.core.database import ensure_schema
     from app.models import POSet, POSetStatus
-    from app.models.base import Base
 
     norm = normalize_po_no(po_no)
     letters = po_letters(po_no)
@@ -333,9 +332,7 @@ def get_or_create_po_set(po_no: str, cfg, create: bool = True):
         if create:
             raise ValueError(f"PO number {po_no!r} has no digits; it cannot key a PO Set")
         return None
-    eng = get_engine(cfg)
-    # ensure tables exist (handles isolated tmp_path DB in tests)
-    Base.metadata.create_all(eng)
+    eng = ensure_schema(cfg)
 
     def _checked(ps):
         if not letters_compatible(ps.po_no_letters, letters):

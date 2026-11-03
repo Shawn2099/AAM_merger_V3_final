@@ -129,13 +129,13 @@ Write-Host "Step 5 OK: Database migrated to head revision." -ForegroundColor Gre
 If running on a Windows Host or VM with Administrator permissions:
 ```powershell
 # Run the master deployment script:
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_production.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup_test_rig.ps1 -OpenFirewall -ScheduleBackup -WithPrefectServer
 ```
 *What this does:*
 1. Downloads NSSM 2.24 if missing.
 2. Installs & starts `AAMMerger-PrefectServer`, `AAMMerger-Worker`, and `AAMMerger-Web`.
-3. Registers the Prefect midnight sync schedule (`0 0 * * *`).
-4. Registers the 01:00 AM daily SQLite backup in Windows Task Scheduler.
+3. Registers the Prefect daily sync schedule (`0 11 * * *`, 11:00 IST).
+4. Registers the 13:00 daily SQLite backup in Windows Task Scheduler (two hours after the sync).
 5. Adds the Windows Firewall rule for port 8000.
 
 #### Mode B: Local Development / Sandbox Mode (Non-Administrator or Container)

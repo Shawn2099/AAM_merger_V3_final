@@ -145,6 +145,11 @@ def _load_config(path=None):
         # A developer/production config may name real LAN hosts. The test client
         # speaks to ``testserver`` and must not be refused by TrustedHostMiddleware.
         cfg.server.allowed_hosts = ["*"]
+    # The suite's thousands of existing route tests predate authentication and
+    # exercise business logic, not login. Auth has its own dedicated tests that
+    # build the app with `auth_enabled=True`. Never let a test run inherit a live
+    # login requirement from config.example.yaml.
+    cfg.auth.enabled = False
     return cfg
 
 

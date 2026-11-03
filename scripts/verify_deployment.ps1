@@ -208,7 +208,7 @@ $schRes = & schtasks.exe /query /tn "AAMMerger-DailyBackup" /fo CSV 2>&1
 if ($LASTEXITCODE -eq 0) {
     Report-Check "Daily Backup Task" "OK" "Task 'AAMMerger-DailyBackup' is registered in Windows Task Scheduler"
 } else {
-    Report-Check "Daily Backup Task" "WARN" "Scheduled task not found. Run scripts/deploy_production.ps1 or scripts/backup_db.ps1 to configure."
+    Report-Check "Daily Backup Task" "WARN" "Scheduled task not found. Run scripts/setup_test_rig.ps1 -ScheduleBackup or scripts/backup_db.ps1 to configure."
 }
 
 # 7. Windows Defender Firewall Rule

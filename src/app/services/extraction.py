@@ -32,9 +32,8 @@ from pypdf import PdfReader
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
-from app.core.database import get_engine
+from app.core.database import ensure_schema, get_engine
 from app.models import DocType, Document, ExtractionStatus
-from app.models.base import Base
 
 logger = logging.getLogger(__name__)
 
@@ -494,7 +493,7 @@ def _call_vlm(stored_path: str, doc_type: str, cfg) -> dict:
     Pages go as `image_url` data URLs in a single request, in real PDF page order
     (the split page indices depend on it), with reasoning effort in `extra_body`.
     Fail-closed on missing secrets, an unreadable PDF, or an oversized one.
-    Synchronous on purpose: the caller is a Prefect task worker thread, never the event loop.
+    Synchronous on purpose: the caller is a worker thread, never the event loop.
     """
     # --- fail-closed secret handling (never hardcoded, never logged) ---
     # The secret lives in .env or in the environment. `load_env` is the one
@@ -520,6 +519,7 @@ def _call_vlm(stored_path: str, doc_type: str, cfg) -> dict:
     if not pdf_path.exists():
         raise FileNotFoundError(f"stored_path not found: {stored_path}")
     # Rasterise BEFORE building the client so a corrupt/oversized file never reaches the API.
+    # `_rasterize_pdf` serialises PDFium internally; no outer semaphore is needed.
     page_images = _rasterize_pdf(pdf_path.read_bytes(), dpi, max_pages, pdf_path.name)
     content: list[ChatCompletionContentPartParam] = [{"type": "text", "text": _PAGE_PROMPT}]
     for png in page_images:
@@ -967,8 +967,7 @@ def repopulate_from_raw_json(doc_id: int, cfg) -> Document | None:
     """Re-derive normalized fields and line items from stored raw JSON without calling VLM."""
     import json
 
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
+    eng = ensure_schema(cfg)
     with Session(eng) as s:
         doc = s.get(Document, doc_id)
         if doc is None or doc.archived_at is not None or not doc.raw_extraction_json:
@@ -1008,6 +1007,21 @@ def _is_infrastructure_leaf(exc: BaseException) -> bool:
         return True
     if isinstance(exc, (TimeoutError, ConnectionError)):
         return True
+    # SQLite's single writer can return "database is locked" when a merge or
+    # another extraction commit holds the write lock past busy_timeout. That is
+    # infrastructure, not a verdict on the PDF: refunding the attempt is the
+    # safe direction. A genuinely corrupt document fails with a content error.
+    try:
+        from sqlalchemy.exc import OperationalError
+        from sqlalchemy.exc import TimeoutError as SATimeoutError
+    except Exception:  # pragma: no cover - SQLAlchemy is a hard dependency
+        OperationalError = SATimeoutError = ()  # type: ignore[assignment]
+    if isinstance(exc, SATimeoutError):
+        return True
+    if isinstance(exc, OperationalError):
+        message = str(exc).casefold()
+        if "database is locked" in message or "database table is locked" in message:
+            return True
     # A missing stored copy is a storage fault, not a verdict on the document:
     # leave it pending so nothing is condemned (and no bytes are lost).
     if isinstance(exc, FileNotFoundError) and "stored_path not found" in str(exc):
@@ -1034,6 +1048,9 @@ _breaker_tripped = False
 #: True only while a sync runs. A 400 from a route (Re-Extract) is about that one
 #: document and must neither trip nor be refunded by the sync's breaker.
 _breaker_counting = False
+#: The trip's refund is performed by exactly one worker; parallel workers that
+#: recorded an earlier 400 must not refund the same rows a second time.
+_refund_claimed = False
 #: Written to a document the breaker refunded. If it is rejected again it is
 #: judged on its own (failed as usual), so a document-specific 400 cannot halt
 #: every night.
@@ -1046,24 +1063,26 @@ class ProviderRequestRejected(RuntimeError):
 
 def reset_provider_breaker() -> None:
     """Forget earlier rejections and start counting. Called at the start of every sync."""
-    global _breaker_tripped, _breaker_counting, _breaker_reason
+    global _breaker_tripped, _breaker_counting, _breaker_reason, _refund_claimed
     with _breaker_lock:
         _breaker_reason = None
         _rejected_400.clear()
         _deferred_400.clear()
         _breaker_tripped = False
         _breaker_counting = True
+        _refund_claimed = False
 
 
 def end_provider_breaker() -> None:
     """Stop counting and clear the trip, so nothing outside a sync is affected."""
-    global _breaker_tripped, _breaker_counting, _breaker_reason
+    global _breaker_tripped, _breaker_counting, _breaker_reason, _refund_claimed
     with _breaker_lock:
         _breaker_reason = None
         _rejected_400.clear()
         _deferred_400.clear()
         _breaker_tripped = False
         _breaker_counting = False
+        _refund_claimed = False
 
 
 def rejected_400_ids() -> set[int]:
@@ -1073,7 +1092,8 @@ def rejected_400_ids() -> set[int]:
 
 
 def provider_breaker_tripped() -> bool:
-    return _breaker_tripped
+    with _breaker_lock:
+        return _breaker_tripped
 
 
 def provider_breaker_reason() -> str | None:
@@ -1164,8 +1184,8 @@ def _note_provider_ok() -> None:
 
 
 def _note_provider_400(doc_id: int) -> list[int] | None:
-    """Record a 400. Returns every rejected document id once the breaker trips, else None."""
-    global _breaker_tripped
+    """Record a 400. The first worker to complete the trip gets the refund list."""
+    global _breaker_tripped, _refund_claimed
     with _breaker_lock:
         if not _breaker_counting:
             return None
@@ -1173,6 +1193,12 @@ def _note_provider_400(doc_id: int) -> list[int] | None:
         if len(_rejected_400) < PROVIDER_400_LIMIT and not _breaker_tripped:
             return None
         _breaker_tripped = True
+        if _refund_claimed:
+            # Another worker already owns the refund. This document is held for
+            # the end-of-pass flush rather than refunded twice.
+            _deferred_400.add(doc_id)
+            return None
+        _refund_claimed = True
         return sorted(_rejected_400 | _deferred_400)
 
 
@@ -1225,11 +1251,54 @@ def _is_infrastructure_error(exc: BaseException | None) -> bool:
     return False
 
 
+def _dump_raw_extraction(doc, result: dict, cfg) -> None:
+    """Best-effort development dump of the raw VLM JSON (never fails an extraction)."""
+    import json
+
+    try:
+        raw_dir = Path(cfg.paths.log_folder).parent / "raw_extractions"
+        if not raw_dir.exists():
+            import os
+
+            if os.getenv("DEBUG") != "1" and os.getenv("AAM_SAVE_RAW") != "1":
+                return
+            raw_dir = Path("data/raw_extractions")
+            raw_dir.mkdir(parents=True, exist_ok=True)
+        safe_stem = Path(doc.original_filename).stem.replace(" ", "_")[:80]
+        fname = f"{doc.sha256_hash[:8]}_{safe_stem}.json"
+        (raw_dir / fname).write_text(
+            json.dumps(result, indent=2, ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def _release_claim(eng, doc_id: int, attempt_no: int) -> Document | None:
+    """Undo a claim without charging an attempt.
+
+    Used when the provider breaker trips between the claim and the call (or a
+    configuration fault is found at that point): the document goes back to
+    `pending` and the attempt is refunded, so the next run reads it.
+    """
+    with Session(eng) as s:
+        doc = s.get(Document, doc_id)
+        if doc is None:
+            return None
+        if doc.extraction_status == ExtractionStatus.processing:
+            doc.extraction_attempt_count = 0
+            doc.extraction_status = ExtractionStatus.pending
+            s.commit()
+            s.refresh(doc)
+        return doc
+
+
 def extract_document(doc_id: int, cfg) -> Document:
     from sqlalchemy import update as _sa_update
 
-    eng = get_engine(cfg)
-    Base.metadata.create_all(eng)
+    eng = ensure_schema(cfg)
+    cap = _attempt_cap(cfg)
+
     with Session(eng) as s:
         doc = s.get(Document, doc_id)
         if doc is None:
@@ -1243,32 +1312,17 @@ def extract_document(doc_id: int, cfg) -> Document:
         if is_manual_only(dtype):
             return doc
 
-        # Compare-and-swap: atomically claim pending → processing so two concurrent
-        # callers (e.g. redo_extract route + recovery sweep running at the same time)
-        # cannot both enter the VLM extraction for the same document.
-        # Uses the same UPDATE…WHERE pattern as locking.acquire_lock — proven for SQLite WAL.
+        # Once the breaker has tripped, a retry must not re-claim a document
+        # that the trip already refunded. Checked inside the session, before
+        # the CAS, so no attempt is charged.
+        if provider_breaker_tripped() and doc.extraction_status == ExtractionStatus.pending:
+            return doc
+
+        # Compare-and-swap: atomically claim pending -> processing so two
+        # callers (a parallel worker and a recovery sweep, or the Re-Extract
+        # route) cannot both enter the VLM for the same document.
         cur_status = doc.extraction_status
-        if cur_status == ExtractionStatus.pending:
-            cas_result = s.execute(
-                _sa_update(Document)
-                .where(
-                    Document.id == doc_id,
-                    Document.extraction_status == ExtractionStatus.pending,
-                )
-                .values(extraction_status=ExtractionStatus.processing)
-                .execution_options(synchronize_session=False)
-            )
-            s.commit()
-            if getattr(cas_result, "rowcount", 0) == 0:
-                # Another caller already claimed it — return current persisted state.
-                s.refresh(doc)
-                return doc
-            s.refresh(doc)
-        elif cur_status == ExtractionStatus.processing:
-            # Already claimed by a concurrent caller — unless the claim is
-            # stale (the worker died mid-call). Without this check a Prefect
-            # retry saw `processing`, returned "success" and the document was
-            # not read again until the next night's reclaim.
+        if cur_status == ExtractionStatus.processing:
             timeout = int(getattr(cfg.extraction, "stale_processing_seconds", 900) or 900)
             cutoff = datetime.now(UTC) - timedelta(seconds=timeout)
             stale = s.execute(
@@ -1283,38 +1337,23 @@ def extract_document(doc_id: int, cfg) -> Document:
             )
             s.commit()
             if getattr(stale, "rowcount", 0) > 0:
-                # Re-enter through the normal claim path; the CAS protects
-                # against a second retry doing the same.
                 return extract_document(doc_id, cfg)
             s.refresh(doc)
             return doc
-        elif cur_status == ExtractionStatus.valid:
-            # Already read. A file stays in the input folder until its PO
-            # Set merges, so a set that is still waiting for a document would
-            # otherwise be re-read on every sync: one VLM call per file per
-            # night, and the attempt count climbing until a perfectly good
-            # document was marked permanently failed. A deliberate re-read is
-            # the operator's: redo_extract sets the status back to pending.
-            #
-            # The one exception is a split parent whose split never
-            # completed (the worker died between cutting the children and
-            # stamping the row): it must be re-processed so the children are
-            # re-derived from the parent.
+
+        if cur_status == ExtractionStatus.valid:
+            # Already read. A split parent whose split never completed is the
+            # one exception: the worker died between cutting children and
+            # stamping the row, so it must be processed again.
             split_incomplete = bool(getattr(doc, "is_split_parent", False)) and not getattr(
                 doc, "split_completed_at", None
             )
             if not split_incomplete:
                 return doc
 
-        if (doc.extraction_attempt_count or 0) >= _attempt_cap(cfg):
-            # Attempt cap reached. This is a terminal state, not a no-op: the
-            # document will never be read again until an operator resets the
-            # count (POST /po_sets/{id}/redo_extract). It returns normally
-            # rather than raising so Prefect does not burn its remaining
-            # retries re-raising an already-decided verdict, which means the
-            # CALLER must not treat a clean task return as success — the
-            # persisted status is the source of truth (see
-            # app/flows/sync.py::_persisted_extraction_status).
+        if (doc.extraction_attempt_count or 0) >= cap:
+            # Terminal state, not a no-op. The caller must read the persisted
+            # row, not the task return value (see flows/sync.py).
             doc.extraction_status = ExtractionStatus.failed
             s.commit()
             s.refresh(doc)
@@ -1323,82 +1362,111 @@ def extract_document(doc_id: int, cfg) -> Document:
                 "no further attempts will be made without an operator reset",
                 doc_id,
                 doc.original_filename,
-                _attempt_cap(cfg),
+                cap,
             )
             return doc
 
-        doc.extraction_attempt_count = (doc.extraction_attempt_count or 0) + 1
-        attempt_no = doc.extraction_attempt_count
-        try:
-            # Multi-page PDFs (FR-6.1, amended: rasterised): every page is rendered to an
-            # image and all pages go to Luna in ONE request, in real page order.
-            result = _call_vlm(doc.stored_path, dtype, cfg)
-            # Persist raw VLM JSON for audit (Task 1) + dev file dump mapped to filename (Task 6)
+        claim_from = cur_status
+        cas_result = s.execute(
+            _sa_update(Document)
+            .where(
+                Document.id == doc_id,
+                Document.extraction_status == claim_from,
+                Document.extraction_attempt_count < cap,
+            )
+            .values(
+                extraction_status=ExtractionStatus.processing,
+                extraction_attempt_count=Document.extraction_attempt_count + 1,
+                updated_at=datetime.now(UTC),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        s.commit()
+        if getattr(cas_result, "rowcount", 0) == 0:
+            # Another caller won the claim (or the cap was reached first).
+            s.refresh(doc)
+            if (
+                doc.extraction_status != ExtractionStatus.valid
+                and (doc.extraction_attempt_count or 0) >= cap
+            ):
+                doc.extraction_status = ExtractionStatus.failed
+                s.commit()
+                s.refresh(doc)
+            return doc
+
+        s.refresh(doc)
+        attempt_no = doc.extraction_attempt_count or 1
+        stored_path = doc.stored_path
+        original_filename = doc.original_filename
+        sha256_hash = doc.sha256_hash
+
+    # The claim is committed and the session is CLOSED before the network call.
+    # Holding a connection for up to vlm.request_timeout_seconds (180 s) would
+    # starve the dashboard and, with N workers, exhaust the pool. It also
+    # avoids an idle-in-transaction connection when the database moves to
+    # Postgres.
+    if provider_breaker_tripped():
+        return _release_claim(eng, doc_id, attempt_no) or doc
+
+    class _DocInfo:
+        """The few immutable fields the dev dump needs, without an ORM object."""
+
+        __slots__ = ("original_filename", "sha256_hash")
+
+        def __init__(self) -> None:
+            self.original_filename = original_filename
+            self.sha256_hash = sha256_hash
+
+    try:
+        # Every page is rasterised and sent as images in one request, in real
+        # page order (FR-6.1, amended).
+        result = _call_vlm(stored_path, dtype, cfg)
+        _dump_raw_extraction(_DocInfo(), result, cfg)
+
+        with Session(eng) as s2:
+            doc = s2.get(Document, doc_id)
+            if doc is None:
+                raise ValueError(f"document {doc_id} disappeared during extraction")
+            if doc.extraction_status != ExtractionStatus.processing:
+                # A reclaim or an operator action changed the row while the
+                # call was in flight. Never overwrite a newer state.
+                logger.warning(
+                    "Document %s changed state during extraction (%s); result discarded",
+                    doc_id,
+                    doc.extraction_status,
+                )
+                return doc
             import json
 
             try:
                 doc.raw_extraction_json = json.dumps(result, ensure_ascii=False, default=str)
             except Exception:
                 doc.raw_extraction_json = None
-            # Dev-only file dump for optimization/debugging — mapped to filename+hash, gitignored
-            try:
-                # Derived from the configured data folder only (R-18): a CWD-relative
-                # fallback let test runs from the repo root write into the repository.
-                raw_dir = Path(cfg.paths.log_folder).parent / "raw_extractions"
-                if raw_dir.exists():
-                    target_dir = raw_dir
-                    safe_stem = Path(doc.original_filename).stem.replace(" ", "_")[:80]
-                    fname = f"{doc.sha256_hash[:8]}_{safe_stem}.json"
-                    (target_dir / fname).write_text(
-                        json.dumps(result, indent=2, ensure_ascii=False, default=str),
-                        encoding="utf-8",
-                    )
-                elif Path("data").exists():
-                    # still create if DEBUG env is set
-                    import os
 
-                    if os.getenv("DEBUG") == "1" or os.getenv("AAM_SAVE_RAW") == "1":
-                        target_dir = Path("data/raw_extractions")
-                        target_dir.mkdir(parents=True, exist_ok=True)
-                        safe_stem = Path(doc.original_filename).stem.replace(" ", "_")[:80]
-                        fname = f"{doc.sha256_hash[:8]}_{safe_stem}.json"
-                        (target_dir / fname).write_text(
-                            json.dumps(result, indent=2, ensure_ascii=False, default=str),
-                            encoding="utf-8",
-                        )
-            except Exception:
-                pass
-
-            # Multi-doc split (PLAN Rev 2 Step 4): COMBINED is the trigger for a
-            # filesystem split, not a 3-section union. The parent row stays
-            # sterile (no numbers, no set, no lines); children are cut as files
-            # into input/ and re-extracted fresh on the next run. The old
-            # 3-section gate (FR-6.7) and union persistence are deleted.
             if result.get("document_type") == "COMBINED":
-                return _handle_combined(doc, s, result, cfg)
+                return _handle_combined(doc, s2, result, cfg)
 
-            populate_from_raw_dict(doc, result, s, cfg)
-            s.commit()
-            s.refresh(doc)
-            _note_provider_ok()
-            return doc
-        except Exception as e:
-            # The session may be in a failed-flush state (e.g. a DB error at
-            # flush); roll back and re-fetch the row so the verdict below can
-            # always be committed and counted.
-            s.rollback()
-            refetched = s.get(Document, doc_id)
-            if refetched is None:
+            populate_from_raw_dict(doc, result, s2, cfg)
+            s2.commit()
+            s2.refresh(doc)
+        _note_provider_ok()
+        return doc
+    except Exception as e:
+        with Session(eng) as s3:
+            doc = s3.get(Document, doc_id)
+            if doc is None:
                 raise e
-            doc = refetched
             if _is_infrastructure_error(e):
                 # A provider or network fault says nothing about the document.
-                # Refund the attempt and leave it pending, so Prefect's retry
-                # and the next sync claim it again instead of condemning it.
-                doc.extraction_attempt_count = max(0, attempt_no - 1)
+                # Refund the attempt and leave it pending, so the next run
+                # claims it again instead of condemning it. When the whole run
+                # is halted (fatal key/credit/config fault) the document is
+                # part of the trip's refund: attempts go to zero, not one.
+                tripped_now = provider_breaker_tripped()
+                doc.extraction_attempt_count = 0 if tripped_now else max(0, attempt_no - 1)
                 doc.extraction_status = ExtractionStatus.pending
-                s.commit()
-                s.refresh(doc)
+                s3.commit()
+                s3.refresh(doc)
                 logger.warning(
                     "VLM infrastructure fault for doc %s (%s): %s. Document stays pending "
                     "for the next run; attempt not counted.",
@@ -1408,11 +1476,24 @@ def extract_document(doc_id: int, cfg) -> Document:
                 )
                 fatal = _fatal_provider_fault(e)
                 if fatal is not None and _trip_provider_fatal(fatal):
-                    # Cannot succeed on the next document either: stop the pass, and raise
-                    # the type Prefect's retry condition treats as final.
+                    # Cannot succeed on the next document either: stop the
+                    # pass, and raise the type Prefect treats as final.
                     logger.error("%s (cause: %s: %s)", fatal, type(e).__name__, e)
                     raise ProviderRequestRejected(fatal) from e
                 raise e
+
+            if provider_breaker_tripped():
+                # Another worker tripped the breaker while this call was in
+                # flight. This document's verdict is held: refund it and stop,
+                # rather than committing `failed` after the coordinator's refund.
+                doc.extraction_status = ExtractionStatus.pending
+                doc.extraction_attempt_count = 0
+                s3.commit()
+                s3.refresh(doc)
+                raise ProviderRequestRejected(
+                    "provider breaker tripped while this document was in flight"
+                ) from e
+
             already_refunded = "provider_400_refund" in (doc.raw_extraction_json or "")
             is_400 = _is_http_400(e)
             rejected = _note_provider_400(doc_id) if is_400 and not already_refunded else None
@@ -1420,7 +1501,9 @@ def extract_document(doc_id: int, cfg) -> Document:
                 _defer_400(doc_id)
             if rejected is not None:
                 # Provider-wide 400 (R-06): refund every document it condemned
-                # and leave them pending; the sync loops stop calling the VLM.
+                # and leave them pending; the sync stops calling the VLM.
+                # `_note_provider_400` claims this list exactly once, so
+                # parallel workers cannot refund the same docs repeatedly.
                 _refund_rejected(eng, rejected)
                 logger.error(
                     "The provider rejected the request itself (HTTP 400) for %d documents in a "
@@ -1436,15 +1519,15 @@ def extract_document(doc_id: int, cfg) -> Document:
                 ) from e
             doc.extraction_attempt_count = attempt_no
             doc.extraction_status = ExtractionStatus.failed
-            s.commit()
-            s.refresh(doc)
-            logger.warning(
-                "VLM extraction failed for doc %s (attempt %s): %s",
-                doc_id,
-                doc.extraction_attempt_count,
-                type(e).__name__,
-            )
-            raise e
+            s3.commit()
+            s3.refresh(doc)
+        logger.warning(
+            "VLM extraction failed for doc %s (attempt %s): %s",
+            doc_id,
+            attempt_no,
+            type(e).__name__,
+        )
+        raise e
 
 
 def unsplit_bundle_clause():

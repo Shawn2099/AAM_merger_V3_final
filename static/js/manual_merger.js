@@ -607,6 +607,11 @@
     var xhr = new XMLHttpRequest();
     xhr.open('POST', els.form.getAttribute('action') || '/manual/merge', true);
     xhr.setRequestHeader('Accept', 'application/json');
+    // CSRF: the session's synchronizer token, rendered into the page meta tag.
+    var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    if (csrfMeta && csrfMeta.content) {
+      xhr.setRequestHeader('X-CSRF-Token', csrfMeta.content);
+    }
     xhr.responseType = 'blob';
 
     xhr.upload.onprogress = function (progress) {
