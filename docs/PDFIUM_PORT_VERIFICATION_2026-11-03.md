@@ -3,12 +3,14 @@
 **Branch:** `feat/pdfium-rasterizer` (from `main` `e716903`)
 **Commit under test:** `da841b9` plus the documentation in this commit
 **Host:** Windows 11 Home 10.0.26300, x64, Python 3.11.17 (uv)
-**Production target:** Windows Server 2016, 2 cores — see the remaining gate at the end.
+**Production target:** **Windows 11 x64** (validated 2026-11-04). Windows Server
+2016 is legacy and is no longer the target.
 
-This record closes the acceptance gates from
-[`PDF_RENDERER_EVALUATION_2026-11-03.md`](PDF_RENDERER_EVALUATION_2026-11-03.md) §12.1
-except the WS2016 execution itself. All numbers below were measured on this host,
-not inferred.
+This record closes the renderer acceptance gates from
+[`PDF_RENDERER_EVALUATION_2026-11-03.md`](PDF_RENDERER_EVALUATION_2026-11-03.md) §12.1.
+All numbers below were measured on this host, not inferred. The separate
+deployment gates (NSSM service session, reboot, live sync and restore) are in
+[`WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md`](WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md).
 
 ---
 
@@ -34,8 +36,8 @@ advapi32.dll, gdi32.dll, kernel32.dll, user32.dll
 ```
 
 No `VCRUNTIME140`, no `MSVCP140`. PE optional-header OS version is **10.0**, so
-Windows Server 2016 (10.0.14393) satisfies the declared minimum. The DLL was not
-executed on WS2016 here; that remains the deployment smoke test.
+Windows 11 x64 (10.0.26300 here) satisfies the declared minimum. Windows Server
+2016 is no longer a target and its clean-image gate is retired.
 
 ### Live HTTP smoke (the real service, not TestClient)
 
@@ -166,20 +168,19 @@ and pypdf (BSD-3). Full texts and build licences ship in the wheel under
 
 ---
 
-## 6. Remaining deployment gate
+## 6. Remaining deployment gate — Windows 11
 
-The only gate from §12.1 not executed here is **a real Windows Server 2016
-clean-image run** (no VC++ redist, service session 0, 2 cores). Win11 proves the
-wheel, the DLL dependency set, the app and the live HTTP paths; the DLL declares
-OS 10.0, which WS2016 10.0.14393 satisfies. Run this on the target host before
-handover:
+The renderer gates are closed on Windows 11. What remains is the **service
+session** part of the deployment, not the library: install the three NSSM
+services, reboot, run one live sync, and restore a backup into a scratch folder.
+That gate is tracked in
+[`WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md`](WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md).
+The renderer smoke command on the target is:
 
 ```powershell
 .\.venv\Scripts\python.exe -c "import pypdfium2; print(pypdfium2.PDFIUM_INFO)"
 .\.venv\Scripts\python.exe -c "import sys; sys.path.insert(0,'src'); from app.services.extraction import _rasterize_pdf; print(len(_rasterize_pdf(open(r'data\real_samples\SIV-RHO-26-233.pdf','rb').read(),150,30)))"
 ```
-
-and time one 30-page document; expected well under 30 s on two cores.
 
 ---
 

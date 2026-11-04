@@ -1,5 +1,10 @@
 # PDF renderer evaluation — 2026-11-03 (UTC)
 
+> **Deployment target update (2026-11-04):** the target is **Windows 11 x64**.
+> Windows Server 2016 references in this evaluation are historical; the WS2016
+> clean-image/2-core gates are retired. Current deployment evidence is in
+> [`WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md`](WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md).
+
 **Status:** discovery/benchmark complete; **implemented on `feat/pdfium-rasterizer`** (2026-11-03), branched from `main` `e716903`.
 **Branch:** `feat/pdfium-rasterizer` (from latest `main`).
 **Scope:** replace PyMuPDF 1.28.2 (AGPL/commercial) as the PDF→PNG rasteriser used by the VLM extraction path, with a permissively licensed, maintainable renderer for a proprietary internal Windows tool.
@@ -28,9 +33,9 @@
 
 - **M (measured):** executed on the evaluation host on 2026-11-03; commands and output paths are in §14.
 - **I (inferred):** from upstream source/docs/issues, package metadata, or code inspection; not executed here.
-- **N/T (not tested):** WS2016, clean service session, 2-core timing, commercial SDKs, pdf.js rendering.
+- **N/T (not tested at evaluation time):** clean service session, 2-core timing, commercial SDKs, pdf.js rendering. (The target was later changed to Windows 11; see the note at the top.)
 
-Evaluation host: Windows 11 Home 10.0.26300 x64, Intel i7-7700 (4 cores/8 threads), 24 GB RAM, Python 3.11.9/3.11.17. **Production is Windows Server 2016 x64, 2 cores, 128 GB.** Per-page timings are roughly transferable because all three Python renderers are single-threaded on the page, but **WS2016/2-core timing is still a gate, not a measured result**.
+Evaluation host: Windows 11 Home 10.0.26300 x64, Intel i7-7700 (4 cores/8 threads), 24 GB RAM, Python 3.11.9/3.11.17. The production target at evaluation time was Windows Server 2016; it is now **Windows 11 x64**, and the Win11 renderer/VLM evidence is in [`PDFIUM_PORT_VERIFICATION_2026-11-03.md`](PDFIUM_PORT_VERIFICATION_2026-11-03.md).
 
 Corpus: 28 deliberately diverse real vendor PDFs (65 pages, first 3 pages each) plus a full scan of all **695** PDFs in `C:\Users\malliath\Desktop\aam_merger\data\real_samples`. The 28-doc set intentionally over-samples the SIV-RHO family and the known malformed file, so its failure rate is **not** representative; the 695-file scan is the better prevalence estimate. Files were read-only; no data was modified.
 

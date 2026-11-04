@@ -6,14 +6,19 @@
 > "no login" statements below are historical; the current install steps are in
 > [`DEPLOY.md`](../DEPLOY.md) and the change record is
 > [`HANDOVER_HARDENING_2026-11-02.md`](./HANDOVER_HARDENING_2026-11-02.md).
+>
+> **2026-11-04 target change:** deploy on **Windows 11 x64**. The Win11
+> acceptance record is
+> [`WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md`](./WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md).
 
 This is the short version for handing the MVP to the client. The full technical
 detail is in [`DEPLOY.md`](../DEPLOY.md); this page is what to follow on the day.
 
-**Target setup:** one Windows PC (the "server") runs the web app, the database,
-the file folders and the nightly sync. Other people in the office open the
-dashboard in a browser at `http://<server-ip>:8000/dashboard`. They all see the
-same data — there is no per-user login.
+**Target setup:** one **Windows 11 x64** PC (the "server") runs the web app, the
+database, the file folders and the nightly sync. Other people in the office open
+the dashboard in a browser at `http://<server-ip>:8000/dashboard` and sign in
+with their own account. Authentication is ON; the first account is an admin and
+every operator gets a named login so the audit log can attribute actions.
 
 ---
 
@@ -21,8 +26,8 @@ same data — there is no per-user login.
 
 | Item | Requirement |
 |---|---|
-| OS | Windows 10/11 or Windows Server 2016+ |
-| CPU / RAM | 2 cores, 4 GB free (2-core is the design target) |
+| OS | **Windows 11 x64** (validated on 10.0.26300). Windows Server 2016 is legacy. |
+| CPU / RAM | 4+ cores recommended; 2 cores / 4 GB free is the minimum sizing assumption |
 | Disk | Local disk only. **Never put the database on an SMB share** — SQLite WAL needs shared memory |
 | Network | Static LAN IP (or a DHCP reservation). Internet access for OpenRouter |
 | Rights | Administrator for the install (services, firewall, backup task) |

@@ -97,9 +97,9 @@ test/<short>  experiments / sample-PDF validation
 
 ## 5. Cross-Platform (Recommended: best-effort)
 
-Dev = Linux, prod = single Win Server 2016 (2 cores, 128GB, `0.0.0.0:<port>` LAN, DB + stored/quarantine/input/output local to host — **never SQLite on SMB share**, WAL requires shared memory).
+Dev = Linux, prod = single Windows 11 x64 host (`0.0.0.0:<port>` LAN, DB + stored/quarantine/input/output local to host — **never SQLite on SMB share**, WAL requires shared memory). Windows Server 2016 is legacy; the 2026-11-04 acceptance run is on Windows 11 Home 10.0.26300 (8 cores), and the 2-core sizing assumption remains a capacity note, not the target OS.
 
-* All environment-specific values in `config.yaml` (paths, host/port, model, timeouts, thresholds, `po_set_lock_timeout_seconds`, `max_concurrent_extraction_tasks=3`, `vlm.rasterize_concurrency=2`, the `auth:` block). App fails fast on invalid config. `max_concurrent_extraction_tasks` is fixed at `3` per SPEC §13.2 and is now **enforced** as the parallel extraction cap — not a range; a 2–3 range would be a spec amendment, not an AGENTS.md drift. `vlm.rasterize_concurrency` must stay at or below it.
+* All environment-specific values in `config.yaml` (paths, host/port, model, timeouts, thresholds, `po_set_lock_timeout_seconds`, `max_concurrent_extraction_tasks=3`, the `auth:` block). App fails fast on invalid config. `max_concurrent_extraction_tasks` is fixed at `3` per SPEC §13.2 and is now **enforced** as the parallel extraction cap — not a range; a 2–3 range would be a spec amendment, not an AGENTS.md drift. `vlm.rasterize_concurrency` is retained for config compatibility; `pypdfium2`'s process-wide lock is the real render serialisation point.
 * Code: `pathlib.Path` everywhere, never hardcode `C:\AAM\...`; use `pathlib` + `os.path` join; separators from config; no `\\` literals.
 * Keep Windows-only code isolated: NSSM wrapper + deployment runbook; app stays portable (Uvicorn, sync SQLAlchemy, `RotatingFileHandler`, `pydantic-settings` env).
 * No dual-OS CI required (accepted); note Windows deltas in runbook. If volume grows beyond ~10 PO Sets/day, tune `config.yaml` only — no code change.
@@ -195,13 +195,15 @@ cp config.example.yaml config.yaml  # then edit paths/model/thresholds; set OPEN
 
 Exact patch versions to pin; LAN IP/firewall for `server.host`/`port` (config-only, no code change). DB backup cadence is now 13:00 daily (development snapshot 15:00) and was verified by a backup/restore drill.
 
-**PDF renderer replacement is evaluated but NOT implemented.** Read
-[`docs/PDF_RENDERER_EVALUATION_2026-11-03.md`](docs/PDF_RENDERER_EVALUATION_2026-11-03.md).
-Decision: replace PyMuPDF (AGPL/commercial) with **pypdfium2 5.14.0** (BSD/Apache),
-with a process-wide PDFium lock and the 8-number-MediaBox repair. PDF Oxide 0.3.78
-is rejected (30/695 real files fail; password-protected PDFs render blank).
-Remaining gates: WS2016 clean-image render, 2-core timing, and a paid VLM A/B
-on 20–30 real documents before removing PyMuPDF from runtime deps.
+**PDF renderer replacement is implemented.** Read
+[`docs/PDFIUM_PORT_VERIFICATION_2026-11-03.md`](docs/PDFIUM_PORT_VERIFICATION_2026-11-03.md).
+PyMuPDF (AGPL/commercial) is removed from runtime deps and the lockfile;
+**pypdfium2 5.14.0 + Pillow** (BSD/Apache, MIT-CMU) is the renderer, with a
+process-wide PDFium lock and the 8-number-MediaBox repair. PDF Oxide 0.3.78 is
+rejected (30/695 real files fail; password-protected PDFs render blank). The
+Win11 renderer, 695-file corpus, thread/memory and 20-document VLM gates are
+recorded in that document. Remaining gate: a real NSSM service-session
+install/reboot, one live sync and a restore drill on the Win11 target.
 
 ---
 

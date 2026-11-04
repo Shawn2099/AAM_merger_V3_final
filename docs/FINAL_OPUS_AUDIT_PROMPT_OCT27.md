@@ -1,5 +1,9 @@
 # Anthropic SOTA Optimized Final Pre-Deployment Code Review Prompt
 
+> **Historical audit prompt (target changed 2026-11-04):** Windows Server 2016
+> was the target when this prompt was written. The current target is Windows 11
+> x64; see [`WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md`](./WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md).
+
 **Target Model:** Claude 3.5 / 5.5 Opus (via Claude CLI or Web)  
 **Target Release Branch:** `deployed/aam-2026-10-27` (Commit `11328e4`)  
 **Reference Baseline:** `main` (Commit `346d3fb`)  

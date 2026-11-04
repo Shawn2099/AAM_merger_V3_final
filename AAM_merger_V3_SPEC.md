@@ -1,5 +1,10 @@
 # AAM_merger_V3 — Technical Specification (SPEC.md)
 
+> **Deployment target update (2026-11-04):** Windows 11 x64 is now the target.
+> Windows Server 2016 references below are historical draft context. The current
+> install/validation record is
+> [`docs/WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md`](./docs/WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md).
+
 **Status:** Draft v1, derived directly from `AAM_merger_V3_business_logic.md` (Final) plus decisions confirmed in the spec-drafting session below. No requirement in this document may be implemented in a way that contradicts the business logic doc — if a conflict is found, STOP and ask (see Section 1).
 
 **Build scope:** Input folder → identification → extraction → grouping → matching → reconciliation → automatic merge → output folder. Distribution (Phase 2) is explicitly excluded from this document.
@@ -13,7 +18,7 @@ These rules sit above every other section and are non-negotiable regardless of h
 1. **Ambiguity → ask, don't infer.** If any requirement in this document is unclear, contradicts another section, or doesn't cover the situation the agent has hit, the agent stops and asks the human — it does not pick a plausible interpretation and proceed. A wrong guess that compiles and runs is worse than a blocked task, because this system's failure mode (a bad merge going to the CA) is silent and costly.
 2. **Stuck or looping → ask, don't keep retrying blind.** If the agent has attempted the same fix more than twice without resolving it, or is oscillating between two broken states, it stops and reports: what it tried, what happened each time, and what it currently believes the blocker is. It asks the human to investigate or decide, rather than attempting a third or fourth variation on its own.
 3. **Verify, don't guess.** Before declaring any piece of functionality done, the agent runs it against real or realistic inputs and inspects the actual output — it does not reason about what the code "should" do and stop there. This applies especially to: extraction against real sample PDFs (see business doc Section 17 — real vendor samples exist and should be used), reconciliation math on constructed edge cases, and concurrency behavior under simulated simultaneous actions. A claim of "this should work" without an observed result is not acceptable as a completion signal.
-4. **This spec is the source of truth over the agent's own training-data defaults.** Where this spec names a specific library, pattern, or version, that instruction wins over whatever the agent would otherwise default to from general knowledge — general "best practice" from training data may be stale or may not account for the Windows Server 2016 / dual-core constraint.
+4. **This spec is the source of truth over the agent's own training-data defaults.** Where this spec names a specific library, pattern, or version, that instruction wins over whatever the agent would otherwise default to from general knowledge — general "best practice" from training data may be stale or may not account for the Windows 11 x64 / dual-core constraint.
 
 ---
 
@@ -49,13 +54,13 @@ Identical to business doc Section 3 (PO, DN, SI, PO Set, po_no, line_item_no, Ag
 
 | Constraint | Decision | Rationale |
 |---|---|---|
-| Windows Server 2016, no containers assumed | Native Windows process, not Docker | Avoids WSL2/Hyper-V container dependency on a 2016 host; simplest reliable path |
+| Windows 11 x64, no containers assumed | Native Windows process, not Docker | Avoids WSL2/Hyper-V container dependency on the target host; simplest reliable path |
 | 2 CPU cores | Async I/O concurrency model for the web layer; explicit Prefect concurrency limits (not autoscaling) | CPU-bound parallelism doesn't scale past 2 cores — async avoids thread contention for I/O-bound work (VLM API calls, DB, file I/O) |
 | 128 GB RAM | Not architected around — treated as headroom, not a design driver | No component in this system needs >2-4 GB working set at "modest volume." Do not add memory-hungry caching layers to "use" the RAM; that's solving a problem that doesn't exist |
 | SQLite in WAL mode (locked decision) | Single-writer discipline: all writes go through one connection pool sized to expected concurrent writers (see 10) | WAL allows concurrent readers + one writer; 2 cores means write contention is inherently low, so this is not a bottleneck at this scale |
 | Prefect server already running | Used via Prefect's Python client + a `process`-type work pool on the same host | No Kubernetes/Docker work pool — matches the single-Windows-host reality |
 | Process supervision on Windows | NSSM (Non-Sucking Service Manager) wraps both the web app process and the Prefect worker process as Windows Services, auto-restart on crash | `gunicorn` does not run on Windows (Unix-only, fork-based) — this is the standard, non-deprecated Windows equivalent |
-| "Launch from any computer on the LAN" (confirmed this session) | The app and its SQLite database run on ONE designated Windows Server 2016 host. Uvicorn binds to `0.0.0.0` on that host; other LAN machines access it via `http://<host-ip>:<port>` in a browser — no local install anywhere else. DB and all `stored_path`/quarantine/input/output folders stay local to that host. | Keeps this a normal single-host web app. Confirmed explicitly to avoid the alternative (DB on a network share), which SQLite's own documentation states is unsafe in WAL mode — WAL requires shared memory between processes, which SMB/UNC network filesystems cannot provide, risking silent corruption, not just slowness. |
+| "Launch from any computer on the LAN" (confirmed this session) | The app and its SQLite database run on ONE designated Windows 11 x64 host. Uvicorn binds to `0.0.0.0` on that host; other LAN machines access it via `http://<host-ip>:<port>` in a browser — no local install anywhere else. DB and all `stored_path`/quarantine/input/output folders stay local to that host. | Keeps this a normal single-host web app. Confirmed explicitly to avoid the alternative (DB on a network share), which SQLite's own documentation states is unsafe in WAL mode — WAL requires shared memory between processes, which SMB/UNC network filesystems cannot provide, risking silent corruption, not just slowness. |
 | Realistic volume (confirmed this session): ~10 PO Sets/day, effectively single user | No load-driven scaling needed anywhere in this system | Directly simplifies §9 concurrency locking (still kept as a cheap safeguard, but not solving a real contention problem) and §10 NFR sizing |
 
 ### 5.2 Approved library table (pin exact versions in `requirements.txt`/lockfile at implementation time — check each for newer patch releases and any deprecation notices before pinning, per Section 1 rule 4)
@@ -323,7 +328,7 @@ Representative examples (full test matrix to be built alongside implementation, 
 
 ## 13. Configuration Management
 
-Confirmed this session: everything environment-specific — paths, timeouts, thresholds, model name — must be externalized to a config file, not hardcoded, so the same codebase runs unmodified on a dev machine, a test box, or the production WS2016 host.
+Confirmed this session: everything environment-specific — paths, timeouts, thresholds, model name — must be externalized to a config file, not hardcoded, so the same codebase runs unmodified on a dev machine, a test box, or the production Windows 11 host.
 
 ### 13.1 Mechanism
 
@@ -419,7 +424,7 @@ logging:
 
 - Exact library patch versions to pin — agent must check current PyPI/changelog state at implementation time (Section 1, rule 4) rather than trusting this document's versions indefinitely, since this spec can go stale.
 - DB backup cadence and location (NFR-6) — operational decision, not yet made.
-- ~~Whether the designated host machine is already chosen/provisioned~~ — **Resolved:** same dual-core/128GB RAM Windows Server 2016 box already running the Prefect server. App, DB, and Prefect worker all co-locate on this one host, consistent with §5.1. Exact LAN IP/hostname and firewall rule for the chosen port are deployment-time details, applied after development — not a blocker, since `server.host`/`server.port` are config.yaml values (§13.2), not hardcoded, so they're set once at deploy time with no code change.
+- ~~Whether the designated host machine is already chosen/provisioned~~ — **Resolved:** the same Windows 11 x64 box (8 logical processors on the 2026-11-04 acceptance host) already running the Prefect server. App, DB, and Prefect worker all co-locate on this one host, consistent with §5.1. Exact LAN IP/hostname and firewall rule for the chosen port are deployment-time details, applied after development — not a blocker, since `server.host`/`server.port` are config.yaml values (§13.2), not hardcoded, so they're set once at deploy time with no code change.
 
 
 we have our proof of concpet at ~/Desktop/AAM_merger_V2 ,u can refer it only if needed but always follow this doc

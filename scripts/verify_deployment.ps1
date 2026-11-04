@@ -2,7 +2,7 @@
 .SYNOPSIS
     scripts/verify_deployment.ps1 - Post-deployment health verification and diagnostics tool for AAM Merger V3.
 .DESCRIPTION
-    Audits the complete runtime environment on Windows Server 2016:
+    Audits the complete runtime environment on Windows 11:
       - Windows Services status (AAMMerger-Web, AAMMerger-Worker, AAMMerger-PrefectServer)
       - Port availability & Web Health endpoints (/health, /dashboard)
       - Prefect Server API responsiveness & deployment schedule status
@@ -85,15 +85,27 @@ try {
     Report-Check "Uvicorn /health" "FAIL" "Could not connect to http://127.0.0.1:${Port}/health ($($_.Exception.Message))"
 }
 
+# Authentication is on by default. A dashboard request without a session is
+# deliberately refused: 303 to /login for a browser, 401 JSON for an API-style
+# request. Both prove the web process and the auth gate are alive; treating
+# either as a failure made the post-deploy audit red on every secure install.
+$dashStatus = 0
+$dashLocation = ""
 try {
-    $dashResp = Invoke-WebRequest -Uri "http://127.0.0.1:${Port}/dashboard" -UseBasicParsing -TimeoutSec 4
-    if ($dashResp.StatusCode -eq 200) {
-        Report-Check "Dashboard /dashboard" "OK" "HTTP 200 OK - Dashboard rendering normally"
-    } else {
-        Report-Check "Dashboard /dashboard" "FAIL" "HTTP $($dashResp.StatusCode)"
-    }
+    $dashResp = Invoke-WebRequest -Uri "http://127.0.0.1:${Port}/dashboard" -UseBasicParsing -TimeoutSec 4 -MaximumRedirection 0 -ErrorAction Stop
+    $dashStatus = [int]$dashResp.StatusCode
 } catch {
-    Report-Check "Dashboard /dashboard" "FAIL" "Could not connect to http://127.0.0.1:${Port}/dashboard ($($_.Exception.Message))"
+    if ($_.Exception.Response) {
+        $dashStatus = [int]$_.Exception.Response.StatusCode
+        $dashLocation = [string]$_.Exception.Response.Headers["Location"]
+    }
+}
+if ($dashStatus -eq 200) {
+    Report-Check "Dashboard /dashboard" "OK" "HTTP 200 OK - Dashboard rendering normally"
+} elseif ($dashStatus -in 302, 303, 401 -and ($dashStatus -eq 401 -or $dashLocation -match "login")) {
+    Report-Check "Dashboard /dashboard" "OK" "Auth gate active (HTTP $dashStatus); sign in at /login"
+} else {
+    Report-Check "Dashboard /dashboard" "FAIL" "HTTP $dashStatus from http://127.0.0.1:${Port}/dashboard"
 }
 
 # 3. Prefect Server & Deployment Check
@@ -214,7 +226,14 @@ if ($LASTEXITCODE -eq 0) {
 # 7. Windows Defender Firewall Rule
 Write-Host "`n[7/7] Checking Windows Firewall..." -ForegroundColor Cyan
 try {
-    $fw = Get-NetFirewallRule -DisplayName "AAM Merger Web Dashboard (Port $Port)" -ErrorAction SilentlyContinue
+    # setup_test_rig.ps1 creates "AAM Merger V3 Web ($Port)". Older installs used
+    # "AAM Merger Web Dashboard (Port $Port)"; accept either so the audit does
+    # not call a correctly configured host unprotected.
+    $fw = $null
+    foreach ($ruleName in @("AAM Merger V3 Web ($Port)", "AAM Merger Web Dashboard (Port $Port)")) {
+        $candidate = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+        if ($candidate) { $fw = $candidate; break }
+    }
     if ($fw -and $fw.Enabled -eq "True") {
         Report-Check "Firewall Rule (Port $Port)" "OK" "Rule enabled for inbound TCP"
     } elseif ($fw) {

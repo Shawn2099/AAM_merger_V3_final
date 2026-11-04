@@ -6,7 +6,7 @@ The caller (extraction) owns the sterile parent row, the `combined/` move,
 page ranges against pypdf ground truth and cuts child files into `input/`.
 
 Filename contract: `<sha16>_p<i>.pdf` — 16-char SHA-256 prefix of the parent
-bytes (WS2016 MAX_PATH), `p<i>` strictly numeric 1-based among NON-SKIP
+bytes (Windows MAX_PATH), `p<i>` strictly numeric 1-based among NON-SKIP
 components in listed order. SKIP consumes coverage but cuts no file.
 """
 

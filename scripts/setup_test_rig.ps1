@@ -2,7 +2,7 @@
 .SYNOPSIS
     scripts/setup_test_rig.ps1 - Complete one-click deployment & test rig setup for AAM Merger V3.
 .DESCRIPTION
-    Automates the entire setup of AAM Merger V3 on a Windows Server 2016 or Windows test rig:
+    Automates the entire setup of AAM Merger V3 on a Windows 11 x64 host or test rig:
       1. Validates Administrator privileges.
       2. Ensures Python environment (.venv) and dependencies are installed.
       3. Verifies or generates config.yaml from config.example.yaml.

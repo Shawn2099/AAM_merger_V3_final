@@ -1,5 +1,9 @@
-# Deployment Runbook — Windows Server 2016 / Test Rig
+# Deployment Runbook — Windows 11 x64
 
+> **Target change (2026-11-04):** Windows 11 x64 is the deployment target.
+> Windows Server 2016 is legacy. The Win11 acceptance record is
+> [`docs/WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md`](./docs/WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md).
+>
 > For a client-office handover, start with
 > [`docs/DELIVERY.md`](./docs/DELIVERY.md) — it is the checklist version of
 > this page. This file keeps the technical detail.

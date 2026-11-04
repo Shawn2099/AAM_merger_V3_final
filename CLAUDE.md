@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-AAM Merger V3: PO/DN/SI reconciliation that produces one merged PDF per PO. FastAPI + Prefect + SQLAlchemy (sync) + SQLite WAL, with a server-rendered Jinja2/HTMX/Alpine dashboard. It is built for a single Windows Server 2016 / office PC on a LAN, and developed on Linux or Windows.
+AAM Merger V3: PO/DN/SI reconciliation that produces one merged PDF per PO. FastAPI + Prefect + SQLAlchemy (sync) + SQLite WAL, with a server-rendered Jinja2/HTMX/Alpine dashboard. It is built for a single Windows 11 x64 office PC on a LAN, and developed on Linux or Windows. Windows Server 2016 is no longer the deployment target.
 
 **Read first:** `docs/CORE_LOGIC.md`, then `AAM_merger_V3_PRODUCT.md`. The PRODUCT doc is the source of truth and wins over `AGENTS.md`. `AAM_merger_V3_SPEC.md` and `AAM_merger_V3_business_logic.md` describe a richer matcher that was retired on 2026-09-29. Do not implement against their matching/reconciliation sections. `SESSION_HANDOFF.md` has the latest state.
 

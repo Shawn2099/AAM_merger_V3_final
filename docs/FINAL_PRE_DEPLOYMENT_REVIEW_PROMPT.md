@@ -1,5 +1,9 @@
 # Anthropic Best-Practice Optimized Code Review & Go/No-Go Audit Prompt
 
+> **Historical audit prompt (target changed 2026-11-04):** Windows Server 2016
+> was the target when this prompt was written. The current target is Windows 11
+> x64; see [`WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md`](./WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md).
+
 **Target Model:** Claude 3.5 / 5.5 Opus  
 **Target Release Branch:** `deployed/aam-2026-10-27`  
 **Reference Baseline Branch:** `main` / `dev` (Commit `f714499`)  
