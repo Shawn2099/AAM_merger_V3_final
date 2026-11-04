@@ -144,6 +144,7 @@ backed up, and the old code was replaced with `main` `4490b04`:
 | Forced first-login change | 303 → `/account/password` |
 | Scheduled tasks | `AAMMerger-DailyBackup` next 13:00; `AAMMerger-DevelopmentSnapshot` next 15:00 |
 | Firewall | `AAM Merger V3 Web (8000)` enabled |
+| First post-start sync | `sync_flow` and its `recovery_flow` completed; no crash encountered |
 
 The first admin is `admin` with `must_change_password=1`. Its temporary
 password is in `C:\Users\malliath\Desktop\deployment\data\initial_admin_password.txt`
@@ -153,9 +154,10 @@ then delete that file.
 The live DB/config/input backup is
 `C:\Users\malliath\Desktop\aam_legacy_backup_20261104_143240`. The old code
 archive was removed after the new deployment passed verification; the old
-release worktree was also removed. The separate `aam_backup` product's files
-are untouched; its three stale services were removed (one remained marked for
-deletion until the next reboot).
+release worktree, the temp verification worktrees and the isolated port-8010
+rig were also removed. The separate `aam_backup` product's files are untouched;
+its three stale services were removed, so only the three `AAMMerger-*` services
+remain.
 
 ## 8. Remaining gate
 
