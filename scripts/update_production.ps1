@@ -2,7 +2,7 @@
 .SYNOPSIS
     scripts/update_production.ps1 - Safe production update and restart runner.
 .DESCRIPTION
-    Applies application updates safely on Windows Server 2016:
+    Applies application updates safely on Windows 11 x64:
       1. Verifies Administrator privileges.
       2. Performs an automated pre-update backup of the SQLite database.
       3. Stops running Windows Services.

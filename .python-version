@@ -1,6 +1,6 @@
 # Local development interpreter.
 #
-# 3.12, not the 3.11 that WS2016 production runs on. This is a WORKSTATION
+# 3.12, not the 3.11 that the Windows 11 production deployment pins. This is a WORKSTATION
 # constraint, not a project one:
 #
 #   Windows Smart App Control on this dev machine blocks the unsigned stdlib

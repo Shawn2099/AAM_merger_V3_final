@@ -143,7 +143,7 @@ All with the canned VLM, no network:
 - Q5 (pymupdf). Record the outcome in D6.
 
 ### WS9. Final proof on the target (LAST; user go-ahead; Claude supervises, user clicks)
-1. Fresh install on the Windows Server 2016 PC from `docs/DELIVERY.md` on a **NEW database**.
+1. Fresh install on the **Windows 11 x64** PC from `docs/DELIVERY.md` on a **NEW database**.
 2. Click-through of every screen (UI_TEST_PLAN as the checklist).
 3. One midnight Prefect run observed.
 4. **Real-corpus run on the NEW database** (paid provider, user go-ahead): compare results with the earlier real run explained in HANDOFF (24 pending sets are known causes; requeue dry-run predicted sets 39, 40, 42, 48, 50 would merge).

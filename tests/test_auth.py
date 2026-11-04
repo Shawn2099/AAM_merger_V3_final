@@ -7,8 +7,10 @@ build the app with authentication explicitly on.
 
 from __future__ import annotations
 
+import io
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -370,6 +372,17 @@ def test_password_hash_is_argon2id_and_verifies():
     assert PASSWORD not in digest
     assert verify_password(digest, PASSWORD) == (True, None)
     assert verify_password(digest, "wrong")[0] is False
+
+
+def test_password_stdin_strips_a_powershell_bom(monkeypatch):
+    """PowerShell 5.1 prefixes piped text with U+FEFF; it must not become part
+    of the password, or `create-user --password-stdin` creates an account that
+    cannot log in with the password the operator typed."""
+    from app.auth import cli
+
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO("\ufeffcorrect horse battery staple\n"))
+    args = SimpleNamespace(password_stdin=True)
+    assert cli._read_password(args) == PASSWORD
 
 
 def test_username_normalisation_is_case_insensitive():

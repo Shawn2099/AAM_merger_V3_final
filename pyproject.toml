@@ -1,12 +1,12 @@
 [project]
 name = "aam-merger-final"
 version = "0.1.0"
-description = "AAM Merger V3 — PO/DN/SI reconciliation → merged PDF (FastAPI + Prefect + SQLite WAL). Cross-platform: Linux dev → WS2016 prod via config.yaml."
+description = "AAM Merger V3 — PO/DN/SI reconciliation → merged PDF (FastAPI + Prefect + SQLite WAL). Cross-platform: Linux dev → Windows 11 prod via config.yaml."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary — internal CA tool" }
 dependencies = [
-    # SPEC §5.2 approved — pins checked 2026-08-15, WS2016 (py 3.11) compatible, latest patches
+    # SPEC §5.2 approved — pins checked 2026-08-15, Windows 11 x64 / Python 3.11 compatible, latest patches
     "fastapi>=0.124.0",
     "uvicorn>=0.34.0",
     "pydantic>=2.11.0",

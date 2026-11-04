@@ -4,7 +4,7 @@
 .SYNOPSIS
     scripts/deploy_production.ps1 - Master one-click installation and deployment script for AAM Merger V3.
 .DESCRIPTION
-    Fully automates the production deployment on Windows Server 2016 (or standalone Windows PC):
+    Legacy installer. Fully automates a production deployment on Windows 11 x64 (or standalone Windows PC):
       1. Verifies Administrator privileges (or provides clean instructions).
       2. Ensures Python virtual environment and dependencies are present and synced.
       3. Prepares config.yaml from config.example.yaml, auto-configuring allowed_hosts with local LAN IP and hostname.

@@ -1329,13 +1329,13 @@ double-quoted `C:\AAM\input` is a YAML escape error and the app refuses to
 start.
 
 **`backup.*` config is not wired.** NFR-6 backup is a runbook item
-(`DEPLOY.md`), not code. `make backup` is Linux-only and unusable on the WS2016
-target — do a SQLite `.backup` from a Windows host instead.
+(`DEPLOY.md`), not code. `make backup` is Linux-only and unusable on the
+Windows 11 target — do a SQLite `.backup` from a Windows host instead.
 
 **`max_concurrent_extraction_tasks` is enforced (2026-11-02).** One sync reads
 up to this many documents at once with a bounded thread pool; the default of 3
 is the SPEC value and is sized for the two-core host. PDF rasterisation has its
-own cap (`vlm.rasterize_concurrency`, default 2) because PyMuPDF is CPU-bound.
+own process-wide PDFium lock because PDFium is not thread-safe; `vlm.rasterize_concurrency` is retained for config compatibility but the lock is the real serialisation point.
 Ingestion, grouping, quarantine, reconciliation and merging stay on the flow
 thread; only the network-bound VLM call runs in parallel. Each worker claims a
 document with the existing compare-and-swap and holds no database session

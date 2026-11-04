@@ -166,7 +166,7 @@ def _safe_filename(name: str | None, fallback: str) -> str:
     Strips path parts, characters Windows refuses (`<>:"/\\|?*` and control
     characters; `:` would otherwise write an alternate data stream), trailing
     dots/spaces, reserved device stems (CON, NUL, ...), and caps the length so a
-    quarantine folder path stays inside MAX_PATH on Server 2016.
+    quarantine folder path stays inside the Windows MAX_PATH limit.
     """
     base = re.split(r"[/\\]", name or "")[-1].strip()
     base = _BAD_FILENAME_CHARS.sub("_", base).strip(" .")

@@ -38,7 +38,10 @@ from app.models import User, UserRole
 
 def _read_password(args) -> str:
     if args.password_stdin:
-        value = sys.stdin.readline().rstrip("\r\n")
+        # Windows PowerShell 5.1 prefixes text piped into a native process with
+        # a UTF-8 BOM. Hashing that makes the account unusable: the operator
+        # types the visible password, the stored hash contains U+FEFF as well.
+        value = sys.stdin.readline().lstrip("\ufeff").rstrip("\r\n")
         if not value:
             raise SystemExit("[ERROR] --password-stdin received an empty line")
         return value

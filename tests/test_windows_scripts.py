@@ -229,6 +229,13 @@ def test_nssm_download_failure_says_how_to_bundle_it() -> None:
     assert "extract win64\\nssm.exe to" in text
 
 
+def test_verify_deployment_accepts_the_auth_gate_and_current_firewall_name() -> None:
+    text = (SCRIPTS / "verify_deployment.ps1").read_text(encoding="utf-8")
+    assert "Windows 11" in text
+    assert "Auth gate active" in text
+    assert "AAM Merger V3 Web ($Port)" in text
+
+
 def test_no_control_bytes_in_deployment_files() -> None:
     files = [
         ROOT / "docs" / "DELIVERY.md",

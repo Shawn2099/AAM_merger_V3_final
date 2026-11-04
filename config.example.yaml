@@ -1,6 +1,6 @@
 # AAM_MERGER-FINAL — config.example.yaml
 # Copy to config.yaml and set real paths. All env-specific values MUST be here, not hardcoded (SPEC §13).
-# WS2016 prod paths are C:\AAM\*, Linux dev can use ./data/* or /tmp/AAM/*
+# Windows 11 prod paths are C:\AAM\*, Linux dev can use ./data/* or /tmp/AAM/*
 # Secrets (OPENROUTER_API_KEY) via .env or env var only, never here (SPEC NFR-5).
 
 paths:
@@ -37,8 +37,9 @@ vlm:
   raster_dpi: 150
   reasoning_effort: "high"
   max_pages: 30
-  # PDF rendering is CPU-bound: on a 2-core host keep this at 2 even when
-  # extraction reads 3 documents in parallel.
+  # Retained for config compatibility. pypdfium2/PDFium is serialised by a
+  # process-wide lock, so this is not a render-parallelism knob; extraction
+  # concurrency is controlled by prefect.max_concurrent_extraction_tasks.
   rasterize_concurrency: 2
   api_key_env_var: "OPENROUTER_API_KEY"
 

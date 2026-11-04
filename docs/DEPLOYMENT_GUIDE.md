@@ -8,8 +8,8 @@
 > This guide's `deploy.bat` path is the older of the two installers; `DEPLOY.md`
 > currently recommends `setup_test_rig.ps1`.
 
-> **Target Platform:** Windows Server 2016 / Windows 10/11 (64-bit)  
-> **Architecture:** Standalone Host with LAN client browser access (`http://<server-ip>:8000`)  
+> **Target Platform:** Windows 11 x64 (validated on 10.0.26300). Windows Server 2016 is legacy.
+> **Architecture:** Standalone Host with LAN client browser access (`http://<server-ip>:8000`)
 > **Key Services:** FastAPI (Web Dashboard) + Prefect Process Worker + Prefect Server (NSSM Windows Services)
 
 ---

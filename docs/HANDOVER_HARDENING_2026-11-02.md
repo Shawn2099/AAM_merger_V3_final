@@ -150,19 +150,20 @@ handover risk.
    A full renderer selection (PDF Oxide, pypdfium2, pdf.js, Poppler,
    Ghostscript, PDFBox and the rest) is in
    [`PDF_RENDERER_EVALUATION_2026-11-03.md`](./PDF_RENDERER_EVALUATION_2026-11-03.md).
-   Decision: **pypdfium2 5.14.0 is the intended permissive replacement**
-   (BSD/Apache, 693/695 real PDFs, low memory), pending the implementation and
-   WS2016/VLM gates in that document. PDF Oxide 0.3.78 is rejected for now:
-   30/695 real files fail to render and user-password PDFs render blank pages
-   without raising. The licence choice is therefore: fund the pypdfium2
-   migration, buy an Artifex licence, or accept AGPL.
+   Decision: **pypdfium2 5.14.0 is the permissive replacement** (BSD/Apache,
+   693/695 real PDFs, low memory). It is now implemented on `main`; see
+   [`PDFIUM_PORT_VERIFICATION_2026-11-03.md`](./PDFIUM_PORT_VERIFICATION_2026-11-03.md).
+   PDF Oxide 0.3.78 is rejected: 30/695 real files fail to render and
+   user-password PDFs render blank pages without raising.
 3. **Real install, reboot and restore drill.** A full NSSM install requires an
    elevated shell; this workstation session is not elevated, so the service
    install and reboot were **not** run here. What was run: the NSSM installer
    in `-DryRun` mode (all service commands printed, nothing changed) and a real
    backup → integrity-check → restore drill into a scratch database (rows
-   verified). Still run WS9 on the target Server 2016 host: install, reboot,
-   one real set, and a restore into a scratch folder.
+   verified). The 2026-11-04 acceptance run on **Windows 11** repeats the
+   non-elevated gates and leaves the elevated install/reboot/one-real-set gate
+   open; see
+   [`WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md`](./WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md).
 4. **One installer — decided.** `deploy.bat` and `Install.cmd` now both run
    `scripts/setup_test_rig.ps1` (firewall, 13:00 backup, local Prefect). The
    older `scripts/deploy_production.ps1` is marked legacy and is no longer

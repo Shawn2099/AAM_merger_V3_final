@@ -22,7 +22,7 @@
 > > hardening folded into Step 4: (a) `split_completed_at` column is required —
 > > Step-1 migration only added 2 of 3 columns; (b) child filenames use a
 > > 16-char SHA prefix (`<sha16>_p<i>.pdf`, `p<i>` numeric-validated) for
-> > WS2016 MAX_PATH; (c) SKIP consumes pages for coverage but cuts **no file**;
+> > Windows MAX_PATH; (c) SKIP consumes pages for coverage but cuts **no file**;
 > > (d) a child re-reading as COMBINED quarantines the parent as
 > > `child_recombined` instead of being silently ignored (Layer 2 names no
 > > types); (e) zero-line/failed children never auto-retry — operator Redo only;
@@ -190,7 +190,7 @@ claim is now true but should say which function reads it
    (`split_completed_at` is a real column — Step-1 migration only added 2 of 3;
    Step 3b adds it. Without the column this section is unimplementable.)
    Child filenames are `<sha16>_p<i>.pdf` (16-char SHA prefix, `p<i>` strictly
-   numeric) for WS2016 MAX_PATH; SKIP components consume pages for coverage but
+   numeric) for Windows MAX_PATH; SKIP components consume pages for coverage but
    cut **no file**. The input file list is snapshotted at run start: children
    landing mid-run wait for the **next** run (pinned by test).
 8. `services/grouping.py`: attach sweeps skip `is_split_parent == True`.

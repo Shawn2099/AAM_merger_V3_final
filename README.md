@@ -1,7 +1,8 @@
 # AAM_MERGER-FINAL — AAM_merger_V3_final
 
 AI-assisted PO/DN/SI reconciliation → one merged PDF per PO. FastAPI + Prefect
-+ SQLite WAL, built for a single Windows Server 2016 host on a LAN.
++ SQLite WAL, built for a single Windows 11 x64 host on a LAN. Windows Server
+2016 is no longer the deployment target.
 
 **Start here:** [`docs/CORE_LOGIC.md`](./docs/CORE_LOGIC.md) — the one-page
 contract (1 PO + n DN + n SI, per-line quantity aggregates, line number first,
