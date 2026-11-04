@@ -635,6 +635,10 @@ def _config(root: Path) -> Path:
     data["manual_merge"]["temp_folder"] = str(root / "manual_merge_tmp")
     data["schedule"]["poll_enabled"] = False  # UI tests must be deterministic
     data["server"]["allowed_hosts"] = ["*"]
+    # UI tests drive the operator pages directly; they are not a login test.
+    # Authentication has its own backend suite (tests/test_auth.py). Keeping it
+    # off here prevents every browser test from being redirected to /login.
+    data.setdefault("auth", {})["enabled"] = False
     # The fail-closed path (no provider key) retries a document before giving
     # up. Real seconds of sleeping buy a UI test nothing: the code path and the
     # attempt count are identical, only the wall clock is shorter (S-16).

@@ -1298,7 +1298,7 @@ def _audit_summary(action: str, detail: dict) -> str:
         changes = detail.get("changes")
         if isinstance(changes, dict) and changes:
             return "; ".join(
-                f"{key}: {value.get('old')} — {value.get('new')}"
+                f"{key}: {value.get('old')} → {value.get('new')}"
                 for key, value in changes.items()
                 if isinstance(value, dict)
             )
