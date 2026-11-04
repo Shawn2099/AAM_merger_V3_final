@@ -19,13 +19,15 @@ from sqlalchemy.orm import Session
 
 from app.auth.passwords import hash_password, verify_password
 from app.auth.service import (
+    authenticate,
+    create_session,
     create_user,
     load_session,
     normalize_username,
 )
 from app.core.config import load_config
 from app.core.database import ensure_schema, get_engine
-from app.models import AuditLog, User, UserRole
+from app.models import AuditLog, AuthEvent, AuthSession, User, UserRole
 
 PASSWORD = "correct horse battery staple"
 
@@ -80,6 +82,7 @@ def auth_app(tmp_path, monkeypatch):
         "app.auth.cli.load_config",
         "app.api.routes.po_sets.load_config",
         "app.api.routes.dashboard.load_config",
+        "app.api.routes.users.load_config",
         "app.services.sync_lock.load_config",
     ):
         monkeypatch.setattr(target, lambda path=None, _cfg=cfg: _cfg)
@@ -316,7 +319,206 @@ def test_admin_can_open_settings(auth_app):
     client, cfg = auth_app
     _make_user(cfg)
     _login(client)
-    assert client.get("/settings").status_code == 200
+    page = client.get("/settings")
+    assert page.status_code == 200
+    assert 'data-testid="settings-users-link"' in page.text
+
+
+def test_operator_cannot_open_audit_or_user_admin_and_nav_hides_them(auth_app):
+    client, cfg = auth_app
+    _make_user(cfg, username="root", role=UserRole.admin)
+    _make_user(cfg, username="op", role=UserRole.operator)
+    _login(client, username="op")
+
+    assert client.get("/audit").status_code == 403
+    assert client.get("/settings/users").status_code == 403
+    dashboard = client.get("/dashboard").text
+    assert 'data-testid="nav-audit"' not in dashboard
+    assert 'data-testid="nav-settings"' not in dashboard
+
+    client.cookies.clear()
+    _login(client, username="root")
+    assert client.get("/audit").status_code == 200
+    admin_dashboard = client.get("/dashboard").text
+    assert 'data-testid="nav-audit"' in admin_dashboard
+    assert 'data-testid="nav-settings"' in admin_dashboard
+    assert client.get("/settings/users").status_code == 200
+
+
+def test_admin_can_create_an_operator_account(auth_app):
+    client, cfg = auth_app
+    _make_user(cfg, username="root")
+    _login(client, username="root")
+    csrf = _csrf(client)
+    r = client.post(
+        "/settings/users/create",
+        data={
+            "username": "bob",
+            "display_name": "Bob",
+            "role": "operator",
+            "password": PASSWORD,
+            "confirm_password": PASSWORD,
+            "must_change_password": "on",
+        },
+        headers={"X-CSRF-Token": csrf},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+
+    with Session(ensure_schema(cfg)) as s:
+        bob = s.scalar(select(User).where(User.username == "bob"))
+        assert bob is not None
+        assert bob.role == UserRole.operator
+        assert bob.must_change_password is True
+        assert verify_password(bob.password_hash, PASSWORD) == (True, None)
+        events = s.scalars(select(AuthEvent)).all()
+        assert any(e.event == "user_created" and e.username == "bob" for e in events)
+
+    page = client.get("/settings/users")
+    assert page.status_code == 200
+    assert 'data-username="bob"' in page.text
+    assert 'data-testid="account-event-row"' in page.text
+
+
+def test_create_user_validates_and_refuses_duplicates(auth_app):
+    client, cfg = auth_app
+    _make_user(cfg, username="root")
+    _login(client, username="root")
+    csrf = _csrf(client)
+    data = {
+        "username": "bob",
+        "role": "operator",
+        "password": PASSWORD,
+        "confirm_password": PASSWORD,
+    }
+    assert (
+        client.post(
+            "/settings/users/create",
+            data=data,
+            headers={"X-CSRF-Token": csrf},
+            follow_redirects=False,
+        ).status_code
+        == 303
+    )
+    duplicate = client.post(
+        "/settings/users/create", data=data, headers={"X-CSRF-Token": csrf}
+    )
+    assert duplicate.status_code == 422
+    assert "already exists" in duplicate.text
+
+    short = client.post(
+        "/settings/users/create",
+        data={**data, "username": "carol", "password": "too-short"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert short.status_code == 422
+    assert "at least 12" in short.text
+
+    no_csrf = client.post("/settings/users/create", data={**data, "username": "dave"})
+    assert no_csrf.status_code == 403
+
+
+def test_admin_can_reset_a_password_and_revoke_sessions(auth_app):
+    client, cfg = auth_app
+    _make_user(cfg, username="root")
+    bob_id = _make_user(cfg, username="bob", role=UserRole.operator)
+    _login(client, username="root")
+    with Session(ensure_schema(cfg)) as s:
+        bob = s.get(User, bob_id)
+        raw_token, _ = create_session(s, bob, cfg=cfg)
+    new_password = "new password for bob"
+    r = client.post(
+        f"/settings/users/{bob_id}/reset-password",
+        data={"new_password": new_password, "confirm_password": new_password},
+        headers={"X-CSRF-Token": _csrf(client)},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+
+    with Session(ensure_schema(cfg)) as s:
+        bob = s.get(User, bob_id)
+        assert bob.must_change_password is True
+        assert verify_password(bob.password_hash, new_password) == (True, None)
+        assert s.scalars(select(AuthSession).where(AuthSession.user_id == bob_id)).all() == []
+        assert load_session(s, raw_token, cfg=cfg) is None
+
+
+def test_admin_can_disable_enable_change_role_and_revoke_sessions(auth_app):
+    client, cfg = auth_app
+    _make_user(cfg, username="root")
+    bob_id = _make_user(cfg, username="bob", role=UserRole.operator)
+    _login(client, username="root")
+    csrf = _csrf(client)
+    with Session(ensure_schema(cfg)) as s:
+        bob = s.get(User, bob_id)
+        create_session(s, bob, cfg=cfg)
+
+    r = client.post(
+        f"/settings/users/{bob_id}/disable",
+        headers={"X-CSRF-Token": csrf},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+    with Session(ensure_schema(cfg)) as s:
+        bob = s.get(User, bob_id)
+        assert bob.is_active is False
+        assert authenticate(s, "bob", PASSWORD) is None
+        assert s.scalars(select(AuthSession).where(AuthSession.user_id == bob_id)).all() == []
+
+    r = client.post(
+        f"/settings/users/{bob_id}/enable",
+        headers={"X-CSRF-Token": csrf},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+    with Session(ensure_schema(cfg)) as s:
+        assert authenticate(s, "bob", PASSWORD) is not None
+
+    r = client.post(
+        f"/settings/users/{bob_id}/role",
+        data={"role": "admin"},
+        headers={"X-CSRF-Token": csrf},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+    with Session(ensure_schema(cfg)) as s:
+        assert s.get(User, bob_id).role == UserRole.admin
+        bob = s.get(User, bob_id)
+        create_session(s, bob, cfg=cfg)
+
+    r = client.post(
+        f"/settings/users/{bob_id}/revoke-sessions",
+        headers={"X-CSRF-Token": csrf},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+    with Session(ensure_schema(cfg)) as s:
+        assert s.scalars(select(AuthSession).where(AuthSession.user_id == bob_id)).all() == []
+
+
+def test_admin_cannot_disable_or_demote_the_last_admin(auth_app):
+    client, cfg = auth_app
+    root_id = _make_user(cfg, username="root")
+    _login(client, username="root")
+    csrf = _csrf(client)
+
+    disabled = client.post(
+        f"/settings/users/{root_id}/disable", headers={"X-CSRF-Token": csrf}
+    )
+    assert disabled.status_code == 422
+    assert "last active admin" in disabled.text
+
+    demoted = client.post(
+        f"/settings/users/{root_id}/role",
+        data={"role": "operator"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert demoted.status_code == 422
+    assert "last active admin" in demoted.text
+    with Session(ensure_schema(cfg)) as s:
+        root = s.get(User, root_id)
+        assert root.is_active is True
+        assert root.role == UserRole.admin
 
 
 # --- throttling -------------------------------------------------------------

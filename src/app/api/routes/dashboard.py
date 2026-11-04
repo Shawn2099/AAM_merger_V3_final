@@ -12,7 +12,7 @@ from html import escape
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, selectinload
@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.routes.po_sets import _scrub_paths
 from app.api.templating import templates
 from app.auth.context import actor_source
+from app.auth.middleware import RequireAdmin
 from app.core.config import load_config
 from app.core.database import get_engine
 from app.models import (
@@ -1356,7 +1357,11 @@ def _audit_entries(rows: list[AuditLog]) -> list[dict]:
     return views
 
 
-@router.get("/audit", response_class=HTMLResponse)
+@router.get(
+    "/audit",
+    response_class=HTMLResponse,
+    dependencies=[Depends(RequireAdmin())],
+)
 def audit_log(request: Request):
     cfg = load_config()
     eng = get_engine(cfg)

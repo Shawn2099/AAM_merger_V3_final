@@ -41,6 +41,7 @@ from app.api.routes.manual_merger import router as manual_router
 from app.api.routes.po_sets import router as po_sets_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.sync import router as sync_router
+from app.api.routes.users import router as users_router
 from app.api.templating import templates
 from app.auth.csrf import csrf_protect
 from app.auth.middleware import AuthMiddleware
@@ -490,6 +491,7 @@ def create_app(allowed_hosts: list[str] | None = None, auth_enabled: bool | None
     app.include_router(po_sets_router, dependencies=[Depends(csrf_protect)])
     app.include_router(manual_router, dependencies=[Depends(csrf_protect)])
     app.include_router(settings_router, dependencies=[Depends(csrf_protect)])
+    app.include_router(users_router, dependencies=[Depends(csrf_protect)])
     app.include_router(dashboard_router, dependencies=[Depends(csrf_protect)])
 
     @app.get("/favicon.ico", include_in_schema=False)
