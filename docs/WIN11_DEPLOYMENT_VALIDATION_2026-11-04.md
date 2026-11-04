@@ -123,23 +123,56 @@ printed every NSSM command for the three services, including the
 `PrefectServer` → `Worker` dependency, the config path, the Prefect API URL and
 the log paths. Nothing was changed.
 
-## 7. Still to run with elevation
+## 7. Live Win11 deployment (completed 2026-11-04)
 
-These are the only remaining deployment gates and need one UAC approval:
+The canonical deployment path `C:\Users\malliath\Desktop\deployment` was
+upgraded in place. The old services were stopped, the live DB/config/input were
+backed up, and the old code was replaced with `main` `4490b04`:
 
-1. Install/update the three NSSM services against the chosen current-code
-   folder, with the firewall rule and the 13:00 backup / 15:00 snapshot tasks.
-2. Stop/start the services and confirm `/health`, `verify_deployment.ps1` and a
-   real operator login from the LAN address.
-3. Reboot Windows 11 and confirm the services return automatically.
-4. Run one real sync (real PDFs, real OpenRouter key) and one restore into a
-   scratch folder.
-5. Then point the live `AAMMerger-*` services at the current code; until then
-   the October deployment remains the live instance.
+| Check | Result |
+|---|---|
+| Live DB migrated | `e8f9a0b1c2d3` → `f1a2b3c4d5e6` |
+| Documents / PO sets / line items | 104 / 29 / 173 preserved |
+| Input folder | 46 files preserved |
+| Key files vs `main` `4490b04` | hashes match (`cli.py`, `verify_deployment.ps1`, `pyproject.toml`, validation doc) |
+| `.git` in deployment | removed (plain production copy) |
+| `pymupdf` in runtime | absent; `pypdfium2==5.14.0` + Pillow installed |
+| Services | all three `Running`, `Automatic` |
+| `verify_deployment.ps1` | **17 passed, 0 failed, 0 warnings** |
+| `/health` on localhost / `10.10.151.53` / hostname | 200 each |
+| LAN login | 303 → dashboard, `aam_session` cookie set |
+| Forced first-login change | 303 → `/account/password` |
+| Scheduled tasks | `AAMMerger-DailyBackup` next 13:00; `AAMMerger-DevelopmentSnapshot` next 15:00 |
+| Firewall | `AAM Merger V3 Web (8000)` enabled |
+| First post-start sync | `sync_flow` and its `recovery_flow` completed; no crash encountered |
 
-## 8. Test suite after the fixes
+The first admin is `admin` with `must_change_password=1`. Its temporary
+password is in `C:\Users\malliath\Desktop\deployment\data\initial_admin_password.txt`
+(ACL restricted to the installing user and SYSTEM). Change it at first login,
+then delete that file.
+
+The live DB/config/input backup is
+`C:\Users\malliath\Desktop\aam_legacy_backup_20261104_143240`. The old code
+archive was removed after the new deployment passed verification; the old
+release worktree, the temp verification worktrees and the isolated port-8010
+rig were also removed. The separate `aam_backup` product's files are untouched;
+its three stale services were removed, so only the three `AAMMerger-*` services
+remain.
+
+## 8. Remaining gate
+
+1. Reboot Windows 11 and confirm the three `Automatic` services return (the
+   service configuration is installed, but the reboot itself was not run here).
+2. Change the `admin` password and delete
+   `data\initial_admin_password.txt`.
+3. Run one real sync with the real OpenRouter key and one restore into a
+   scratch folder. The live DB migration, backup and restore drill on its copy
+   already passed.
+
+## 9. Test suite after the fixes
 
 - `pytest tests/test_auth.py`: 25 passed.
 - `pytest tests/test_windows_scripts.py`: 27 passed, 1 skipped.
 - `ruff check` on the changed Python files: clean.
-- Full non-UI suite and the UI gate are re-run before the PR is merged.
+- Full non-UI suite: exit 0; PR #13 Windows and UI release gates passed.
+- Clean-copy `setup_test_rig.ps1 -SkipServices`: exit 0.
