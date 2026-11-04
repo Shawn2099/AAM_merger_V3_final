@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block title %}User accounts — AAM Merger V3{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <div>
+      <h2 class="card-title"><span>👥 User accounts</span></h2>
+      <p class="card-subtitle">
+        Create named operator accounts, reset passwords, change roles and revoke sessions.
+        Every action is recorded in the account event history below.
+      </p>
+    </div>
+    <a href="/settings" class="btn btn-secondary" data-testid="back-to-settings">Back to settings</a>
+  </div>
+
+  {% if error %}
+  <div data-testid="users-error" role="alert"
+       style="margin:0 0 16px; padding:12px 14px; border-radius:8px; background:var(--clr-quarantined-bg); color:var(--clr-quarantined-text); border:1px solid var(--clr-quarantined-border);">
+    <strong>Not saved.</strong> {{ error }}
+  </div>
+  {% endif %}
+  {% if ok %}
+  <div data-testid="users-ok" role="status"
+       style="margin:0 0 16px; padding:12px 14px; border-radius:8px; background:var(--clr-merged-bg); color:var(--clr-merged-text); border:1px solid var(--clr-merged-border);">
+    {{ ok }}
+  </div>
+  {% endif %}
+
+  <section style="margin:0 0 28px;" data-testid="user-create-section">
+    <h3 style="margin:0 0 2px; font-size:1.02rem;">Add an account</h3>
+    <p class="muted" style="margin:0 0 10px; font-size:0.85rem;">
+      Passwords must be at least 12 characters. New accounts are marked “must change password”
+      by default, so the operator chooses their own password at first login.
+    </p>
+    <form method="post" action="/settings/users/create" data-testid="user-create-form"
+          autocomplete="off" style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; max-width:900px;">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token|default('') }}">
+
+      <label>Username
+        <input name="username" data-testid="user-username" required maxlength="64"
+               autocomplete="off" placeholder="e.g. alice" style="width:100%;">
+      </label>
+      <label>Display name <span class="muted">(optional)</span>
+        <input name="display_name" data-testid="user-display-name" maxlength="128"
+               autocomplete="off" style="width:100%;">
+      </label>
+      <label>Role
+        <select name="role" data-testid="user-role" style="width:100%;">
+          {% for role in roles %}
+          <option value="{{ role }}" {% if role == 'operator' %}selected{% endif %}>{{ role }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Initial password
+        <input name="password" data-testid="user-password" type="password" required
+               minlength="12" autocomplete="new-password" style="width:100%;">
+      </label>
+      <label>Repeat password
+        <input name="confirm_password" data-testid="user-confirm-password" type="password" required
+               minlength="12" autocomplete="new-password" style="width:100%;">
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; align-self:end; padding-bottom:4px;">
+        <input type="checkbox" name="must_change_password" data-testid="user-must-change" checked>
+        Must change password at first login
+      </label>
+
+      <div style="grid-column:1 / -1;">
+        <button type="submit" class="btn btn-primary" data-testid="user-create-submit">Create account</button>
+      </div>
+    </form>
+  </section>
+
+  <section style="margin:0 0 28px;" data-testid="user-list-section">
+    <h3 style="margin:0 0 8px; font-size:1.02rem;">Accounts</h3>
+    <div class="table-container">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Sessions</th>
+            <th>Last login</th>
+            <th>Manage</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for user in users %}
+          <tr data-testid="user-row" data-username="{{ user.username }}">
+            <td>
+              <strong>{{ user.username }}</strong>
+              {% if user.display_name %}<div class="muted" style="font-size:0.82rem;">{{ user.display_name }}</div>{% endif %}
+              {% if user.id == current_user_id %}<span class="badge badge-merged" style="font-size:0.7rem;">You</span>{% endif %}
+            </td>
+            <td>{{ user.role }}</td>
+            <td>
+              {% if user.is_active %}
+                <span class="badge badge-merged" style="font-size:0.72rem;">Active</span>
+              {% else %}
+                <span class="badge badge-quarantined" style="font-size:0.72rem;">Disabled</span>
+              {% endif %}
+              {% if user.must_change_password %}
+                <div class="muted" style="font-size:0.75rem;">Must change password</div>
+              {% endif %}
+            </td>
+            <td>{{ user.session_count }}</td>
+            <td>{{ user.last_login_at|ist }}</td>
+            <td>
+              <details data-testid="user-actions-{{ user.username }}">
+                <summary style="cursor:pointer;">Manage</summary>
+                <div style="display:grid; gap:10px; margin-top:10px; min-width:260px;">
+
+                  <form method="post" action="/settings/users/{{ user.id }}/role"
+                        data-testid="user-role-form" style="display:flex; gap:6px; align-items:center;">
+                    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token|default('') }}">
+                    <select name="role" aria-label="Role for {{ user.username }}">
+                      {% for role in roles %}
+                      <option value="{{ role }}" {% if role == user.role %}selected{% endif %}>{{ role }}</option>
+                      {% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-secondary btn-sm">Change role</button>
+                  </form>
+
+                  <form method="post" action="/settings/users/{{ user.id }}/reset-password"
+                        data-testid="user-reset-form" autocomplete="off"
+                        style="display:grid; gap:6px;">
+                    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token|default('') }}">
+                    <input name="new_password" type="password" required minlength="12"
+                           placeholder="New password" autocomplete="new-password">
+                    <input name="confirm_password" type="password" required minlength="12"
+                           placeholder="Repeat new password" autocomplete="new-password">
+                    <button type="submit" class="btn btn-secondary btn-sm">Reset password</button>
+                  </form>
+
+                  <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                    {% if user.is_active %}
+                    <form method="post" action="/settings/users/{{ user.id }}/disable"
+                          data-testid="user-disable-form" style="margin:0;">
+                      <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token|default('') }}">
+                      <button type="submit" class="btn btn-secondary btn-sm">Disable</button>
+                    </form>
+                    {% else %}
+                    <form method="post" action="/settings/users/{{ user.id }}/enable"
+                          data-testid="user-enable-form" style="margin:0;">
+                      <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token|default('') }}">
+                      <button type="submit" class="btn btn-secondary btn-sm">Enable</button>
+                    </form>
+                    {% endif %}
+
+                    <form method="post" action="/settings/users/{{ user.id }}/revoke-sessions"
+                          data-testid="user-revoke-form" style="margin:0;">
+                      <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token|default('') }}">
+                      <button type="submit" class="btn btn-secondary btn-sm">Revoke sessions</button>
+                    </form>
+                  </div>
+                </div>
+              </details>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section data-testid="account-events-section">
+    <h3 style="margin:0 0 8px; font-size:1.02rem;">Recent account events</h3>
+    {% if events %}
+    <div class="table-container">
+      <table class="data-table">
+        <thead>
+          <tr><th>When</th><th>Event</th><th>Username</th><th>Detail</th></tr>
+        </thead>
+        <tbody>
+          {% for event in events %}
+          <tr data-testid="account-event-row">
+            <td class="muted">{{ event.created_at|ist }}</td>
+            <td>{{ event.event }}</td>
+            <td>{{ event.username }}</td>
+            <td class="muted">{{ event.detail }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted">No account events recorded yet.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

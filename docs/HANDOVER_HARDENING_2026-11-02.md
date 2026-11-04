@@ -23,6 +23,11 @@ This is the change record for the handover work. It is not a substitute for
 - **Two roles.** `operator` does daily work; `admin` also changes Settings and
   may remove/archive a set. The Settings and destructive routes enforce this on
   the server, not only in the template.
+- **Admin user management (2026-11-04).** `/settings/users` lets an admin create
+  accounts, reset passwords (forcing a change and revoking sessions),
+  disable/enable, change role and revoke sessions. The page also shows recent
+  account events. Audit and Settings are hidden from operators and return 403
+  if opened directly.
 - **CSRF.** A per-session synchronizer token. HTMX sends `X-CSRF-Token`
   automatically (`app.js`); native forms carry a hidden `csrf_token`.
 - **Login throttling** per username and per client IP, stored in
