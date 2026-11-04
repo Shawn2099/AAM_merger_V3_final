@@ -155,14 +155,12 @@ handover risk.
    [`PDFIUM_PORT_VERIFICATION_2026-11-03.md`](./PDFIUM_PORT_VERIFICATION_2026-11-03.md).
    PDF Oxide 0.3.78 is rejected: 30/695 real files fail to render and
    user-password PDFs render blank pages without raising.
-3. **Real install, reboot and restore drill.** A full NSSM install requires an
-   elevated shell; this workstation session is not elevated, so the service
-   install and reboot were **not** run here. What was run: the NSSM installer
-   in `-DryRun` mode (all service commands printed, nothing changed) and a real
-   backup → integrity-check → restore drill into a scratch database (rows
-   verified). The 2026-11-04 acceptance run on **Windows 11** repeats the
-   non-elevated gates and leaves the elevated install/reboot/one-real-set gate
-   open; see
+3. **Real install and restore drill.** A full NSSM install requires an elevated
+   shell. The 2026-11-04 Win11 run performed it: the live DB was migrated, the
+   three services are running, the firewall and 13:00/15:00 tasks are
+   registered, and `verify_deployment.ps1` returned 17/17. A real
+   backup → integrity-check → restore drill into a scratch database also passed.
+   The reboot-persistence check and one live sync remain; see
    [`WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md`](./WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md).
 4. **One installer — decided.** `deploy.bat` and `Install.cmd` now both run
    `scripts/setup_test_rig.ps1` (firewall, 13:00 backup, local Prefect). The
