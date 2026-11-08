@@ -202,8 +202,10 @@ PyMuPDF (AGPL/commercial) is removed from runtime deps and the lockfile;
 process-wide PDFium lock and the 8-number-MediaBox repair. PDF Oxide 0.3.78 is
 rejected (30/695 real files fail; password-protected PDFs render blank). The
 Win11 renderer, 695-file corpus, thread/memory and 20-document VLM gates are
-recorded in that document. Remaining gate: a real NSSM service-session
-install/reboot, one live sync and a restore drill on the Win11 target.
+recorded in that document. The NSSM install, live DB migration, firewall and
+13:00/15:00 tasks are now running on Win11; remaining gates are the reboot
+persistence check and one live sync/restore drill. See
+[`docs/WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md`](docs/WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md).
 
 ---
 

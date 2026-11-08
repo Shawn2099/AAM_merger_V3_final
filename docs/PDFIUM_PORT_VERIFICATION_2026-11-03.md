@@ -170,10 +170,9 @@ and pypdf (BSD-3). Full texts and build licences ship in the wheel under
 
 ## 6. Remaining deployment gate — Windows 11
 
-The renderer gates are closed on Windows 11. What remains is the **service
-session** part of the deployment, not the library: install the three NSSM
-services, reboot, run one live sync, and restore a backup into a scratch folder.
-That gate is tracked in
+The renderer gates are closed on Windows 11. The three NSSM services are now
+installed and running against the current code; the reboot persistence check and
+one live sync/restore remain. That gate is tracked in
 [`WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md`](WIN11_DEPLOYMENT_VALIDATION_2026-11-04.md).
 The renderer smoke command on the target is:
 
