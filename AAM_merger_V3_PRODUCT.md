@@ -1344,6 +1344,15 @@ HTTP-400 breaker stops new work, lets in-flight calls finish and refunds the
 whole run, exactly as the sequential path did. Raising the cap is a capacity
 decision, not a tuning knob.
 
+**SQLite write discipline (2026-11-09).** The extraction claim and the
+post-VLM persistence start their transaction with a write (`UPDATE …
+RETURNING`, or a write-first lock). A `SELECT` followed by an `UPDATE` in the
+same transaction is a lock upgrade that SQLite rejects with `database is
+locked` even with `busy_timeout=30000`; keeping the inspection read in its own
+closed session avoids it. The engine caps the WAL at 64 MB and refuses to start
+on SQLite older than 3.35. Evidence, edge cases and the 600-document burst:
+[`docs/SQLITE_CONCURRENCY_EVALUATION_2026-11-09.md`](docs/SQLITE_CONCURRENCY_EVALUATION_2026-11-09.md).
+
 **A run summary is only as honest as its worst document.** The sync summary
 (`processed` / `extracted` / `errors`) must be computed from the *persisted
 document row*, never from whether a Prefect task raised. Prefect places a task

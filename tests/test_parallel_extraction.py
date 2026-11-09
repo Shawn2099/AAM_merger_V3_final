@@ -128,6 +128,29 @@ def test_breaker_stops_new_work_and_marks_the_rest_skipped(cfg, monkeypatch):
     assert all(o.halted for o in outcomes)
 
 
+def test_empty_job_list_returns_empty(cfg):
+    assert run_extractions([], cfg) == []
+
+
+def test_duplicate_job_ids_are_read_once(cfg):
+    calls: list[int] = []
+
+    def extract(doc_id):
+        calls.append(doc_id)
+        return SimpleNamespace(extraction_status=ExtractionStatus.valid)
+
+    jobs = [
+        ExtractionJob(doc_id=1, input_file=None, filename="a.pdf"),
+        ExtractionJob(doc_id=1, input_file=None, filename="a-copy.pdf"),
+        ExtractionJob(doc_id=2, input_file=None, filename="b.pdf"),
+    ]
+    outcomes = run_extractions(jobs, cfg, extract_fn=extract)
+
+    assert sorted(calls) == [1, 2]
+    assert len(outcomes) == 2
+    assert {outcome.job.doc_id for outcome in outcomes} == {1, 2}
+
+
 def test_one_document_failure_does_not_stop_the_batch(cfg):
     cfg.prefect.max_concurrent_extraction_tasks = 2
 

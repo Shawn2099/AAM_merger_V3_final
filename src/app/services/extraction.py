@@ -29,7 +29,9 @@ from openai.types.chat import ChatCompletionContentPartParam
 from PIL import Image
 from pydantic import BaseModel, Field, field_validator
 from pypdf import PdfReader
-from sqlalchemy import and_
+from sqlalchemy import and_, or_, update
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import TimeoutError as SATimeoutError
 from sqlalchemy.orm import Session
 
 from app.core.database import ensure_schema, get_engine
@@ -1011,11 +1013,6 @@ def _is_infrastructure_leaf(exc: BaseException) -> bool:
     # another extraction commit holds the write lock past busy_timeout. That is
     # infrastructure, not a verdict on the PDF: refunding the attempt is the
     # safe direction. A genuinely corrupt document fails with a content error.
-    try:
-        from sqlalchemy.exc import OperationalError
-        from sqlalchemy.exc import TimeoutError as SATimeoutError
-    except Exception:  # pragma: no cover - SQLAlchemy is a hard dependency
-        OperationalError = SATimeoutError = ()  # type: ignore[assignment]
     if isinstance(exc, SATimeoutError):
         return True
     if isinstance(exc, OperationalError):
@@ -1274,131 +1271,225 @@ def _dump_raw_extraction(doc, result: dict, cfg) -> None:
         pass
 
 
-def _release_claim(eng, doc_id: int, attempt_no: int) -> Document | None:
+def _read_document_snapshot(eng, doc_id: int) -> Document | None:
+    """Read a document in a short session that is closed before any write.
+
+    SQLite keeps a shared lock after a SELECT. If that same transaction later
+    tries to UPDATE while another connection holds the write lock, SQLite
+    fails the upgrade immediately with ``database is locked`` — ``busy_timeout``
+    does not wait for a deadlock-prone upgrade. Keeping the inspection read in
+    its own closed session removes that upgrade; every write below starts with
+    the UPDATE itself.
+    """
+    with Session(eng) as s:
+        return s.get(Document, doc_id)
+
+
+def _write_first(eng, doc_id: int, *, conditions=(), **values) -> bool:
+    """Apply an UPDATE as the first statement of a fresh transaction.
+
+    Returns True when a row matched. The first statement must be the write:
+    that is what makes SQLite wait for a competing writer instead of failing a
+    read-to-write lock upgrade. Optional ``conditions`` keep a stale snapshot
+    from overwriting a newer state (archived, reclassified, already valid).
+    """
+    with Session(eng) as s:
+        result = s.execute(
+            update(Document)
+            .where(Document.id == doc_id, *conditions)
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        s.commit()
+        return (getattr(result, "rowcount", 0) or 0) > 0
+
+
+def _release_claim(eng, doc_id: int, _attempt_no: int) -> Document | None:
     """Undo a claim without charging an attempt.
 
     Used when the provider breaker trips between the claim and the call (or a
     configuration fault is found at that point): the document goes back to
-    `pending` and the attempt is refunded, so the next run reads it.
+    `pending` and the attempt is refunded, so the next run reads it. The UPDATE
+    is the first statement (see `_write_first`).
     """
     with Session(eng) as s:
-        doc = s.get(Document, doc_id)
-        if doc is None:
-            return None
-        if doc.extraction_status == ExtractionStatus.processing:
-            doc.extraction_attempt_count = 0
-            doc.extraction_status = ExtractionStatus.pending
-            s.commit()
-            s.refresh(doc)
-        return doc
-
-
-def extract_document(doc_id: int, cfg) -> Document:
-    from sqlalchemy import update as _sa_update
-
-    eng = ensure_schema(cfg)
-    cap = _attempt_cap(cfg)
-
-    with Session(eng) as s:
-        doc = s.get(Document, doc_id)
-        if doc is None:
-            raise ValueError(f"document {doc_id} not found")
-        if doc.archived_at is not None:
-            # Archived documents are evidence, not work. A direct call must
-            # not spend a VLM request or rewrite their extracted fields.
-            return doc
-
-        dtype = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
-        if is_manual_only(dtype):
-            return doc
-
-        # Once the breaker has tripped, a retry must not re-claim a document
-        # that the trip already refunded. Checked inside the session, before
-        # the CAS, so no attempt is charged.
-        if provider_breaker_tripped() and doc.extraction_status == ExtractionStatus.pending:
-            return doc
-
-        # Compare-and-swap: atomically claim pending -> processing so two
-        # callers (a parallel worker and a recovery sweep, or the Re-Extract
-        # route) cannot both enter the VLM for the same document.
-        cur_status = doc.extraction_status
-        if cur_status == ExtractionStatus.processing:
-            timeout = int(getattr(cfg.extraction, "stale_processing_seconds", 900) or 900)
-            cutoff = datetime.now(UTC) - timedelta(seconds=timeout)
-            stale = s.execute(
-                _sa_update(Document)
-                .where(
-                    Document.id == doc_id,
-                    Document.extraction_status == ExtractionStatus.processing,
-                    Document.updated_at <= cutoff,
-                )
-                .values(extraction_status=ExtractionStatus.pending)
-                .execution_options(synchronize_session=False)
-            )
-            s.commit()
-            if getattr(stale, "rowcount", 0) > 0:
-                return extract_document(doc_id, cfg)
-            s.refresh(doc)
-            return doc
-
-        if cur_status == ExtractionStatus.valid:
-            # Already read. A split parent whose split never completed is the
-            # one exception: the worker died between cutting children and
-            # stamping the row, so it must be processed again.
-            split_incomplete = bool(getattr(doc, "is_split_parent", False)) and not getattr(
-                doc, "split_completed_at", None
-            )
-            if not split_incomplete:
-                return doc
-
-        if (doc.extraction_attempt_count or 0) >= cap:
-            # Terminal state, not a no-op. The caller must read the persisted
-            # row, not the task return value (see flows/sync.py).
-            doc.extraction_status = ExtractionStatus.failed
-            s.commit()
-            s.refresh(doc)
-            logger.error(
-                "Extraction permanently failed for doc %s (%s): attempt cap %d reached, "
-                "no further attempts will be made without an operator reset",
-                doc_id,
-                doc.original_filename,
-                cap,
-            )
-            return doc
-
-        claim_from = cur_status
-        cas_result = s.execute(
-            _sa_update(Document)
+        s.execute(
+            update(Document)
             .where(
                 Document.id == doc_id,
-                Document.extraction_status == claim_from,
-                Document.extraction_attempt_count < cap,
+                Document.extraction_status == ExtractionStatus.processing,
+                Document.archived_at.is_(None),
             )
             .values(
-                extraction_status=ExtractionStatus.processing,
-                extraction_attempt_count=Document.extraction_attempt_count + 1,
+                extraction_status=ExtractionStatus.pending,
+                extraction_attempt_count=0,
                 updated_at=datetime.now(UTC),
             )
             .execution_options(synchronize_session=False)
         )
         s.commit()
-        if getattr(cas_result, "rowcount", 0) == 0:
-            # Another caller won the claim (or the cap was reached first).
-            s.refresh(doc)
-            if (
-                doc.extraction_status != ExtractionStatus.valid
-                and (doc.extraction_attempt_count or 0) >= cap
-            ):
-                doc.extraction_status = ExtractionStatus.failed
-                s.commit()
-                s.refresh(doc)
+    return _read_document_snapshot(eng, doc_id)
+
+
+def extract_document(doc_id: int, cfg) -> Document:
+    eng = ensure_schema(cfg)
+    cap = _attempt_cap(cfg)
+    now = datetime.now(UTC)
+
+    # Read once in a short session that is closed before any write. The claim
+    # below must not upgrade a read lock: see _read_document_snapshot().
+    doc = _read_document_snapshot(eng, doc_id)
+    if doc is None:
+        raise ValueError(f"document {doc_id} not found")
+    if doc.archived_at is not None:
+        # Archived documents are evidence, not work. A direct call must
+        # not spend a VLM request or rewrite their extracted fields.
+        return doc
+
+    dtype = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
+    if is_manual_only(dtype):
+        return doc
+
+    # Once the breaker has tripped, a retry must not re-claim a document
+    # that the trip already refunded. Checked before the CAS so no attempt is
+    # charged.
+    if provider_breaker_tripped() and doc.extraction_status == ExtractionStatus.pending:
+        return doc
+
+    if doc.extraction_status == ExtractionStatus.processing:
+        timeout = int(getattr(cfg.extraction, "stale_processing_seconds", 900) or 900)
+        cutoff = now - timedelta(seconds=timeout)
+        # Write-first: resetting a stale claim must not upgrade a read lock.
+        with Session(eng) as s:
+            stale = s.execute(
+                update(Document)
+                .where(
+                    Document.id == doc_id,
+                    Document.extraction_status == ExtractionStatus.processing,
+                    Document.updated_at <= cutoff,
+                    Document.archived_at.is_(None),
+                )
+                .values(extraction_status=ExtractionStatus.pending, updated_at=now)
+                .execution_options(synchronize_session=False)
+            )
+            s.commit()
+            stale_count = getattr(stale, "rowcount", 0) or 0
+        if stale_count > 0:
+            return extract_document(doc_id, cfg)
+        fresh = _read_document_snapshot(eng, doc_id)
+        if fresh is not None and fresh.extraction_status == ExtractionStatus.pending:
+            # Another worker reset the same stale claim; try to claim it now
+            # instead of leaving it pending for another pass.
+            return extract_document(doc_id, cfg)
+        return fresh or doc
+
+    if doc.extraction_status == ExtractionStatus.valid:
+        # Already read. A split parent whose split never completed is the
+        # one exception: the worker died between cutting children and
+        # stamping the row, so it must be processed again.
+        split_incomplete = bool(getattr(doc, "is_split_parent", False)) and not getattr(
+            doc, "split_completed_at", None
+        )
+        if not split_incomplete:
             return doc
 
-        s.refresh(doc)
-        attempt_no = doc.extraction_attempt_count or 1
-        stored_path = doc.stored_path
-        original_filename = doc.original_filename
-        sha256_hash = doc.sha256_hash
+    if (doc.extraction_attempt_count or 0) >= cap:
+        # Terminal state, not a no-op. The caller must read the persisted
+        # row, not the task return value (see flows/sync.py).
+        marked = _write_first(
+            eng,
+            doc_id,
+            conditions=(
+                Document.extraction_attempt_count >= cap,
+                Document.archived_at.is_(None),
+            ),
+            extraction_status=ExtractionStatus.failed,
+            updated_at=now,
+        )
+        failed_doc = _read_document_snapshot(eng, doc_id) or doc
+        if marked:
+            logger.error(
+                "Extraction permanently failed for doc %s (%s): attempt cap %d reached, "
+                "no further attempts will be made without an operator reset",
+                doc_id,
+                failed_doc.original_filename,
+                cap,
+            )
+        return failed_doc
+
+    claim_from = doc.extraction_status
+    # The UPDATE is the first statement: it takes the write lock instead of
+    # upgrading a read lock. RETURNING gives the claimed values without a
+    # second SELECT in the same transaction.
+    with Session(eng) as s:
+        claimed = s.execute(
+            update(Document)
+            .where(
+                Document.id == doc_id,
+                Document.extraction_status == claim_from,
+                Document.extraction_attempt_count < cap,
+                Document.archived_at.is_(None),
+                Document.doc_type.notin_((DocType.CUSTOMS, DocType.SHIPPING)),
+                # A valid document is claimable only while its split is
+                # incomplete. Without this, a worker that read the parent
+                # before another worker finished the split could re-extract it.
+                or_(
+                    Document.extraction_status != ExtractionStatus.valid,
+                    and_(
+                        Document.is_split_parent.is_(True),
+                        Document.split_completed_at.is_(None),
+                    ),
+                ),
+            )
+            .values(
+                extraction_status=ExtractionStatus.processing,
+                extraction_attempt_count=Document.extraction_attempt_count + 1,
+                updated_at=now,
+            )
+            .returning(
+                Document.extraction_attempt_count,
+                Document.stored_path,
+                Document.original_filename,
+                Document.sha256_hash,
+                Document.doc_type,
+            )
+            .execution_options(synchronize_session=False)
+        ).first()
+        s.commit()
+
+    if claimed is None:
+        # Another caller won the claim (or the cap was reached first). Read
+        # fresh; mark the terminal cap state only if it still applies.
+        fresh = _read_document_snapshot(eng, doc_id)
+        if fresh is None:
+            raise ValueError(f"document {doc_id} disappeared during extraction")
+        if (
+            fresh.extraction_status != ExtractionStatus.valid
+            and (fresh.extraction_attempt_count or 0) >= cap
+        ):
+            _write_first(
+                eng,
+                doc_id,
+                conditions=(
+                    Document.extraction_attempt_count >= cap,
+                    Document.archived_at.is_(None),
+                ),
+                extraction_status=ExtractionStatus.failed,
+                updated_at=datetime.now(UTC),
+            )
+            fresh = _read_document_snapshot(eng, doc_id) or fresh
+        if fresh.extraction_status == ExtractionStatus.pending:
+            # A concurrent reset (operator or stale reclaim) won the race;
+            # claim the now-pending row instead of leaving it for another pass.
+            return extract_document(doc_id, cfg)
+        return fresh
+
+    attempt_no = claimed.extraction_attempt_count or 1
+    stored_path = claimed.stored_path
+    original_filename = claimed.original_filename
+    sha256_hash = claimed.sha256_hash
+    claimed_dtype = claimed.doc_type
+    dtype = claimed_dtype.value if hasattr(claimed_dtype, "value") else str(claimed_dtype)
 
     # The claim is committed and the session is CLOSED before the network call.
     # Holding a connection for up to vlm.request_timeout_seconds (180 s) would
@@ -1424,16 +1515,48 @@ def extract_document(doc_id: int, cfg) -> Document:
         _dump_raw_extraction(_DocInfo(), result, cfg)
 
         with Session(eng) as s2:
-            doc = s2.get(Document, doc_id)
-            if doc is None:
-                raise ValueError(f"document {doc_id} disappeared during extraction")
-            if doc.extraction_status != ExtractionStatus.processing:
+            # Lock and revalidate in one write-first statement. A SELECT here
+            # would hold a read lock and then upgrade to a writer while another
+            # extraction is committing — the same SQLite failure mode as the
+            # claim.
+            locked = s2.execute(
+                update(Document)
+                .where(
+                    Document.id == doc_id,
+                    Document.extraction_status == ExtractionStatus.processing,
+                    Document.archived_at.is_(None),
+                )
+                .values(updated_at=datetime.now(UTC))
+                .execution_options(synchronize_session=False)
+            )
+            if (getattr(locked, "rowcount", 0) or 0) == 0:
+                doc = s2.get(Document, doc_id)
+                if doc is None:
+                    raise ValueError(f"document {doc_id} disappeared during extraction")
                 # A reclaim or an operator action changed the row while the
                 # call was in flight. Never overwrite a newer state.
                 logger.warning(
                     "Document %s changed state during extraction (%s); result discarded",
                     doc_id,
                     doc.extraction_status,
+                )
+                return doc
+            doc = s2.get(Document, doc_id)
+            if doc is None:
+                raise ValueError(f"document {doc_id} disappeared during extraction")
+            dtype_now = doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
+            if is_manual_only(dtype_now):
+                # An operator reclassified this document while the VLM call was
+                # in flight. The manual type wins; discard the automated result
+                # and leave the row for the operator (reclassify is normally
+                # refused while a sync runs, so this is a defensive guard).
+                doc.extraction_status = ExtractionStatus.pending
+                s2.commit()
+                s2.refresh(doc)
+                logger.warning(
+                    "Document %s was reclassified as %s during extraction; result discarded",
+                    doc_id,
+                    dtype_now,
                 )
                 return doc
             import json
@@ -1452,75 +1575,95 @@ def extract_document(doc_id: int, cfg) -> Document:
         _note_provider_ok()
         return doc
     except Exception as e:
-        with Session(eng) as s3:
-            doc = s3.get(Document, doc_id)
-            if doc is None:
-                raise e
-            if _is_infrastructure_error(e):
-                # A provider or network fault says nothing about the document.
-                # Refund the attempt and leave it pending, so the next run
-                # claims it again instead of condemning it. When the whole run
-                # is halted (fatal key/credit/config fault) the document is
-                # part of the trip's refund: attempts go to zero, not one.
-                tripped_now = provider_breaker_tripped()
-                doc.extraction_attempt_count = 0 if tripped_now else max(0, attempt_no - 1)
-                doc.extraction_status = ExtractionStatus.pending
-                s3.commit()
-                s3.refresh(doc)
-                logger.warning(
-                    "VLM infrastructure fault for doc %s (%s): %s. Document stays pending "
-                    "for the next run; attempt not counted.",
-                    doc_id,
-                    doc.original_filename,
-                    type(e).__name__,
-                )
-                fatal = _fatal_provider_fault(e)
-                if fatal is not None and _trip_provider_fatal(fatal):
-                    # Cannot succeed on the next document either: stop the
-                    # pass, and raise the type Prefect treats as final.
-                    logger.error("%s (cause: %s: %s)", fatal, type(e).__name__, e)
-                    raise ProviderRequestRejected(fatal) from e
-                raise e
+        doc = _read_document_snapshot(eng, doc_id)
+        if doc is None:
+            raise e
+        if _is_infrastructure_error(e):
+            # A provider or network fault says nothing about the document.
+            # Refund the attempt and leave it pending, so the next run
+            # claims it again instead of condemning it. When the whole run
+            # is halted (fatal key/credit/config fault) the document is
+            # part of the trip's refund: attempts go to zero, not one.
+            tripped_now = provider_breaker_tripped()
+            _write_first(
+                eng,
+                doc_id,
+                conditions=(
+                    Document.extraction_status == ExtractionStatus.processing,
+                    Document.archived_at.is_(None),
+                ),
+                extraction_attempt_count=0 if tripped_now else max(0, attempt_no - 1),
+                extraction_status=ExtractionStatus.pending,
+                updated_at=datetime.now(UTC),
+            )
+            logger.warning(
+                "VLM infrastructure fault for doc %s (%s): %s. Document stays pending "
+                "for the next run; attempt not counted.",
+                doc_id,
+                doc.original_filename,
+                type(e).__name__,
+            )
+            fatal = _fatal_provider_fault(e)
+            if fatal is not None and _trip_provider_fatal(fatal):
+                # Cannot succeed on the next document either: stop the
+                # pass, and raise the type Prefect treats as final.
+                logger.error("%s (cause: %s: %s)", fatal, type(e).__name__, e)
+                raise ProviderRequestRejected(fatal) from e
+            raise e
 
-            if provider_breaker_tripped():
-                # Another worker tripped the breaker while this call was in
-                # flight. This document's verdict is held: refund it and stop,
-                # rather than committing `failed` after the coordinator's refund.
-                doc.extraction_status = ExtractionStatus.pending
-                doc.extraction_attempt_count = 0
-                s3.commit()
-                s3.refresh(doc)
-                raise ProviderRequestRejected(
-                    "provider breaker tripped while this document was in flight"
-                ) from e
+        if provider_breaker_tripped():
+            # Another worker tripped the breaker while this call was in
+            # flight. This document's verdict is held: refund it and stop,
+            # rather than committing `failed` after the coordinator's refund.
+            _write_first(
+                eng,
+                doc_id,
+                conditions=(
+                    Document.extraction_status == ExtractionStatus.processing,
+                    Document.archived_at.is_(None),
+                ),
+                extraction_status=ExtractionStatus.pending,
+                extraction_attempt_count=0,
+                updated_at=datetime.now(UTC),
+            )
+            raise ProviderRequestRejected(
+                "provider breaker tripped while this document was in flight"
+            ) from e
 
-            already_refunded = "provider_400_refund" in (doc.raw_extraction_json or "")
-            is_400 = _is_http_400(e)
-            rejected = _note_provider_400(doc_id) if is_400 and not already_refunded else None
-            if is_400 and already_refunded:
-                _defer_400(doc_id)
-            if rejected is not None:
-                # Provider-wide 400 (R-06): refund every document it condemned
-                # and leave them pending; the sync stops calling the VLM.
-                # `_note_provider_400` claims this list exactly once, so
-                # parallel workers cannot refund the same docs repeatedly.
-                _refund_rejected(eng, rejected)
-                logger.error(
-                    "The provider rejected the request itself (HTTP 400) for %d documents in a "
-                    "row (%s). This is almost certainly a wrong vlm.model or an unsupported "
-                    "request option, not bad documents. Their attempts are refunded, they stay "
-                    "pending, and no further documents are sent this sync. Fix the config and "
-                    "run the sync again.",
-                    len(rejected),
-                    e,
-                )
-                raise ProviderRequestRejected(
-                    "provider rejected the request for several documents in a row"
-                ) from e
-            doc.extraction_attempt_count = attempt_no
-            doc.extraction_status = ExtractionStatus.failed
-            s3.commit()
-            s3.refresh(doc)
+        already_refunded = "provider_400_refund" in (doc.raw_extraction_json or "")
+        is_400 = _is_http_400(e)
+        rejected = _note_provider_400(doc_id) if is_400 and not already_refunded else None
+        if is_400 and already_refunded:
+            _defer_400(doc_id)
+        if rejected is not None:
+            # Provider-wide 400 (R-06): refund every document it condemned
+            # and leave them pending; the sync stops calling the VLM.
+            # `_note_provider_400` claims this list exactly once, so
+            # parallel workers cannot refund the same docs repeatedly.
+            _refund_rejected(eng, rejected)
+            logger.error(
+                "The provider rejected the request itself (HTTP 400) for %d documents in a "
+                "row (%s). This is almost certainly a wrong vlm.model or an unsupported "
+                "request option, not bad documents. Their attempts are refunded, they stay "
+                "pending, and no further documents are sent this sync. Fix the config and "
+                "run the sync again.",
+                len(rejected),
+                e,
+            )
+            raise ProviderRequestRejected(
+                "provider rejected the request for several documents in a row"
+            ) from e
+        _write_first(
+            eng,
+            doc_id,
+            conditions=(
+                Document.extraction_status == ExtractionStatus.processing,
+                Document.archived_at.is_(None),
+            ),
+            extraction_attempt_count=attempt_no,
+            extraction_status=ExtractionStatus.failed,
+            updated_at=datetime.now(UTC),
+        )
         logger.warning(
             "VLM extraction failed for doc %s (attempt %s): %s",
             doc_id,

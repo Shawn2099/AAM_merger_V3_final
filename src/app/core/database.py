@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 from pathlib import Path
 
@@ -21,6 +22,12 @@ _schema_lock = threading.Lock()
 
 
 def get_engine(cfg: AppConfig) -> Engine:
+    if sqlite3.sqlite_version_info < (3, 35, 0):
+        raise RuntimeError(
+            f"SQLite {sqlite3.sqlite_version} is too old: this build needs "
+            "3.35+ for UPDATE ... RETURNING in the extraction claim. "
+            "Use the Python 3.11+ runtime bundled with the application."
+        )
     db_path = Path(cfg.paths.database_path).resolve()
     key = db_path.as_posix()
     engine = _engine_cache.get(key)
@@ -43,6 +50,10 @@ def get_engine(cfg: AppConfig) -> Engine:
             cursor.execute("PRAGMA synchronous=NORMAL;")
             cursor.execute("PRAGMA foreign_keys=ON;")
             cursor.execute("PRAGMA busy_timeout=30000;")
+            # Cap the WAL after checkpointing so a burst cannot leave an
+            # unbounded -wal file on the host's disk. 64 MB is ample for this
+            # write volume and still leaves checkpointing cheap.
+            cursor.execute("PRAGMA journal_size_limit=67108864;")
             cursor.close()
 
         _engine_cache[key] = engine

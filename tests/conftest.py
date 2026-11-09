@@ -58,6 +58,15 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 #: touches lives under it, and it is removed when the session ends.
 _SESSION_DIR = Path(tempfile.mkdtemp(prefix="aam-merger-tests-"))
 
+#: Prefect's API server stores its metadata in ``$PREFECT_HOME/prefect.db``.
+#: Without this override every test run grew the developer's real
+#: ``~/.prefect/prefect.db``; it reached 2.18 GB / 36,000 flow runs in three
+#: weeks. Keep all Prefect state inside the session directory, and do not let
+#: an inherited API URL point the suite at a live server.
+os.environ["PREFECT_HOME"] = str(_SESSION_DIR / "prefect")
+os.environ.pop("PREFECT_API_URL", None)
+os.environ.pop("PREFECT_API_DATABASE_CONNECTION_URL", None)
+
 #: The suite must never pick up the developer's own secrets. A real
 #: `.env` at the repository root holds a live API key, and the config
 #: loader reads it — so a test that asserts "no key -> fail closed" would

@@ -154,6 +154,19 @@ NPM_CONFIG_CACHE=/tmp/npm-cache npx --yes skills add <owner/repo@skill> -y
    result is not done.
 5. **Ask don't guess** on any ambiguity; after 2 failed fix attempts, stop and
    report.
+6. **SQLite write discipline (2026-11-09):** the extraction claim and the
+   post-VLM persistence must start their transaction with a write
+   (`UPDATE … RETURNING` or a write-first lock). Never `SELECT` then `UPDATE`
+   in the same transaction: SQLite fails that lock upgrade immediately with
+   `database is locked`, and `busy_timeout` does not help. The engine sets WAL,
+   `busy_timeout=30000`, and `journal_size_limit=64 MB`. Evidence and burst
+   results: [`docs/SQLITE_CONCURRENCY_EVALUATION_2026-11-09.md`](docs/SQLITE_CONCURRENCY_EVALUATION_2026-11-09.md).
+   The test suite isolates Prefect with `PREFECT_HOME` under the session temp
+   directory; never let it write to the developer’s real `~/.prefect`.
+   **Prefect’s own SQLite metadata is a known live contention point** (178,368
+   `database is locked` entries in the live server log, all in
+   `mark_deployments_ready`). Do not scale extraction on top of it: move
+   Prefect’s metadata to PostgreSQL/Prefect Cloud or remove Prefect first.
 
 ### 7.1 Current test-suite state (2026-11-03)
 
